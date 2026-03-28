@@ -27,7 +27,6 @@ mod client;
 mod error;
 mod message;
 mod packet;
-mod wbi;
 
 pub use api::RoomInfo;
 pub use client::{BliveDmClient, BliveDmClientBuilder, EventStream};
