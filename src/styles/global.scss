@@ -1,0 +1,193 @@
+// ==================== CSS Variables ====================
+:root {
+  // 用户可配置变量（由 JS 动态设置）
+  --window-opacity: 0.95;
+  --user-font-size: 14px;
+  --window-border: 1px solid rgba(80, 80, 80, 0.5);
+  
+  // Notion 风格扁平化颜色
+  --bg-primary: rgba(25, 25, 25, var(--window-opacity));
+  --bg-secondary: rgba(32, 32, 32, var(--window-opacity));
+  --bg-card: rgba(40, 40, 40, var(--window-opacity));
+  --bg-hover: rgba(55, 55, 55, var(--window-opacity));
+  --bg-active: rgba(65, 65, 65, var(--window-opacity));
+  
+  --text-primary: #ebebeb;
+  --text-secondary: #9b9b9b;
+  --text-muted: #6b6b6b;
+  
+  // 强调色 - 扁平柔和
+  --accent-primary: #5c9eff;
+  --accent-secondary: #ff7eb3;
+  --accent-tertiary: #b794f4;
+  --accent-gold: #f5c842;
+  
+  --border-color: rgba(80, 80, 80, 0.5);
+  
+  // SC 价格颜色 - 扁平化
+  --sc-30: #3d6da8;
+  --sc-50: #4a8a9e;
+  --sc-100: #d89843;
+  --sc-500: #d64d4d;
+  --sc-1000: #a31a32;
+  --sc-2000: #7a0c18;
+  
+  // 大航海颜色 - 扁平化
+  --guard-captain: #5b8ec9;  // 舰长 - 蓝色
+  --guard-admiral: #9370db;  // 提督 - 紫色
+  --guard-governor: #e6a23c; // 总督 - 金色
+  
+  // 尺寸
+  --title-bar-height: 36px;
+  --tab-bar-height: 40px;
+  --border-radius: 6px;
+  --border-radius-sm: 3px;
+  
+  // 字体
+  --font-family: 'Microsoft YaHei', 'PingFang SC', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 14px;
+  --font-size-lg: 16px;
+}
+
+// ==================== Reset & Base ====================
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #app {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: var(--font-family);
+  font-size: var(--font-size-base);
+  color: var(--text-primary);
+  background: transparent;
+  user-select: none;
+}
+
+// ==================== Scrollbar ====================
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(100, 100, 100, 0.4);
+  border-radius: 4px;
+  
+  &:hover {
+    background: rgba(100, 100, 100, 0.6);
+  }
+}
+
+// ==================== Utility Classes ====================
+.flex {
+  display: flex;
+}
+
+.flex-col {
+  flex-direction: column;
+}
+
+.flex-1 {
+  flex: 1;
+}
+
+.items-center {
+  align-items: center;
+}
+
+.justify-center {
+  justify-content: center;
+}
+
+.justify-between {
+  justify-content: space-between;
+}
+
+.gap-1 { gap: 4px; }
+.gap-2 { gap: 8px; }
+.gap-3 { gap: 12px; }
+
+.p-1 { padding: 4px; }
+.p-2 { padding: 8px; }
+.p-3 { padding: 12px; }
+
+.text-xs { font-size: var(--font-size-xs); }
+.text-sm { font-size: var(--font-size-sm); }
+.text-base { font-size: var(--font-size-base); }
+.text-lg { font-size: var(--font-size-lg); }
+
+.text-muted { color: var(--text-muted); }
+.text-secondary { color: var(--text-secondary); }
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// ==================== Animations ====================
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out;
+}
+
+.animate-slide-in {
+  animation: slideIn 0.2s ease-out;
+}
+
+// ==================== Common Components ====================
+.icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: var(--border-radius-sm);
+  transition: background 0.15s, color 0.15s;
+  
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  
+  &.danger:hover {
+    background: rgba(220, 60, 60, 0.2);
+    color: #dc3c3c;
+  }
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  font-size: var(--font-size-xs);
+  border-radius: var(--border-radius-sm);
+  background: var(--bg-hover);
+  
+  &.guard-1 { background: var(--guard-governor); color: #333; }
+  &.guard-2 { background: var(--guard-admiral); color: white; }
+  &.guard-3 { background: var(--guard-captain); color: white; }
+}

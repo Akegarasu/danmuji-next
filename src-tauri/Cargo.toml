@@ -1,0 +1,51 @@
+[package]
+name = "danmuji-next"
+version = "1.4.0"
+description = "Bilibili 弹幕姬"
+authors = ["anzu"]
+edition = "2021"
+
+[profile.dev]
+split-debuginfo = "unpacked"
+
+[profile.dev.package."*"]
+debug = 0
+strip = "debuginfo"
+
+[lib]
+name = "danmuji_next_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "5"
+open = "5"
+
+# blivedm dependencies
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+futures-util = "0.3"
+reqwest = { version = "0.12", features = ["json", "cookies"] }
+flate2 = "1"
+brotli = "7"
+md5 = "0.7"
+base64 = "0.22"
+thiserror = "2"
+log = "0.4"
+url = "2"
+urlencoding = "2"
+tauri-plugin-process = "2"
+chrono = "0.4"
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-dpapi = "0.2"
+
+[dev-dependencies]
+env_logger = "0.11"
