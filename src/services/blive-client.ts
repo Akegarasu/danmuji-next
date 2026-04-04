@@ -8,6 +8,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useDanmakuStore } from '@/stores/danmaku'
 import { useSettingsStore } from '@/stores/settings'
+import { useVideoRequestStore } from '@/stores/video-request'
 import type { DataUpdate, DataSnapshot, EventType } from '@/types'
 
 // ==================== 后端类型定义 ====================
@@ -215,6 +216,10 @@ function applySnapshot(snapshot: DataSnapshot, store: ReturnType<typeof useDanma
   if (snapshot.stats) {
     store.updateStats(snapshot.stats)
   }
+  if (snapshot.video_requests) {
+    const videoStore = useVideoRequestStore()
+    videoStore.syncRequests(snapshot.video_requests)
+  }
 
   console.log('[BliveClient] Applied snapshot')
 }
@@ -259,6 +264,24 @@ function processDataUpdate(update: DataUpdate, store: ReturnType<typeof useDanma
       console.log('[BliveClient] Live stopped')
       store.updateRoomInfo({ liveStatus: 0 })
       break
+
+    case 'VideoRequestAppend': {
+      const videoStore = useVideoRequestStore()
+      videoStore.appendRequest(update.data)
+      break
+    }
+
+    case 'VideoRequestUpdate': {
+      const videoStore = useVideoRequestStore()
+      videoStore.updateRequest(update.data)
+      break
+    }
+
+    case 'VideoRequestSync': {
+      const videoStore = useVideoRequestStore()
+      videoStore.syncRequests(update.data)
+      break
+    }
   }
 }
 

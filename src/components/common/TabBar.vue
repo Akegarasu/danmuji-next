@@ -46,10 +46,17 @@ const handleContextMenu = (e: MouseEvent, type: TabType) => {
   border-bottom: 1px solid var(--border-color);
   padding: 4px;
   gap: 4px;
+  overflow-x: auto;
+
+  // 窄窗口时隐藏滚动条但允许滚动
+  &::-webkit-scrollbar {
+    height: 0;
+  }
 }
 
 .tab-item {
   flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -61,7 +68,13 @@ const handleContextMenu = (e: MouseEvent, type: TabType) => {
   font-size: var(--font-size-sm);
   font-weight: 500;
   cursor: pointer;
+  white-space: nowrap;
   transition: background 0.15s, color 0.15s;
+
+  @media (max-width: 300px) {
+    flex: 0 0 auto;
+    padding: 0 10px;
+  }
   
   &:hover {
     color: var(--text-primary);

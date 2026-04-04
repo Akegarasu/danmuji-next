@@ -16,7 +16,7 @@
         "title": "AKI 弹幕姬",
         "width": 400,
         "height": 600,
-        "minWidth": 280,
+        "minWidth": 240,
         "minHeight": 200,
         "transparent": true,
         "decorations": false,

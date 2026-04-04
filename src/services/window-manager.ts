@@ -297,6 +297,20 @@ export const createArchiveWindow = async (): Promise<void> => {
 }
 
 /**
+ * 创建扩展窗口
+ */
+export const createExtensionWindow = async (): Promise<void> => {
+  try {
+    await invoke('create_extension_window')
+    await setWindowOpenState('extension', true)
+    console.log(`[WindowManager] Created extension window`)
+  } catch (e) {
+    console.error(`[WindowManager] Failed to create extension window:`, e)
+    throw e
+  }
+}
+
+/**
  * 关闭窗口
  */
 export const closeWindow = async (label: string): Promise<void> => {
@@ -341,6 +355,9 @@ export const restorePreviouslyOpenWindows = async (): Promise<void> => {
       } else if (label === 'archive') {
         await createArchiveWindow()
         console.log(`[WindowManager] Restored archive window`)
+      } else if (label === 'extension') {
+        await createExtensionWindow()
+        console.log(`[WindowManager] Restored extension window`)
       }
     }
   } catch (e) {

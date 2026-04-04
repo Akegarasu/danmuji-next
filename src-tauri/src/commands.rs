@@ -23,6 +23,7 @@ use crate::config::get_config_path;
 use crate::crypto;
 use crate::kv_store::KVStore;
 use crate::lock_state::LockStateManager;
+use crate::video_info::{self, VideoInfo};
 use crate::window_state::{WindowConfig, WindowState};
 
 // ==================== 配置文件操作 ====================
@@ -752,4 +753,75 @@ pub async fn create_archive_window(
         .and_then(|v| serde_json::from_value(v).ok());
 
     build_window(&app, &config, saved_state.as_ref())
+}
+
+// ==================== 扩展窗口 ====================
+
+/// 创建扩展窗口
+#[tauri::command]
+pub async fn create_extension_window(
+    app: tauri::AppHandle,
+    kv_store: State<'_, KVStore>,
+) -> Result<(), String> {
+    let config = WindowConfig::extension();
+
+    // 检查窗口是否已存在
+    if let Some(existing) = app.get_webview_window(&config.label) {
+        focus_existing_window(&existing);
+        return Ok(());
+    }
+
+    let key = window_state_key(&config.label);
+    let saved_state: Option<WindowState> = kv_store
+        .get(&key)
+        .and_then(|v| serde_json::from_value(v).ok());
+
+    build_window(&app, &config, saved_state.as_ref())
+}
+
+// ==================== 视频信息 ====================
+
+/// 获取 Bilibili 视频信息
+#[tauri::command]
+pub async fn fetch_video_info(video_id: String) -> Result<VideoInfo, String> {
+    video_info::fetch_video_info(&video_id).await
+}
+
+/// 标记点播为已看/未看
+#[tauri::command]
+pub async fn mark_video_watched(
+    service: State<'_, Arc<BliveService>>,
+    request_id: String,
+    watched: bool,
+) -> Result<(), String> {
+    service.mark_video_watched(&request_id, watched).await;
+    Ok(())
+}
+
+/// 删除点播请求
+#[tauri::command]
+pub async fn remove_video_request(
+    service: State<'_, Arc<BliveService>>,
+    request_id: String,
+) -> Result<(), String> {
+    service.remove_video_request(&request_id).await;
+    Ok(())
+}
+
+/// 清空已看的点播
+#[tauri::command]
+pub async fn clear_watched_videos(
+    service: State<'_, Arc<BliveService>>,
+) -> Result<(), String> {
+    service.clear_watched_videos().await;
+    Ok(())
+}
+
+/// 清空所有点播
+#[tauri::command]
+pub async fn clear_all_videos(
+    service: State<'_, Arc<BliveService>>,
+) -> Result<(), String> {
+    service.clear_all_videos().await;
+    Ok(())
 }

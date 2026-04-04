@@ -17,6 +17,7 @@ export type EventType =
   | 'contribution_rank'  // 贡献排行
   | 'stats'          // 统计数据
   | 'live_status'    // 直播状态
+  | 'video_request'  // 点播请求
 
 /** 所有事件类型 */
 export const ALL_EVENT_TYPES: EventType[] = [
@@ -25,7 +26,8 @@ export const ALL_EVENT_TYPES: EventType[] = [
   'super_chat',
   'contribution_rank',
   'stats',
-  'live_status'
+  'live_status',
+  'video_request'
 ]
 
 // ==================== Tab 相关类型 ====================
@@ -251,6 +253,36 @@ export interface GiftUpsert {
   action: 'insert' | 'update'
 }
 
+/** 视频信息（来自后端） */
+export interface VideoInfo {
+  bvid: string
+  aid: number
+  title: string
+  cover: string
+  view: number
+  owner_name: string
+  owner_face: string
+  duration: number
+}
+
+/** 点播来源 */
+export type VideoRequestSource = 'danmaku' | 'superchat'
+
+/** 点播请求项（来自后端） */
+export interface VideoRequestItem {
+  id: string
+  video_id: string
+  username: string
+  uid: number
+  source: VideoRequestSource
+  sc_price?: number
+  timestamp: number
+  watched: boolean
+  video_info?: VideoInfo
+  loading: boolean
+  error?: string
+}
+
 /** 数据更新类型（来自后端） */
 export type DataUpdate =
   | { type: 'DanmakuAppend'; data: ProcessedDanmaku[] }
@@ -262,6 +294,9 @@ export type DataUpdate =
   | { type: 'ContributionsUpdate'; data: UserContribution[] }
   | { type: 'LiveStart' }
   | { type: 'LiveStop' }
+  | { type: 'VideoRequestAppend'; data: VideoRequestItem }
+  | { type: 'VideoRequestUpdate'; data: VideoRequestItem }
+  | { type: 'VideoRequestSync'; data: VideoRequestItem[] }
 
 /** 数据快照（来自后端） */
 export interface DataSnapshot {
@@ -272,6 +307,7 @@ export interface DataSnapshot {
   contribution_rank_full?: ContributionRankUser[]
   contributions?: UserContribution[]
   stats?: LiveStats
+  video_requests?: VideoRequestItem[]
 }
 
 // ==================== 工具函数 ====================

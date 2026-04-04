@@ -18,6 +18,7 @@ mod config;
 mod crypto;
 mod kv_store;
 mod lock_state;
+mod video_info;
 mod window_state;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -179,6 +180,14 @@ pub fn run() {
             commands::search_archive_superchat,
             commands::delete_archive_session,
             commands::create_archive_window,
+            // 扩展
+            commands::create_extension_window,
+            // 视频信息
+            commands::fetch_video_info,
+            commands::mark_video_watched,
+            commands::remove_video_request,
+            commands::clear_watched_videos,
+            commands::clear_all_videos,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

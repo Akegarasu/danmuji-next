@@ -730,6 +730,7 @@ dependencies = [
  "log",
  "md5",
  "open",
+ "regex",
  "reqwest",
  "rusqlite",
  "serde",

@@ -97,4 +97,22 @@ impl WindowConfig {
             shadow: false,
         }
     }
+
+    /// 创建扩展窗口配置
+    pub fn extension() -> Self {
+        Self {
+            label: "extension".to_string(),
+            title: "扩展".to_string(),
+            url: "/#/extension".into(),
+            default_width: 500.0,
+            default_height: 550.0,
+            min_width: 350.0,
+            min_height: 400.0,
+            transparent: true,
+            decorations: false,
+            always_on_top: false,
+            resizable: true,
+            shadow: false,
+        }
+    }
 }

@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::StreamExt;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, Mutex, RwLock};
@@ -18,6 +19,7 @@ use tokio::task::JoinHandle;
 use tokio::time::interval;
 
 use crate::archive::{ArchiveEvent, ArchiveManager};
+use crate::video_info::{self, VideoInfo};
 use crate::blivedm::api::{
     get_contribution_rank, get_danmu_info, get_room_init, ContributionRankUser, RoomInfo,
 };
@@ -55,6 +57,8 @@ pub enum EventType {
     Stats,
     /// 直播状态（开播/下播）
     LiveStatus,
+    /// 点播请求
+    VideoRequest,
 }
 
 // ==================== 连接状态 ====================
@@ -200,6 +204,44 @@ pub struct LiveStats {
 
 // ==================== 数据更新类型 ====================
 
+/// 点播请求（发送给前端）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VideoRequestItem {
+    /// 唯一 ID
+    pub id: String,
+    /// 视频 ID（BV/AV号）
+    pub video_id: String,
+    /// 请求者用户名
+    pub username: String,
+    /// 请求者 UID
+    pub uid: u64,
+    /// 来源类型
+    pub source: VideoRequestSource,
+    /// SC 金额（电池，仅 SC 来源时有值）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sc_price: Option<u64>,
+    /// 请求时间戳（毫秒）
+    pub timestamp: i64,
+    /// 是否已看
+    pub watched: bool,
+    /// 视频信息（异步加载后填充）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub video_info: Option<VideoInfo>,
+    /// 是否正在加载
+    pub loading: bool,
+    /// 加载错误
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// 点播来源
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VideoRequestSource {
+    Danmaku,
+    Superchat,
+}
+
 /// 数据更新（发送给前端）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
@@ -222,6 +264,12 @@ pub enum DataUpdate {
     LiveStart,
     /// 下播
     LiveStop,
+    /// 点播请求追加
+    VideoRequestAppend(VideoRequestItem),
+    /// 点播请求更新（视频信息加载完成）
+    VideoRequestUpdate(VideoRequestItem),
+    /// 点播列表全量同步（用于 watched/remove/clear 操作后）
+    VideoRequestSync(Vec<VideoRequestItem>),
 }
 
 impl DataUpdate {
@@ -237,6 +285,9 @@ impl DataUpdate {
             DataUpdate::ContributionsUpdate(_) => EventType::ContributionRank,
             DataUpdate::LiveStart => EventType::LiveStatus,
             DataUpdate::LiveStop => EventType::LiveStatus,
+            DataUpdate::VideoRequestAppend(_) => EventType::VideoRequest,
+            DataUpdate::VideoRequestUpdate(_) => EventType::VideoRequest,
+            DataUpdate::VideoRequestSync(_) => EventType::VideoRequest,
         }
     }
 }
@@ -283,6 +334,9 @@ pub struct DataSnapshot {
     /// 统计数据
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stats: Option<LiveStats>,
+    /// 点播请求列表
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub video_requests: Option<Vec<VideoRequestItem>>,
 }
 
 // ==================== 数据状态 ====================
@@ -305,6 +359,11 @@ struct LiveData {
     user_contributions: HashMap<u64, UserContribution>,
     /// 统计数据
     stats: LiveStats,
+
+    /// 点播请求列表
+    video_requests: Vec<VideoRequestItem>,
+    /// 已见过的视频 ID（用于去重，小写）
+    video_request_ids: HashSet<String>,
 
     /// 待发送的更新
     pending_updates: Vec<DataUpdate>,
@@ -331,6 +390,8 @@ impl Default for LiveData {
             contribution_rank_full: Vec::new(),
             user_contributions: HashMap::new(),
             stats: LiveStats::default(),
+            video_requests: Vec::new(),
+            video_request_ids: HashSet::new(),
             pending_updates: Vec::new(),
             pending_danmaku: Vec::new(),
             pending_gift_upserts: Vec::new(),
@@ -388,11 +449,16 @@ impl LiveData {
             } else {
                 None
             },
+            video_requests: if event_types.contains(&EventType::VideoRequest) {
+                Some(self.video_requests.clone())
+            } else {
+                None
+            },
         }
     }
 
     /// 处理弹幕
-    fn process_danmaku(&mut self, danmaku: Danmaku) {
+    fn process_danmaku(&mut self, danmaku: Danmaku) -> Vec<(String, String, u64, Option<u64>)> {
         let processed = ProcessedDanmaku {
             id: format!("dm_{}_{}", danmaku.timestamp, danmaku.sender.uid),
             content: danmaku.content,
@@ -412,7 +478,18 @@ impl LiveData {
             let _ = tx.send(ArchiveEvent::Danmaku(processed.clone()));
         }
 
+        // 检测 BV/AV号
+        let detected = self.detect_and_add_video_requests(
+            &processed.content,
+            &processed.user.name,
+            processed.user.uid,
+            VideoRequestSource::Danmaku,
+            None,
+            processed.timestamp,
+        );
+
         self.pending_danmaku.push(processed);
+        detected
     }
 
     /// 处理礼物
@@ -512,7 +589,7 @@ impl LiveData {
     }
 
     /// 处理 SC
-    fn process_superchat(&mut self, sc: SuperChat) {
+    fn process_superchat(&mut self, sc: SuperChat) -> Vec<(String, String, u64, Option<u64>)> {
         // SC 价格：原始 price 是人民币，转换为电池（1元=10电池）
         let price = (sc.price as u64) * 10;
 
@@ -563,8 +640,20 @@ impl LiveData {
             &guard_level,
         );
 
+        // 检测 BV/AV号
+        let detected = self.detect_and_add_video_requests(
+            &processed.content,
+            &processed.user.name,
+            processed.user.uid,
+            VideoRequestSource::Superchat,
+            Some(price),
+            processed.start_time,
+        );
+
         self.pending_updates
             .push(DataUpdate::SuperChatAppend(processed));
+
+        detected
     }
 
     /// 处理大航海
@@ -700,6 +789,112 @@ impl LiveData {
         }
     }
 
+    /// 从文本中检测 BV/AV号，创建点播请求
+    /// 返回需要异步获取视频信息的列表: (request_id, video_id, uid, sc_price)
+    fn detect_and_add_video_requests(
+        &mut self,
+        content: &str,
+        username: &str,
+        uid: u64,
+        source: VideoRequestSource,
+        sc_price: Option<u64>,
+        timestamp: i64,
+    ) -> Vec<(String, String, u64, Option<u64>)> {
+        let re = Regex::new(r"(?i)(BV[a-zA-Z0-9]{10}|av\d+)").unwrap();
+        let mut to_fetch = Vec::new();
+
+        for cap in re.captures_iter(content) {
+            let video_id = cap[1].to_string();
+            let key = video_id.to_lowercase();
+
+            // 去重
+            if self.video_request_ids.contains(&key) {
+                continue;
+            }
+            self.video_request_ids.insert(key);
+
+            let id = format!("vr_{}_{}", timestamp, uid);
+            let item = VideoRequestItem {
+                id: id.clone(),
+                video_id: video_id.clone(),
+                username: username.to_string(),
+                uid,
+                source: source.clone(),
+                sc_price,
+                timestamp: if timestamp < 1_000_000_000_000 {
+                    timestamp * 1000
+                } else {
+                    timestamp
+                },
+                watched: false,
+                video_info: None,
+                loading: true,
+                error: None,
+            };
+
+            self.video_requests.insert(0, item.clone());
+            self.pending_updates
+                .push(DataUpdate::VideoRequestAppend(item));
+            to_fetch.push((id, video_id, uid, sc_price));
+        }
+
+        to_fetch
+    }
+
+    /// 更新点播请求的视频信息
+    fn update_video_request_info(
+        &mut self,
+        request_id: &str,
+        info: Result<VideoInfo, String>,
+    ) {
+        if let Some(item) = self.video_requests.iter_mut().find(|r| r.id == request_id) {
+            match info {
+                Ok(vi) => {
+                    item.video_info = Some(vi);
+                    item.loading = false;
+                    item.error = None;
+                }
+                Err(e) => {
+                    item.loading = false;
+                    item.error = Some(e);
+                }
+            }
+            self.pending_updates
+                .push(DataUpdate::VideoRequestUpdate(item.clone()));
+        }
+    }
+
+    /// 标记点播为已看/未看
+    fn set_video_watched(&mut self, request_id: &str, watched: bool) {
+        if let Some(item) = self.video_requests.iter_mut().find(|r| r.id == request_id) {
+            item.watched = watched;
+        }
+        self.pending_updates
+            .push(DataUpdate::VideoRequestSync(self.video_requests.clone()));
+    }
+
+    /// 删除点播请求
+    fn remove_video_request(&mut self, request_id: &str) {
+        self.video_requests.retain(|r| r.id != request_id);
+        self.pending_updates
+            .push(DataUpdate::VideoRequestSync(self.video_requests.clone()));
+    }
+
+    /// 清空已看的点播
+    fn clear_watched_videos(&mut self) {
+        self.video_requests.retain(|r| !r.watched);
+        self.pending_updates
+            .push(DataUpdate::VideoRequestSync(self.video_requests.clone()));
+    }
+
+    /// 清空所有点播
+    fn clear_all_videos(&mut self) {
+        self.video_requests.clear();
+        self.video_request_ids.clear();
+        self.pending_updates
+            .push(DataUpdate::VideoRequestSync(self.video_requests.clone()));
+    }
+
     /// 获取待发送的更新，并清空缓冲区
     fn take_pending_updates(&mut self) -> Vec<DataUpdate> {
         let mut updates = std::mem::take(&mut self.pending_updates);
@@ -802,7 +997,7 @@ impl Default for ServiceState {
 
 pub struct BliveService {
     state: RwLock<ServiceState>,
-    live_data: Mutex<LiveData>,
+    live_data: Arc<Mutex<LiveData>>,
     /// 窗口订阅: window_label -> subscription
     subscriptions: RwLock<HashMap<String, WindowSubscription>>,
 }
@@ -811,7 +1006,7 @@ impl BliveService {
     pub fn new() -> Self {
         Self {
             state: RwLock::new(ServiceState::default()),
-            live_data: Mutex::new(LiveData::default()),
+            live_data: Arc::new(Mutex::new(LiveData::default())),
             subscriptions: RwLock::new(HashMap::new()),
         }
     }
@@ -885,6 +1080,44 @@ impl BliveService {
     pub async fn get_snapshot(&self, event_types: HashSet<EventType>) -> DataSnapshot {
         let data = self.live_data.lock().await;
         data.snapshot(&event_types)
+    }
+
+    // ==================== 点播管理 ====================
+
+    /// 异步获取视频信息（批量）
+    async fn spawn_video_fetches(&self, to_fetch: Vec<(String, String, u64, Option<u64>)>) {
+        for (request_id, video_id, _uid, _sc_price) in to_fetch {
+            let live_data = self.live_data.clone();
+            tokio::spawn(async move {
+                let result = video_info::fetch_video_info(&video_id).await;
+                let mut data = live_data.lock().await;
+                data.update_video_request_info(&request_id, result);
+            });
+        }
+    }
+
+    /// 标记点播为已看
+    pub async fn mark_video_watched(&self, request_id: &str, watched: bool) {
+        let mut data = self.live_data.lock().await;
+        data.set_video_watched(request_id, watched);
+    }
+
+    /// 删除点播请求
+    pub async fn remove_video_request(&self, request_id: &str) {
+        let mut data = self.live_data.lock().await;
+        data.remove_video_request(request_id);
+    }
+
+    /// 清空已看
+    pub async fn clear_watched_videos(&self) {
+        let mut data = self.live_data.lock().await;
+        data.clear_watched_videos();
+    }
+
+    /// 清空所有
+    pub async fn clear_all_videos(&self) {
+        let mut data = self.live_data.lock().await;
+        data.clear_all_videos();
     }
 
     pub async fn connect(
@@ -1150,9 +1383,17 @@ impl BliveService {
         let mut data = self.live_data.lock().await;
 
         match event {
-            Event::Danmaku(danmaku) => data.process_danmaku(danmaku),
+            Event::Danmaku(danmaku) => {
+                let to_fetch = data.process_danmaku(danmaku);
+                drop(data); // 释放锁后异步获取视频信息
+                self.spawn_video_fetches(to_fetch).await;
+            }
             Event::Gift(gift) => data.process_gift(gift),
-            Event::SuperChat(sc) => data.process_superchat(sc),
+            Event::SuperChat(sc) => {
+                let to_fetch = data.process_superchat(sc);
+                drop(data);
+                self.spawn_video_fetches(to_fetch).await;
+            }
             Event::GuardBuy(guard) => data.process_guard_buy(guard),
             Event::OnlineRankV2(rank) => data.process_online_rank(rank),
             Event::OnlineRankCount(count) => data.process_online_count(count),

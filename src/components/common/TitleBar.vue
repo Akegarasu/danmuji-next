@@ -4,7 +4,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { exit } from '@tauri-apps/plugin-process'
-import { createSettingsWindow, createArchiveWindow, closeWindow } from '@/services/window-manager'
+import { createSettingsWindow, createArchiveWindow, createExtensionWindow, closeWindow } from '@/services/window-manager'
 import { useDanmakuStore } from '@/stores/danmaku'
 
 const props = withDefaults(defineProps<{
@@ -80,6 +80,14 @@ const openArchive = async () => {
     await createArchiveWindow()
   } catch (e) {
     console.error('Failed to open archive:', e)
+  }
+}
+
+const openExtension = async () => {
+  try {
+    await createExtensionWindow()
+  } catch (e) {
+    console.error('Failed to open extension:', e)
   }
 }
 
@@ -176,6 +184,11 @@ onUnmounted(() => {
           <line x1="10" y1="12" x2="14" y2="12" />
         </svg>
       </button>
+      <button v-if="showSettingsBtn" class="icon-btn extension-btn" @click="openExtension" title="扩展">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+        </svg>
+      </button>
       <button v-if="showSettingsBtn" class="icon-btn settings-btn" @click="openSettings" title="设置">
         <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
           <g id="SVGRepo_bgCarrier" stroke-width="0"></g>
@@ -222,6 +235,13 @@ onUnmounted(() => {
   font-weight: 500;
   color: var(--text-primary);
   flex-shrink: 0;
+}
+
+// 窗口宽度过小时隐藏标题
+@media (max-width: 360px) {
+  .title {
+    display: none;
+  }
 }
 
 .status-badge {
@@ -306,6 +326,11 @@ onUnmounted(() => {
     }
 
     &.archive-btn svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    &.extension-btn svg {
       width: 14px;
       height: 14px;
     }
