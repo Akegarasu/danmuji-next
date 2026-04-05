@@ -1,5 +1,7 @@
 //! Bilibili 视频信息获取模块
 
+use std::sync::LazyLock;
+
 use serde::{Deserialize, Serialize};
 
 /// 视频信息
@@ -54,6 +56,14 @@ struct ApiOwner {
     face: String,
 }
 
+/// 全局复用的 HTTP 客户端（避免每次请求创建新的连接池）
+static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
+    reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        .build()
+        .expect("Failed to build HTTP client")
+});
+
 /// 获取视频信息
 /// video_id 支持 BV号 或 av号（如 "BV1xx..." 或 "av12345"）
 pub async fn fetch_video_info(video_id: &str) -> Result<VideoInfo, String> {
@@ -75,12 +85,7 @@ pub async fn fetch_video_info(video_id: &str) -> Result<VideoInfo, String> {
         return Err(format!("无效的视频 ID: {}", video_id));
     };
 
-    let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-        .build()
-        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
-
-    let resp: ApiResponse = client
+    let resp: ApiResponse = HTTP_CLIENT
         .get(&url)
         .header("Referer", "https://www.bilibili.com")
         .send()

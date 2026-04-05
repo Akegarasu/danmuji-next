@@ -6,6 +6,8 @@
 //! - `window_state`: 窗口状态定义和配置
 //! - `commands`: Tauri 命令实现
 //! - `blivedm`: Bilibili 直播弹幕协议库
+//! - `live_types`: 直播数据公共类型
+//! - `live_data`: 直播数据状态管理
 //! - `blive_service`: 弹幕服务管理器
 //! - `lock_state`: 窗口锁定状态管理
 
@@ -17,6 +19,8 @@ mod commands;
 mod config;
 mod crypto;
 mod kv_store;
+mod live_data;
+mod live_types;
 mod lock_state;
 mod video_info;
 mod window_state;

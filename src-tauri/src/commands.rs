@@ -15,8 +15,9 @@ use crate::auth::{self, QRCodeData, QRCodeStatus, UserInfo};
 use crate::archive::{
     ArchiveManager, ArchiveSession, ArchivedDanmaku, ArchivedGift, ArchivedSuperChat, PagedResult,
 };
-use crate::blive_service::{
-    BliveService, ConnectResult, ConnectionStatus, DataSnapshot, EventType, RoomInfoResponse,
+use crate::blive_service::BliveService;
+use crate::live_types::{
+    ConnectResult, ConnectionStatus, DataSnapshot, EventType, RoomInfoResponse,
 };
 use crate::blivedm;
 use crate::config::get_config_path;

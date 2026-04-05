@@ -12,7 +12,7 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, Mutex};
 
-use crate::blive_service::{LiveStats, ProcessedDanmaku, ProcessedGift, ProcessedSuperChat};
+use crate::live_types::{LiveStats, ProcessedDanmaku, ProcessedGift, ProcessedSuperChat};
 
 // ==================== 数据库初始化 ====================
 
@@ -793,13 +793,25 @@ impl ArchiveManager {
 
     pub async fn delete_session(&self, session_id: i64) -> Result<(), String> {
         let db = self.db.lock().await;
-        db.execute_batch(&format!(
-            "DELETE FROM danmaku WHERE session_id = {};
-             DELETE FROM gifts WHERE session_id = {};
-             DELETE FROM super_chats WHERE session_id = {};
-             DELETE FROM sessions WHERE id = {};",
-            session_id, session_id, session_id, session_id,
-        ))
+        db.execute(
+            "DELETE FROM danmaku WHERE session_id = ?1",
+            rusqlite::params![session_id],
+        )
+        .map_err(|e| format!("删除存档失败: {}", e))?;
+        db.execute(
+            "DELETE FROM gifts WHERE session_id = ?1",
+            rusqlite::params![session_id],
+        )
+        .map_err(|e| format!("删除存档失败: {}", e))?;
+        db.execute(
+            "DELETE FROM super_chats WHERE session_id = ?1",
+            rusqlite::params![session_id],
+        )
+        .map_err(|e| format!("删除存档失败: {}", e))?;
+        db.execute(
+            "DELETE FROM sessions WHERE id = ?1",
+            rusqlite::params![session_id],
+        )
         .map_err(|e| format!("删除存档失败: {}", e))?;
         log::info!("Archive session deleted: id={}", session_id);
         Ok(())
