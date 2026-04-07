@@ -8,7 +8,10 @@
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "td": "tauri dev",
-    "build1": "tauri build"
+    "build1": "tauri build",
+    "tauri:build": "pnpm exec tauri build",
+    "version:bump": "python scripts/bump_version_and_build.py --no-build",
+    "release:local": "python scripts/bump_version_and_build.py"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

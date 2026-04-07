@@ -28,6 +28,8 @@ test/
 
 .claude/*
 
+__pycache__/
+
 .git_old
 
 docs/WINDOW_SYSTEM.md
