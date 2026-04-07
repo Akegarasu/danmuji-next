@@ -104,7 +104,7 @@ const getUserColor = () => {
   flex-wrap: wrap;
   padding: 0.4em 0.6em;
   margin: 0.1em 0;
-  font-size: var(--font-size-sm);
+  font-size: var(--content-font-size-sm);
   line-height: 1.6;
   word-break: break-all;
   cursor: default;

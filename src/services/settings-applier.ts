@@ -28,17 +28,18 @@ export const applyHideBorder = (hide: boolean) => {
 }
 
 /**
- * 应用字体大小设置
+ * 应用字体大小设置（仅影响内容区域：弹幕、礼物、SC 等）
+ * UI 元素（标题栏、标签栏、设置窗口）使用固定的 --font-size-* 变量，不受此设置影响
  */
 export const applyFontSize = (fontSize: number) => {
   // 确保 fontSize 在有效范围内
   const validSize = Math.max(10, Math.min(48, fontSize))
   document.documentElement.style.setProperty('--user-font-size', `${validSize}px`)
-  document.documentElement.style.setProperty('--font-size-base', `${validSize}px`)
-  document.documentElement.style.setProperty('--font-size-sm', `${validSize - 2}px`)
-  document.documentElement.style.setProperty('--font-size-xs', `${validSize - 3}px`)
-  document.documentElement.style.setProperty('--font-size-lg', `${validSize + 2}px`)
-  console.log('[Settings] Applied font size:', validSize)
+  document.documentElement.style.setProperty('--content-font-size-base', `${validSize}px`)
+  document.documentElement.style.setProperty('--content-font-size-sm', `${validSize - 2}px`)
+  document.documentElement.style.setProperty('--content-font-size-xs', `${validSize - 3}px`)
+  document.documentElement.style.setProperty('--content-font-size-lg', `${validSize + 2}px`)
+  console.log('[Settings] Applied content font size:', validSize)
 }
 
 /**

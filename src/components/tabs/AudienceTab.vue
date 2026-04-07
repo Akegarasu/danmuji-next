@@ -302,7 +302,7 @@ const copyUsername = () => {
 .rank-num {
   width: 24px;
   text-align: center;
-  font-size: var(--font-size-xs);
+  font-size: var(--content-font-size-xs);
   color: var(--text-muted);
 }
 
@@ -313,7 +313,7 @@ const copyUsername = () => {
   overflow: hidden;
   flex: 1;
   min-width: 0;
-  font-size: var(--font-size-sm);
+  font-size: var(--content-font-size-sm);
 }
 
 .guard-badge {
@@ -349,7 +349,7 @@ const copyUsername = () => {
 }
 
 .user-score {
-  font-size: var(--font-size-xs);
+  font-size: var(--content-font-size-xs);
   color: var(--accent-gold);
   font-weight: 500;
   flex-shrink: 0;

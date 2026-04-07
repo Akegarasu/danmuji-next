@@ -57,13 +57,13 @@ const scColor = computed(() => {
 .username {
   color: white;
   font-weight: 500;
-  font-size: var(--font-size-sm);
+  font-size: var(--content-font-size-sm);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
 .price {
   color: white;
-  font-size: var(--font-size-xs);
+  font-size: var(--content-font-size-xs);
   font-weight: 600;
   background: rgba(0, 0, 0, 0.2);
   padding: 2px 8px;
@@ -72,7 +72,7 @@ const scColor = computed(() => {
 
 .send-time {
   color: rgba(255, 255, 255, 0.6);
-  font-size: var(--font-size-xs);
+  font-size: var(--content-font-size-xs);
   font-family: monospace;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
@@ -81,7 +81,7 @@ const scColor = computed(() => {
   padding: 8px 12px;
   background: var(--sc-bg);
   color: white;
-  font-size: var(--font-size-sm);
+  font-size: var(--content-font-size-sm);
   line-height: 1.5;
   min-height: 32px;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);

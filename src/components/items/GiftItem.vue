@@ -236,7 +236,7 @@ const timeText = computed(() => formatEventTime(props.gift.timestamp))
   align-items: center;
   gap: 0.35em;
   margin-bottom: 2px;
-  font-size: var(--font-size-xs);
+  font-size: var(--content-font-size-xs);
 }
 
 .time {
@@ -270,26 +270,26 @@ const timeText = computed(() => formatEventTime(props.gift.timestamp))
 
 .gift-name {
   color: var(--text-primary);
-  font-size: var(--font-size-sm);
+  font-size: var(--content-font-size-sm);
   font-weight: 500;
 }
 
 .gift-num {
   color: var(--accent-secondary);
-  font-size: var(--font-size-sm);
+  font-size: var(--content-font-size-sm);
   font-weight: 600;
 }
 
 .gift-price {
   color: var(--accent-gold);
-  font-size: var(--font-size-sm);
+  font-size: var(--content-font-size-sm);
   font-weight: 600;
   flex-shrink: 0;
 }
 
 .gift-free {
   color: var(--text-muted);
-  font-size: var(--font-size-xs);
+  font-size: var(--content-font-size-xs);
   flex-shrink: 0;
 }
 </style>

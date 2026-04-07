@@ -598,9 +598,10 @@ const saveButtonText = computed(() => {
 
           <div class="setting-group">
             <label class="setting-label">
-              字体大小 <span class="value">{{ fontSize }}px</span>
+              内容字体大小 <span class="value">{{ fontSize }}px</span>
             </label>
             <input v-model.number="fontSize" type="range" min="10" max="48" class="setting-slider" />
+            <span class="setting-hint">仅影响弹幕、礼物、SC 等内容区域</span>
           </div>
 
           <div class="setting-group toggle">

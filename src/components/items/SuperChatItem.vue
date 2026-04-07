@@ -132,13 +132,13 @@ const isExpired = computed(() => progress.value <= 0)
 .username {
   color: white;
   font-weight: 500;
-  font-size: var(--font-size-sm);
+  font-size: var(--content-font-size-sm);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
 .price {
   color: white;
-  font-size: var(--font-size-xs);
+  font-size: var(--content-font-size-xs);
   font-weight: 600;
   background: rgba(0, 0, 0, 0.2);
   padding: 2px 8px;
@@ -152,14 +152,14 @@ const isExpired = computed(() => progress.value <= 0)
   
   .send-time {
     color: rgba(255, 255, 255, 0.6);
-    font-size: var(--font-size-xs);
+    font-size: var(--content-font-size-xs);
     font-family: monospace;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
   }
   
   .time {
     color: rgba(255, 255, 255, 0.9);
-    font-size: var(--font-size-xs);
+    font-size: var(--content-font-size-xs);
     font-family: monospace;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
     background: rgba(0, 0, 0, 0.15);
@@ -172,7 +172,7 @@ const isExpired = computed(() => progress.value <= 0)
   padding: 10px 12px;
   background: var(--sc-bg);
   color: white;
-  font-size: var(--font-size-sm);
+  font-size: var(--content-font-size-sm);
   line-height: 1.5;
   min-height: 40px;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);

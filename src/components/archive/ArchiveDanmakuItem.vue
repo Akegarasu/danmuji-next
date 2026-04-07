@@ -33,7 +33,7 @@ defineProps<{
   flex-wrap: wrap;
   gap: 0 0.35em;
   padding: 0.35em 0.6em;
-  font-size: var(--font-size-sm);
+  font-size: var(--content-font-size-sm);
   line-height: 1.6;
   word-break: break-all;
   border-radius: var(--border-radius-sm);
