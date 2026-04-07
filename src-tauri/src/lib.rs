@@ -29,8 +29,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use blive_service::BliveService;
-use config::{get_archive_db_path, get_window_kv_path};
-use kv_store::KVStore;
+use config::{get_archive_db_path, get_video_request_kv_path, get_window_kv_path};
+use kv_store::{KVStore, VideoRequestStore};
 use lock_state::LockStateManager;
 use archive::ArchiveManager;
 use tauri::{
@@ -58,6 +58,9 @@ pub fn run() {
     // 初始化窗口 KV 存储
     let window_kv_store = KVStore::new(get_window_kv_path());
 
+    // 初始化点播数据 KV 存储
+    let video_request_store = VideoRequestStore::new(get_video_request_kv_path());
+
     // 初始化存档管理器
     let archive_manager = Arc::new(
         ArchiveManager::new(get_archive_db_path()).expect("初始化存档数据库失败"),
@@ -74,6 +77,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
         .manage(window_kv_store)
+        .manage(video_request_store)
         .manage(archive_manager)
         .manage(blive_service)
         .manage(lock_manager)
@@ -188,6 +192,7 @@ pub fn run() {
             commands::create_extension_window,
             // 视频信息
             commands::fetch_video_info,
+            commands::load_video_requests,
             commands::mark_video_watched,
             commands::remove_video_request,
             commands::clear_watched_videos,

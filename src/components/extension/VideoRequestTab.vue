@@ -1,9 +1,14 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useVideoRequestStore } from '@/stores/video-request'
 import { invoke } from '@tauri-apps/api/core'
 
 const videoStore = useVideoRequestStore()
+
+// 挂载时加载持久化的点播数据
+onMounted(() => {
+  videoStore.loadPersistedRequests()
+})
 
 const unwatchedList = computed(() => videoStore.unwatchedRequests)
 const watchedList = computed(() => videoStore.watchedRequests)

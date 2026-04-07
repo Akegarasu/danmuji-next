@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::LazyLock;
 
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
 use crate::archive::ArchiveEvent;
@@ -15,12 +16,16 @@ use crate::blivedm::{
     CoinType, Danmaku, DanmakuType, Gift, GuardBuy, GuardLevel, OnlineRankCount, OnlineRankV2,
     SuperChat,
 };
+use crate::kv_store::VideoRequestStore;
 use crate::live_types::*;
 use crate::video_info::VideoInfo;
 
 /// BV/AV 号匹配正则（编译一次，全局复用）
+///
+/// 只提取 ID 本身，允许前后紧邻其他字符，避免依赖边界判断漏匹配。
+/// 使用 find_iter 而非 captures_iter，减少不必要的捕获开销。
 static VIDEO_ID_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)(BV[a-zA-Z0-9]{10}|av\d+)").unwrap());
+    LazyLock::new(|| Regex::new(r"(?i:BV[A-Z0-9]{10}|AV[0-9]+)").unwrap());
 
 // ==================== 窗口订阅 ====================
 
@@ -93,10 +98,61 @@ impl Default for LiveData {
     }
 }
 
+/// 点播持久化数据（存入 KV Store）
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct PersistedVideoRequests {
+    requests: Vec<VideoRequestItem>,
+    seen_ids: HashSet<String>,
+}
+
+/// KV Store 中点播数据的 key
+const VIDEO_REQUESTS_KV_KEY: &str = "video_requests";
+
 impl LiveData {
-    /// 清空所有数据
+    /// 清空直播数据（保留点播列表）
     pub fn clear(&mut self) {
+        let vr = std::mem::take(&mut self.video_requests);
+        let vr_ids = std::mem::take(&mut self.video_request_ids);
         *self = Self::default();
+        self.video_requests = vr;
+        self.video_request_ids = vr_ids;
+    }
+
+    /// 从 KV Store 加载点播数据
+    pub fn load_video_requests(&mut self, kv: &VideoRequestStore) {
+        if let Some(val) = kv.get(VIDEO_REQUESTS_KV_KEY) {
+            match serde_json::from_value::<PersistedVideoRequests>(val) {
+                Ok(persisted) => {
+                    self.video_requests = persisted.requests;
+                    self.video_request_ids = persisted.seen_ids;
+                    log::info!(
+                        "Loaded {} video requests from KV store",
+                        self.video_requests.len()
+                    );
+                }
+                Err(e) => {
+                    log::warn!("Failed to parse persisted video requests: {}", e);
+                }
+            }
+        }
+    }
+
+    /// 保存点播数据到 KV Store
+    pub fn save_video_requests(&self, kv: &VideoRequestStore) {
+        let persisted = PersistedVideoRequests {
+            requests: self.video_requests.clone(),
+            seen_ids: self.video_request_ids.clone(),
+        };
+        match serde_json::to_value(&persisted) {
+            Ok(val) => {
+                if let Err(e) = kv.set(VIDEO_REQUESTS_KV_KEY.to_string(), val) {
+                    log::error!("Failed to save video requests to KV store: {}", e);
+                }
+            }
+            Err(e) => {
+                log::error!("Failed to serialize video requests: {}", e);
+            }
+        }
     }
 
     /// 生成数据快照
@@ -151,10 +207,7 @@ impl LiveData {
     // ==================== 事件处理 ====================
 
     /// 处理弹幕，返回需要异步获取视频信息的列表
-    pub fn process_danmaku(
-        &mut self,
-        danmaku: Danmaku,
-    ) -> Vec<(String, String, u64, Option<u64>)> {
+    pub fn process_danmaku(&mut self, danmaku: Danmaku) -> Vec<(String, String, u64, Option<u64>)> {
         let processed = ProcessedDanmaku {
             id: format!("dm_{}_{}", danmaku.timestamp, danmaku.sender.uid),
             content: danmaku.content,
@@ -273,10 +326,7 @@ impl LiveData {
     }
 
     /// 处理 SC，返回需要异步获取视频信息的列表
-    pub fn process_superchat(
-        &mut self,
-        sc: SuperChat,
-    ) -> Vec<(String, String, u64, Option<u64>)> {
+    pub fn process_superchat(&mut self, sc: SuperChat) -> Vec<(String, String, u64, Option<u64>)> {
         let price = (sc.price as u64) * 10;
 
         let sender_uid = sc.sender_uid;
@@ -481,8 +531,8 @@ impl LiveData {
     ) -> Vec<(String, String, u64, Option<u64>)> {
         let mut to_fetch = Vec::new();
 
-        for cap in VIDEO_ID_RE.captures_iter(content) {
-            let video_id = cap[1].to_string();
+        for matched in VIDEO_ID_RE.find_iter(content) {
+            let video_id = matched.as_str().to_string();
             let key = video_id.to_lowercase();
 
             if self.video_request_ids.contains(&key) {
@@ -548,6 +598,9 @@ impl LiveData {
 
     /// 删除点播请求
     pub fn remove_video_request(&mut self, request_id: &str) {
+        if let Some(item) = self.video_requests.iter().find(|r| r.id == request_id) {
+            self.video_request_ids.remove(&item.video_id.to_lowercase());
+        }
         self.video_requests.retain(|r| r.id != request_id);
         self.pending_updates
             .push(DataUpdate::VideoRequestSync(self.video_requests.clone()));
@@ -555,6 +608,9 @@ impl LiveData {
 
     /// 清空已看的点播
     pub fn clear_watched_videos(&mut self) {
+        for item in self.video_requests.iter().filter(|r| r.watched) {
+            self.video_request_ids.remove(&item.video_id.to_lowercase());
+        }
         self.video_requests.retain(|r| !r.watched);
         self.pending_updates
             .push(DataUpdate::VideoRequestSync(self.video_requests.clone()));
@@ -600,5 +656,52 @@ impl LiveData {
         }
 
         updates
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_video_id_regex() {
+        // BV号 = BV + 恰好10位字母数字 = 12字符
+        // 嵌在中文中
+        assert!(VIDEO_ID_RE
+            .find_iter("点播BV1xx411c7mD谢谢")
+            .next()
+            .is_some());
+        assert!(VIDEO_ID_RE.find_iter("看看av12345吧").next().is_some());
+        // 独立出现
+        assert!(VIDEO_ID_RE.find_iter("BV1xx411c7mD").next().is_some());
+        assert!(VIDEO_ID_RE.find_iter("av999").next().is_some());
+        // 空格分隔
+        assert!(VIDEO_ID_RE
+            .find_iter("请看 BV1xx411c7mD 这个")
+            .next()
+            .is_some());
+
+        assert!(VIDEO_ID_RE.find_iter("abcBV1xx411c7mD").next().is_some());
+        assert!(VIDEO_ID_RE.find_iter("9BV1xx411c7mD").next().is_some());
+
+        assert!(VIDEO_ID_RE.find_iter("BV1xx411c7mDXYZ").next().is_some());
+        assert!(VIDEO_ID_RE.find_iter("av12345x").next().is_some());
+
+        let danmaku_list = vec![
+            "看看这个av123456",
+            "kkBV1xx411c7mD",
+            "BV1xx411c7mD这个！",
+            "！BV1xx411c7mD",
+        ];
+        for danmaku in danmaku_list {
+            assert!(VIDEO_ID_RE.find_iter(danmaku).next().is_some());
+        }
+
+        // find_iter 只提取 video ID 本身
+        let caps: Vec<String> = VIDEO_ID_RE
+            .find_iter("我想点播BV1xx411c7mD和av67890")
+            .map(|m| m.as_str().to_string())
+            .collect();
+        assert_eq!(caps, vec!["BV1xx411c7mD", "av67890"]);
     }
 }

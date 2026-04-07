@@ -32,7 +32,7 @@ export const applyHideBorder = (hide: boolean) => {
  */
 export const applyFontSize = (fontSize: number) => {
   // 确保 fontSize 在有效范围内
-  const validSize = Math.max(10, Math.min(24, fontSize))
+  const validSize = Math.max(10, Math.min(48, fontSize))
   document.documentElement.style.setProperty('--user-font-size', `${validSize}px`)
   document.documentElement.style.setProperty('--font-size-base', `${validSize}px`)
   document.documentElement.style.setProperty('--font-size-sm', `${validSize - 2}px`)

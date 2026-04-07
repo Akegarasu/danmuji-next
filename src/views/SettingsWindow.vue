@@ -600,7 +600,7 @@ const saveButtonText = computed(() => {
             <label class="setting-label">
               字体大小 <span class="value">{{ fontSize }}px</span>
             </label>
-            <input v-model.number="fontSize" type="range" min="10" max="24" class="setting-slider" />
+            <input v-model.number="fontSize" type="range" min="10" max="48" class="setting-slider" />
           </div>
 
           <div class="setting-group toggle">
