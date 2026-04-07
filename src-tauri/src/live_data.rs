@@ -73,6 +73,8 @@ pub struct LiveData {
     contributions_dirty: bool,
     /// 存档 channel sender（连接时设置）
     pub(crate) archive_tx: Option<mpsc::UnboundedSender<ArchiveEvent>>,
+    /// 点播数据持久化存储（内聚在 LiveData 中，变更时自动保存）
+    vr_store: Option<VideoRequestStore>,
 }
 
 impl Default for LiveData {
@@ -94,6 +96,7 @@ impl Default for LiveData {
             stats_dirty: false,
             contributions_dirty: false,
             archive_tx: None,
+            vr_store: None,
         }
     }
 }
@@ -109,18 +112,29 @@ struct PersistedVideoRequests {
 const VIDEO_REQUESTS_KV_KEY: &str = "video_requests";
 
 impl LiveData {
-    /// 清空直播数据（保留点播列表）
+    /// 创建新实例，附带点播持久化存储
+    pub(crate) fn new(vr_store: VideoRequestStore) -> Self {
+        Self {
+            vr_store: Some(vr_store),
+            ..Self::default()
+        }
+    }
+
+    /// 清空直播数据（保留点播列表和存储引用）
     pub fn clear(&mut self) {
         let vr = std::mem::take(&mut self.video_requests);
         let vr_ids = std::mem::take(&mut self.video_request_ids);
+        let vr_store = self.vr_store.take();
         *self = Self::default();
         self.video_requests = vr;
         self.video_request_ids = vr_ids;
+        self.vr_store = vr_store;
     }
 
     /// 从 KV Store 加载点播数据
-    pub fn load_video_requests(&mut self, kv: &VideoRequestStore) {
-        if let Some(val) = kv.get(VIDEO_REQUESTS_KV_KEY) {
+    pub fn load_video_requests(&mut self) {
+        let Some(store) = &self.vr_store else { return };
+        if let Some(val) = store.get(VIDEO_REQUESTS_KV_KEY) {
             match serde_json::from_value::<PersistedVideoRequests>(val) {
                 Ok(persisted) => {
                     self.video_requests = persisted.requests;
@@ -138,14 +152,15 @@ impl LiveData {
     }
 
     /// 保存点播数据到 KV Store
-    pub fn save_video_requests(&self, kv: &VideoRequestStore) {
+    fn save_video_requests(&self) {
+        let Some(store) = &self.vr_store else { return };
         let persisted = PersistedVideoRequests {
             requests: self.video_requests.clone(),
             seen_ids: self.video_request_ids.clone(),
         };
         match serde_json::to_value(&persisted) {
             Ok(val) => {
-                if let Err(e) = kv.set(VIDEO_REQUESTS_KV_KEY.to_string(), val) {
+                if let Err(e) = store.set(VIDEO_REQUESTS_KV_KEY.to_string(), val) {
                     log::error!("Failed to save video requests to KV store: {}", e);
                 }
             }
@@ -565,6 +580,9 @@ impl LiveData {
             to_fetch.push((id, video_id, uid, sc_price));
         }
 
+        if !to_fetch.is_empty() {
+            self.save_video_requests();
+        }
         to_fetch
     }
 
@@ -584,6 +602,7 @@ impl LiveData {
             }
             self.pending_updates
                 .push(DataUpdate::VideoRequestUpdate(item.clone()));
+            self.save_video_requests();
         }
     }
 
@@ -594,6 +613,7 @@ impl LiveData {
         }
         self.pending_updates
             .push(DataUpdate::VideoRequestSync(self.video_requests.clone()));
+        self.save_video_requests();
     }
 
     /// 删除点播请求
@@ -604,6 +624,7 @@ impl LiveData {
         self.video_requests.retain(|r| r.id != request_id);
         self.pending_updates
             .push(DataUpdate::VideoRequestSync(self.video_requests.clone()));
+        self.save_video_requests();
     }
 
     /// 清空已看的点播
@@ -614,6 +635,7 @@ impl LiveData {
         self.video_requests.retain(|r| !r.watched);
         self.pending_updates
             .push(DataUpdate::VideoRequestSync(self.video_requests.clone()));
+        self.save_video_requests();
     }
 
     /// 清空所有点播
@@ -622,6 +644,7 @@ impl LiveData {
         self.video_request_ids.clear();
         self.pending_updates
             .push(DataUpdate::VideoRequestSync(self.video_requests.clone()));
+        self.save_video_requests();
     }
 
     // ==================== 更新收集 ====================

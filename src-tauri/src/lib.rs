@@ -58,16 +58,14 @@ pub fn run() {
     // 初始化窗口 KV 存储
     let window_kv_store = KVStore::new(get_window_kv_path());
 
-    // 初始化点播数据 KV 存储
-    let video_request_store = VideoRequestStore::new(get_video_request_kv_path());
-
     // 初始化存档管理器
     let archive_manager = Arc::new(
         ArchiveManager::new(get_archive_db_path()).expect("初始化存档数据库失败"),
     );
 
-    // 初始化弹幕服务
-    let blive_service = Arc::new(BliveService::new());
+    // 初始化弹幕服务（点播持久化存储内聚在 LiveData 中）
+    let video_request_store = VideoRequestStore::new(get_video_request_kv_path());
+    let blive_service = Arc::new(BliveService::new(video_request_store));
 
     // 初始化窗口锁定状态管理器，并从 KV 存储加载保存的状态
     let lock_manager = LockStateManager::new();
@@ -77,7 +75,6 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
         .manage(window_kv_store)
-        .manage(video_request_store)
         .manage(archive_manager)
         .manage(blive_service)
         .manage(lock_manager)

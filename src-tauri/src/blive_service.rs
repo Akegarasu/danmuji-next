@@ -57,10 +57,10 @@ pub struct BliveService {
 }
 
 impl BliveService {
-    pub fn new() -> Self {
+    pub fn new(vr_store: VideoRequestStore) -> Self {
         Self {
             state: RwLock::new(ServiceState::default()),
-            live_data: Arc::new(Mutex::new(LiveData::default())),
+            live_data: Arc::new(Mutex::new(LiveData::new(vr_store))),
             subscriptions: RwLock::new(HashMap::new()),
         }
     }
@@ -139,52 +139,45 @@ impl BliveService {
     // ==================== 点播管理 ====================
 
     /// 从 KV Store 加载持久化的点播数据
-    pub async fn load_video_requests(&self, kv: &VideoRequestStore) {
+    pub async fn load_video_requests(&self) {
         let mut data = self.live_data.lock().await;
-        data.load_video_requests(kv);
+        data.load_video_requests();
     }
 
     /// 异步获取视频信息（批量）
-    async fn spawn_video_fetches(&self, app: &AppHandle, to_fetch: Vec<(String, String, u64, Option<u64>)>) {
+    async fn spawn_video_fetches(&self, to_fetch: Vec<(String, String, u64, Option<u64>)>) {
         for (request_id, video_id, _uid, _sc_price) in to_fetch {
             let live_data = self.live_data.clone();
-            let app = app.clone();
             tokio::spawn(async move {
                 let result = video_info::fetch_video_info(&video_id).await;
                 let mut data = live_data.lock().await;
                 data.update_video_request_info(&request_id, result);
-                let kv = app.state::<VideoRequestStore>();
-                data.save_video_requests(&kv);
             });
         }
     }
 
     /// 标记点播为已看
-    pub async fn mark_video_watched(&self, kv: &VideoRequestStore, request_id: &str, watched: bool) {
+    pub async fn mark_video_watched(&self, request_id: &str, watched: bool) {
         let mut data = self.live_data.lock().await;
         data.set_video_watched(request_id, watched);
-        data.save_video_requests(kv);
     }
 
     /// 删除点播请求
-    pub async fn remove_video_request(&self, kv: &VideoRequestStore, request_id: &str) {
+    pub async fn remove_video_request(&self, request_id: &str) {
         let mut data = self.live_data.lock().await;
         data.remove_video_request(request_id);
-        data.save_video_requests(kv);
     }
 
     /// 清空已看
-    pub async fn clear_watched_videos(&self, kv: &VideoRequestStore) {
+    pub async fn clear_watched_videos(&self) {
         let mut data = self.live_data.lock().await;
         data.clear_watched_videos();
-        data.save_video_requests(kv);
     }
 
     /// 清空所有
-    pub async fn clear_all_videos(&self, kv: &VideoRequestStore) {
+    pub async fn clear_all_videos(&self) {
         let mut data = self.live_data.lock().await;
         data.clear_all_videos();
-        data.save_video_requests(kv);
     }
 
     pub async fn connect(
@@ -371,7 +364,7 @@ impl BliveService {
                     event = stream.next() => {
                         match event {
                             Some(Ok(e)) => {
-                                service.process_event(&app_clone, e).await;
+                                service.process_event(e).await;
                             }
                             Some(Err(e)) => {
                                 log::error!("Event error: {}", e);
@@ -446,28 +439,20 @@ impl BliveService {
     }
 
     /// 处理事件
-    async fn process_event(&self, app: &AppHandle, event: Event) {
+    async fn process_event(&self, event: Event) {
         let mut data = self.live_data.lock().await;
 
         match event {
             Event::Danmaku(danmaku) => {
                 let to_fetch = data.process_danmaku(danmaku);
-                if !to_fetch.is_empty() {
-                    let kv = app.state::<VideoRequestStore>();
-                    data.save_video_requests(&kv);
-                }
-                drop(data); // 释放锁后异步获取视频信息
-                self.spawn_video_fetches(app, to_fetch).await;
+                drop(data);
+                self.spawn_video_fetches(to_fetch).await;
             }
             Event::Gift(gift) => data.process_gift(gift),
             Event::SuperChat(sc) => {
                 let to_fetch = data.process_superchat(sc);
-                if !to_fetch.is_empty() {
-                    let kv = app.state::<VideoRequestStore>();
-                    data.save_video_requests(&kv);
-                }
                 drop(data);
-                self.spawn_video_fetches(app, to_fetch).await;
+                self.spawn_video_fetches(to_fetch).await;
             }
             Event::GuardBuy(guard) => data.process_guard_buy(guard),
             Event::OnlineRankV2(rank) => data.process_online_rank(rank),
@@ -552,11 +537,5 @@ impl BliveService {
             state.status = status.clone();
         }
         let _ = app.emit("blive-status", status);
-    }
-}
-
-impl Default for BliveService {
-    fn default() -> Self {
-        Self::new()
     }
 }

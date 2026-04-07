@@ -22,7 +22,7 @@ use crate::live_types::{
 use crate::blivedm;
 use crate::config::get_config_path;
 use crate::crypto;
-use crate::kv_store::{KVStore, VideoRequestStore};
+use crate::kv_store::KVStore;
 use crate::lock_state::LockStateManager;
 use crate::video_info::{self, VideoInfo};
 use crate::window_state::{WindowConfig, WindowState};
@@ -792,9 +792,8 @@ pub async fn fetch_video_info(video_id: String) -> Result<VideoInfo, String> {
 #[tauri::command]
 pub async fn load_video_requests(
     service: State<'_, Arc<BliveService>>,
-    kv_store: State<'_, VideoRequestStore>,
 ) -> Result<Vec<VideoRequestItem>, String> {
-    service.load_video_requests(&kv_store).await;
+    service.load_video_requests().await;
     let snapshot = service.get_snapshot([EventType::VideoRequest].into()).await;
     Ok(snapshot.video_requests.unwrap_or_default())
 }
@@ -803,11 +802,10 @@ pub async fn load_video_requests(
 #[tauri::command]
 pub async fn mark_video_watched(
     service: State<'_, Arc<BliveService>>,
-    kv_store: State<'_, VideoRequestStore>,
     request_id: String,
     watched: bool,
 ) -> Result<(), String> {
-    service.mark_video_watched(&kv_store, &request_id, watched).await;
+    service.mark_video_watched(&request_id, watched).await;
     Ok(())
 }
 
@@ -815,10 +813,9 @@ pub async fn mark_video_watched(
 #[tauri::command]
 pub async fn remove_video_request(
     service: State<'_, Arc<BliveService>>,
-    kv_store: State<'_, VideoRequestStore>,
     request_id: String,
 ) -> Result<(), String> {
-    service.remove_video_request(&kv_store, &request_id).await;
+    service.remove_video_request(&request_id).await;
     Ok(())
 }
 
@@ -826,9 +823,8 @@ pub async fn remove_video_request(
 #[tauri::command]
 pub async fn clear_watched_videos(
     service: State<'_, Arc<BliveService>>,
-    kv_store: State<'_, VideoRequestStore>,
 ) -> Result<(), String> {
-    service.clear_watched_videos(&kv_store).await;
+    service.clear_watched_videos().await;
     Ok(())
 }
 
@@ -836,8 +832,7 @@ pub async fn clear_watched_videos(
 #[tauri::command]
 pub async fn clear_all_videos(
     service: State<'_, Arc<BliveService>>,
-    kv_store: State<'_, VideoRequestStore>,
 ) -> Result<(), String> {
-    service.clear_all_videos(&kv_store).await;
+    service.clear_all_videos().await;
     Ok(())
 }
