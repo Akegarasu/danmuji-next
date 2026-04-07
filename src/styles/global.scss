@@ -43,12 +43,12 @@
   --border-radius: 6px;
   --border-radius-sm: 3px;
   
-  // 字体 - UI 固定尺寸（标题栏、标签栏、设置窗口等）
+  // 字体 - UI 元素尺寸（标题栏、标签栏、设置窗口等，由 UI 字体大小设置控制）
   --font-family: 'Microsoft YaHei', 'PingFang SC', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-size-xs: 12px;
-  --font-size-sm: 14px;
-  --font-size-base: 18px;
-  --font-size-lg: 24px;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 14px;
+  --font-size-lg: 16px;
 
   // 字体 - 内容区域尺寸（弹幕、礼物、SC 等，由用户字体大小设置控制）
   --content-font-size-xs: 11px;

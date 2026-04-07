@@ -59,6 +59,8 @@ export interface WindowSettings {
   opacity: number
   alwaysOnTop: boolean
   fontSize: number
+  /** UI 元素字体大小（标题栏、标签栏等） */
+  uiFontSize: number
   showMedal: boolean
   showAvatar: boolean
   hideBorder: boolean
@@ -142,6 +144,7 @@ export const DEFAULT_WINDOW_SETTINGS: WindowSettings = {
   opacity: 0.9,
   alwaysOnTop: true,
   fontSize: 14,
+  uiFontSize: 14,
   showMedal: true,
   showAvatar: true,
   hideBorder: false,

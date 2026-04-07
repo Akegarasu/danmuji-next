@@ -266,12 +266,12 @@ const openVideo = async (bvid: string) => {
   }
 
   .empty-text {
-    font-size: var(--font-size-base);
+    font-size: var(--content-font-size-base);
     margin-bottom: 4px;
   }
 
   .empty-hint {
-    font-size: var(--font-size-xs);
+    font-size: var(--content-font-size-xs);
     text-align: center;
     padding: 0 20px;
   }
@@ -353,7 +353,7 @@ const openVideo = async (bvid: string) => {
   gap: 3px;
 
   .video-title {
-    font-size: var(--font-size-sm);
+    font-size: var(--content-font-size-sm);
     color: var(--text-primary);
     line-height: 1.3;
     cursor: pointer;
@@ -372,7 +372,7 @@ const openVideo = async (bvid: string) => {
   .meta {
     display: flex;
     gap: 8px;
-    font-size: var(--font-size-xs);
+    font-size: var(--content-font-size-xs);
     color: var(--text-muted);
   }
 
@@ -380,7 +380,7 @@ const openVideo = async (bvid: string) => {
     display: flex;
     align-items: center;
     gap: 4px;
-    font-size: var(--font-size-xs);
+    font-size: var(--content-font-size-xs);
     color: var(--text-secondary);
 
     .source-badge {
@@ -456,7 +456,7 @@ const openVideo = async (bvid: string) => {
   display: flex;
   align-items: center;
   margin: 12px 0 8px;
-  font-size: var(--font-size-xs);
+  font-size: var(--content-font-size-xs);
   color: var(--text-muted);
 
   &::before,

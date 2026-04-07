@@ -239,10 +239,16 @@ const opacity = computed({
   set: (v) => settingsStore.updateWindowSettings('main', { opacity: v / 100 })
 })
 
-// 字体大小
+// 内容字体大小
 const fontSize = computed({
   get: () => settings.value.windows.main?.fontSize ?? 14,
   set: (v) => settingsStore.updateWindowSettings('main', { fontSize: v })
+})
+
+// UI 字体大小
+const uiFontSize = computed({
+  get: () => settings.value.windows.main?.uiFontSize ?? 14,
+  set: (v) => settingsStore.updateWindowSettings('main', { uiFontSize: v })
 })
 
 // 窗口置顶
@@ -601,7 +607,15 @@ const saveButtonText = computed(() => {
               内容字体大小 <span class="value">{{ fontSize }}px</span>
             </label>
             <input v-model.number="fontSize" type="range" min="10" max="48" class="setting-slider" />
-            <span class="setting-hint">仅影响弹幕、礼物、SC 等内容区域</span>
+            <span class="setting-hint">仅影响弹幕、礼物、SC、点播等内容区域</span>
+          </div>
+
+          <div class="setting-group">
+            <label class="setting-label">
+              UI 字体大小 <span class="value">{{ uiFontSize }}px</span>
+            </label>
+            <input v-model.number="uiFontSize" type="range" min="10" max="48" class="setting-slider" />
+            <span class="setting-hint">影响标题栏、标签栏等 UI 元素</span>
           </div>
 
           <div class="setting-group toggle">

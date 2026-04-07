@@ -28,8 +28,19 @@ export const applyHideBorder = (hide: boolean) => {
 }
 
 /**
- * 应用字体大小设置（仅影响内容区域：弹幕、礼物、SC 等）
- * UI 元素（标题栏、标签栏、设置窗口）使用固定的 --font-size-* 变量，不受此设置影响
+ * 应用 UI 字体大小设置（标题栏、标签栏、设置窗口等 UI 元素）
+ */
+export const applyUiFontSize = (fontSize: number) => {
+  const validSize = Math.max(10, Math.min(48, fontSize))
+  document.documentElement.style.setProperty('--font-size-base', `${validSize}px`)
+  document.documentElement.style.setProperty('--font-size-sm', `${validSize - 2}px`)
+  document.documentElement.style.setProperty('--font-size-xs', `${validSize - 3}px`)
+  document.documentElement.style.setProperty('--font-size-lg', `${validSize + 2}px`)
+  console.log('[Settings] Applied UI font size:', validSize)
+}
+
+/**
+ * 应用内容字体大小设置（弹幕、礼物、SC、点播等内容区域）
  */
 export const applyFontSize = (fontSize: number) => {
   // 确保 fontSize 在有效范围内
@@ -52,6 +63,7 @@ export const applyCurrentSettings = () => {
   if (mainSettings) {
     applyOpacity(mainSettings.opacity)
     applyFontSize(mainSettings.fontSize)
+    applyUiFontSize(mainSettings.uiFontSize ?? 14)
     applyHideBorder(mainSettings.hideBorder)
   }
 }
@@ -75,6 +87,7 @@ export const initSettingsApplier = () => {
       if (newSettings) {
         applyOpacity(newSettings.opacity)
         applyFontSize(newSettings.fontSize)
+        applyUiFontSize(newSettings.uiFontSize ?? 14)
         applyHideBorder(newSettings.hideBorder)
       }
     },
