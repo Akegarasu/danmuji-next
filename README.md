@@ -1,14 +1,214 @@
-# Tauri + Vue + TypeScript
+# danmuji-next
 
-This template should help get you started developing with Vue 3 and TypeScript in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+“把直播间的热闹，安安静静地留在桌面一角。”
 
-## Release Workflow
+`danmuji-next` 是一个基于 `Tauri 2 + Vue 3 + TypeScript + Rust` 开发的 Bilibili 直播桌面弹幕姬。  
+它面向日常开播、同传、录播切片、数据观察与桌面常驻场景，提供透明置顶、多窗口拆分、互动时间线、点播收集、直播存档等能力。
 
-- Local bump only: `python scripts/bump_version_and_build.py --no-build`
-- Local bump + build: `python scripts/bump_version_and_build.py`
-- Bump minor version + build: `python scripts/bump_version_and_build.py minor`
-- After committing the version change, push a tag like `v1.6.1` to trigger GitHub Actions release build and publish.
+项目目前以 `Windows` 桌面环境为主要使用场景。
 
-## Recommended IDE Setup
+## 项目介绍
 
-- [VS Code](https://code.visualstudio.com/) + [Vue - Official](https://marketplace.visualstudio.com/items?itemName=Vue.volar) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+和传统“只把弹幕铺在屏幕上”的工具不同，`danmuji-next` 更像一个能长期陪播的桌面侧栏：
+
+- 主窗口可透明、置顶、无边框显示，适合挂在桌面边缘常驻。
+- 弹幕、礼物、SC、观众信息既能集中查看，也能拆成独立窗口分区摆放。
+- 登录后可直接接入直播间管理能力，例如屏蔽词同步与用户禁言。
+- 直播过程中的互动数据会进入本地存档，方便事后检索与复盘。
+- 扩展窗口支持自动捕获观众发送的 `BV/AV` 点播请求，并补全视频信息。
+
+如果你想要的是一个偏桌面常驻、轻量但不简陋的 B 站直播辅助工具，这个项目就是为这种场景准备的。
+
+## 功能
+
+### 主界面
+
+- 互动总览：将弹幕、礼物、SC 合并为一条时间线展示。
+- 独立分栏：支持 `互动 / 弹幕 / 礼物 / SC / 观众` 五类视图。
+- 右键拆窗：任意标签页都可以拆分成独立窗口。
+- 自动滚动：列表默认跟随最新消息，也可以手动停留后再一键回到底部。
+- 置顶与透明：适合边播边看，不强占桌面空间。
+- 鼠标穿透锁定：锁定后窗口可穿透点击，托盘支持一键解锁全部窗口。
+
+### 直播数据
+
+- 实时弹幕接收，支持表情弹幕展示。
+- 礼物实时更新，支持合并显示、最低价格过滤、免费礼物过滤、过期灰显。
+- SC 单独展示，可与礼物视图联动查看。
+- 观众页支持贡献排行、在线排行与房间统计信息。
+- 主标题栏可显示连接状态、在线人数与当前房间标题。
+
+### 账号与房管
+
+- 支持 Bilibili 扫码登录。
+- 本地保存登录态、房间号与显示设置。
+- 支持对互动用户执行禁言。
+- 支持读取、添加、删除直播间屏蔽词。
+- 支持维护“特别关注”UID 列表，在界面中高亮相关用户。
+
+### 存档与扩展
+
+- 自动记录直播会话。
+- 本地存档支持检索弹幕、礼物、SC。
+- 存档支持按关键词、内容类型、价格区间分页查询。
+- 异常退出后会尝试恢复未正常结束的存档会话。
+- 扩展窗口支持“点播”功能，自动捕获弹幕或 SC 中出现的 `BV/AV` 视频号。
+- 点播列表支持补全封面、标题、UP 主、播放量、时长，并可标记已看、删除、清空。
+
+### 多窗口与持久化
+
+- 主窗口、拆分窗口、设置窗口、存档窗口、扩展窗口都支持状态保存。
+- 应用下次启动时会恢复上一次已打开的窗口布局。
+- 设置、窗口状态、点播列表都会本地持久化。
+- 直播存档使用本地数据库保存，适合长期积累与回查。
+
+## 窗口一览
+
+项目当前包含这些主要窗口：
+
+| 窗口 | 作用 |
+| --- | --- |
+| 主窗口 | 默认入口，包含互动总览与各类标签页 |
+| 标签独立窗口 | 从主窗口右键拆出，用于单独展示某一类数据 |
+| 设置窗口 | 登录、连接、显示选项、特别关注、屏蔽词管理 |
+| 存档窗口 | 查看历史直播会话并搜索弹幕、礼物、SC |
+| 扩展窗口 | 当前内置点播页，用于管理观众点播请求 |
+
+## 使用方式
+
+### 首次使用
+
+1. 启动应用。
+2. 打开“设置”窗口。
+3. 通过扫码完成 Bilibili 登录。
+4. 填写直播间房间号。
+5. 点击“连接直播间”。
+
+连接成功后，主窗口会开始接收实时数据；如果你已经保存过房间号和登录态，应用启动时也会尝试自动连接。
+
+### 日常使用建议
+
+- 想把不同信息分开摆放时，可以在主窗口标签栏上右键拆窗。
+- 想把窗口挂在桌面边缘时，可以开启置顶、调低透明度，再根据需要隐藏边框。
+- 想避免误触时，可以锁定窗口进入鼠标穿透状态。
+- 想回看某场直播里的关键互动时，直接去“存档”窗口搜索关键词即可。
+- 想收集观众投稿视频时，可以打开“扩展”窗口中的点播页。
+
+## 技术栈
+
+| 部分 | 技术 |
+| --- | --- |
+| 桌面容器 | Tauri 2 |
+| 前端 | Vue 3、TypeScript、Vite、Pinia |
+| 后端 | Rust |
+| 数据存储 | 本地配置文件、KV 存储、SQLite 存档 |
+
+## 本地开发
+
+### 环境准备
+
+- `Node.js`
+- `pnpm`
+- `Rust`
+- Tauri 构建所需系统环境
+
+安装依赖：
+
+```bash
+pnpm install
+```
+
+启动前端开发：
+
+```bash
+pnpm dev
+```
+
+启动 Tauri 开发模式：
+
+```bash
+pnpm run td
+```
+
+## 构建
+
+前端构建：
+
+```bash
+pnpm build
+```
+
+Tauri 构建：
+
+```bash
+pnpm run tauri:build
+```
+
+## 版本与发版
+
+项目提供了一个本地 `Python` 脚本，用于统一递增版本号，并同步更新这些文件：
+
+- `package.json`
+- `src-tauri/Cargo.toml`
+- `src-tauri/tauri.conf.json`
+- `src-tauri/Cargo.lock`
+
+仅自增版本号：
+
+```bash
+python scripts/bump_version_and_build.py --no-build
+```
+
+自增补丁版本并本地构建：
+
+```bash
+python scripts/bump_version_and_build.py
+```
+
+自增次版本并本地构建：
+
+```bash
+python scripts/bump_version_and_build.py minor
+```
+
+也可以直接使用 npm script：
+
+```bash
+pnpm run version:bump
+pnpm run release:local
+```
+
+## GitHub Release 工作流
+
+仓库已经配置 Tauri 发版工作流：
+
+- 工作流文件：`.github/workflows/tauri-release.yml`
+- 触发方式：推送形如 `v1.6.1` 的标签
+- 运行环境：`windows-latest`
+- 结果：自动构建并上传到 GitHub Release
+
+建议的发版流程如下：
+
+1. 本地执行版本自增脚本。
+2. 提交版本变更。
+3. 创建标签，例如 `git tag v1.6.1`。
+4. 推送提交和标签：`git push origin main --tags`。
+5. 等待 GitHub Actions 完成构建并发布产物。
+
+## 项目结构
+
+```text
+.
+├─ src/                 前端界面、状态管理、窗口与服务逻辑
+├─ src-tauri/           Tauri/Rust 后端、Bilibili 连接与本地存储
+├─ scripts/             本地辅助脚本
+└─ .github/workflows/   GitHub Actions 工作流
+```
+
+## 适用场景
+
+- 主播开播时的桌面侧边弹幕显示
+- 同传或翻译时的分栏信息监看
+- 礼物、SC、观众贡献的实时观察
+- 直播结束后的互动内容检索
+- 收集和整理观众视频点播请求
