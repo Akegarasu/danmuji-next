@@ -1,7 +1,7 @@
 [package]
 name = "danmuji-next"
-version = "1.5.0"
-description = "Bilibili 弹幕姬"
+version = "1.6.0"
+description = "秋葉的 Bilibili 弹幕姬"
 authors = ["anzu"]
 edition = "2021"
 
