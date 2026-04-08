@@ -44,3 +44,18 @@ jobs:
           releaseBody: See the assets below to download this version.
           releaseDraft: false
           prerelease: false
+
+      - name: Prepare portable executable asset
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release-assets | Out-Null
+          $tag = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "v__VERSION__" }
+          $portableName = "danmuji-next_${tag}_windows_x64_portable.exe"
+          Copy-Item "src-tauri/target/release/danmuji-next.exe" "release-assets/$portableName" -Force
+          "PORTABLE_ASSET=release-assets/$portableName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Upload portable executable to release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: ${{ env.PORTABLE_ASSET }}
