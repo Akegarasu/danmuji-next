@@ -38,7 +38,7 @@ def replace_json_version(path: Path, old_version: str, new_version: str) -> None
                 raise ValueError(
                     f"Version mismatch in {path}: expected {old_version}, found {match.group(2)}"
                 )
-            lines[index] = f"{match.group(1)}{new_version}{match.group(3)}"
+            lines[index] = f"{match.group(1)}{new_version}{match.group(3)}\n"
             write_lines(path, lines)
             return
     raise ValueError(f"Could not update JSON version in {path}")
@@ -73,7 +73,7 @@ def replace_cargo_toml_version(path: Path, old_version: str, new_version: str) -
                     raise ValueError(
                         f"Version mismatch in {path}: expected {old_version}, found {match.group(2)}"
                     )
-                lines[index] = f"{match.group(1)}{new_version}{match.group(3)}"
+                lines[index] = f"{match.group(1)}{new_version}{match.group(3)}\n"
                 write_lines(path, lines)
                 return
     raise ValueError(f"Could not update package version in {path}")
@@ -141,7 +141,6 @@ def get_current_version() -> str:
         "package.json": extract_json_version(ROOT / "package.json"),
         "src-tauri/Cargo.toml": extract_cargo_toml_version(ROOT / "src-tauri" / "Cargo.toml"),
         "src-tauri/tauri.conf.json": extract_json_version(ROOT / "src-tauri" / "tauri.conf.json"),
-        "src-tauri/Cargo.lock": extract_cargo_lock_version(ROOT / "src-tauri" / "Cargo.lock"),
     }
     unique_versions = set(versions.values())
     if len(unique_versions) != 1:

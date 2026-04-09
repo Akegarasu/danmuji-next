@@ -13,6 +13,7 @@
     "core:event:allow-listen",
     "core:window:allow-set-ignore-cursor-events",
     "opener:default",
-    "process:default"
+    "process:default",
+    "updater:default"
   ]
 }

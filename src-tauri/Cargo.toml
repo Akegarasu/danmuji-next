@@ -1,6 +1,6 @@
 [package]
 name = "danmuji-next"
-version = "1.6.0"
+version = "1.7.0"
 description = "秋葉的 Bilibili 弹幕姬"
 authors = ["anzu"]
 edition = "2021"
@@ -41,6 +41,7 @@ log = "0.4"
 url = "2"
 urlencoding = "2"
 tauri-plugin-process = "2"
+tauri-plugin-updater = "2"
 chrono = "0.4"
 regex = "1"
 rusqlite = { version = "0.31", features = ["bundled"] }
