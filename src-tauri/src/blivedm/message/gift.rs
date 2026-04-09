@@ -33,11 +33,52 @@ pub struct Gift {
     pub action: String,
     /// 时间戳
     pub timestamp: i64,
+    /// 批次连击 ID（同一轮 batch combo 共用）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub batch_combo_id: Option<String>,
+    /// 批次连击详情
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub batch_combo_send: Option<BatchComboSend>,
+    /// 连击详情
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub combo_send: Option<ComboSend>,
+    /// 连击停留时间（秒）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub combo_stay_time: Option<u32>,
+    /// 连击总价值
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub combo_total_coin: Option<u64>,
     /// 发送者勋章
     #[serde(skip_serializing_if = "Option::is_none")]
     pub medal: Option<Medal>,
     /// 舰队等级
     pub guard_level: GuardLevel,
+}
+
+/// 批次连击信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchComboSend {
+    pub action: String,
+    pub batch_combo_id: String,
+    pub batch_combo_num: u32,
+    pub gift_id: u64,
+    pub gift_name: String,
+    pub gift_num: u32,
+    pub uid: u64,
+    pub uname: String,
+}
+
+/// 连击信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComboSend {
+    pub action: String,
+    pub combo_id: String,
+    pub combo_num: u32,
+    pub gift_id: u64,
+    pub gift_name: String,
+    pub gift_num: u32,
+    pub uid: u64,
+    pub uname: String,
 }
 
 /// 货币类型
@@ -77,6 +118,39 @@ impl Gift {
             .unwrap_or("投喂")
             .to_string();
         let timestamp = data.get("timestamp")?.as_i64()?;
+        let batch_combo_id = data
+            .get("batch_combo_id")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let batch_combo_send = data.get("batch_combo_send").and_then(|v| {
+            Some(BatchComboSend {
+                action: v.get("action")?.as_str()?.to_string(),
+                batch_combo_id: v.get("batch_combo_id")?.as_str()?.to_string(),
+                batch_combo_num: v.get("batch_combo_num")?.as_u64()? as u32,
+                gift_id: v.get("gift_id")?.as_u64()?,
+                gift_name: v.get("gift_name")?.as_str()?.to_string(),
+                gift_num: v.get("gift_num")?.as_u64()? as u32,
+                uid: v.get("uid")?.as_u64()?,
+                uname: v.get("uname")?.as_str()?.to_string(),
+            })
+        });
+        let combo_send = data.get("combo_send").and_then(|v| {
+            Some(ComboSend {
+                action: v.get("action")?.as_str()?.to_string(),
+                combo_id: v.get("combo_id")?.as_str()?.to_string(),
+                combo_num: v.get("combo_num")?.as_u64()? as u32,
+                gift_id: v.get("gift_id")?.as_u64()?,
+                gift_name: v.get("gift_name")?.as_str()?.to_string(),
+                gift_num: v.get("gift_num")?.as_u64()? as u32,
+                uid: v.get("uid")?.as_u64()?,
+                uname: v.get("uname")?.as_str()?.to_string(),
+            })
+        });
+        let combo_stay_time = data
+            .get("combo_stay_time")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32);
+        let combo_total_coin = data.get("combo_total_coin").and_then(|v| v.as_u64());
 
         let guard_level = data
             .get("guard_level")
@@ -113,6 +187,11 @@ impl Gift {
             sender_face,
             action,
             timestamp,
+            batch_combo_id,
+            batch_combo_send,
+            combo_send,
+            combo_stay_time,
+            combo_total_coin,
             medal,
             guard_level,
         })
