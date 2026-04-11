@@ -16,6 +16,7 @@ import {
   getCurrentRoomInfo,
   type ConnectionStatus
 } from '@/services/blive-client'
+import { checkForUpdate, getAppVersion, isPortable, type UpdateInfo } from '@/services/updater'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { AudienceSortType } from '@/types'
@@ -193,6 +194,9 @@ onMounted(async () => {
 
   // 应用设置到 UI
   applyCurrentSettings()
+
+  // 加载关于信息
+  initAboutInfo()
 })
 
 onUnmounted(async () => {
@@ -216,7 +220,8 @@ const sections = [
   { id: 'gift', label: '礼物' },
   { id: 'audience', label: '观众' },
   { id: 'special-follow', label: '特别关注' },
-  { id: 'shield-keyword', label: '屏蔽词' }
+  { id: 'shield-keyword', label: '屏蔽词' },
+  { id: 'about', label: '关于' }
 ]
 
 // const sortOptions = [
@@ -512,6 +517,39 @@ const saveButtonText = computed(() => {
   if (saveStatus.value === 'saved') return '已保存'
   return '保存设置'
 })
+
+// ==================== 关于 ====================
+
+const appVersion = ref('')
+const portableMode = ref(false)
+const updateCheckStatus = ref<'idle' | 'checking' | 'found' | 'latest' | 'error'>('idle')
+const aboutUpdateInfo = ref<UpdateInfo | null>(null)
+
+const initAboutInfo = async () => {
+  appVersion.value = await getAppVersion()
+  portableMode.value = await isPortable()
+}
+
+const manualCheckUpdate = async () => {
+  updateCheckStatus.value = 'checking'
+  try {
+    const info = await checkForUpdate()
+    if (info) {
+      aboutUpdateInfo.value = info
+      updateCheckStatus.value = 'found'
+    } else {
+      updateCheckStatus.value = 'latest'
+      setTimeout(() => { updateCheckStatus.value = 'idle' }, 3000)
+    }
+  } catch {
+    updateCheckStatus.value = 'error'
+    setTimeout(() => { updateCheckStatus.value = 'idle' }, 3000)
+  }
+}
+
+const openProjectUrl = async () => {
+  await invoke('open_url', { url: 'https://github.com/Akegarasu/danmuji-next' })
+}
 </script>
 
 <template>
@@ -841,6 +879,41 @@ const saveButtonText = computed(() => {
             >
               <span>{{ item.keyword }}</span>
               <button class="shield-keyword-del" @click="confirmDelKeyword(item.keyword)">×</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 关于 -->
+        <div v-show="activeSection === 'about'" class="section">
+          <h3 class="section-title">关于</h3>
+
+          <div class="about-info-card">
+            <div class="about-row">
+              <span class="about-label">版本</span>
+              <span class="about-value">v{{ appVersion }}</span>
+              <span v-if="portableMode" class="about-badge">便携版</span>
+            </div>
+            <div class="about-row">
+              <span class="about-label">项目地址</span>
+              <a class="about-link" @click.prevent="openProjectUrl">
+                github.com/Akegarasu/danmuji-next
+              </a>
+            </div>
+          </div>
+
+          <div class="about-update-section">
+            <button
+              class="about-check-btn"
+              :disabled="updateCheckStatus === 'checking'"
+              @click="manualCheckUpdate"
+            >
+              <template v-if="updateCheckStatus === 'checking'">检查中...</template>
+              <template v-else-if="updateCheckStatus === 'latest'">已是最新版本</template>
+              <template v-else-if="updateCheckStatus === 'error'">检查失败</template>
+              <template v-else>检查更新</template>
+            </button>
+            <div v-if="updateCheckStatus === 'found' && aboutUpdateInfo" class="about-update-found">
+              <span>发现新版本 v{{ aboutUpdateInfo.version }}</span>
             </div>
           </div>
         </div>
@@ -1570,5 +1643,89 @@ const saveButtonText = computed(() => {
     opacity: 0.7;
     cursor: not-allowed;
   }
+}
+
+// ==================== 关于 ====================
+
+.about-info-card {
+  padding: 14px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.about-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.about-label {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  flex-shrink: 0;
+  min-width: 56px;
+}
+
+.about-value {
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.about-badge {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  padding: 1px 6px;
+  background: var(--bg-hover);
+  border-radius: 8px;
+}
+
+.about-link {
+  font-size: var(--font-size-sm);
+  color: var(--accent-primary);
+  cursor: pointer;
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.about-update-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.about-check-btn {
+  padding: 8px 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+
+  &:hover:not(:disabled) {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  &:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+  }
+}
+
+.about-update-found {
+  font-size: var(--font-size-sm);
+  color: var(--accent-primary);
+  font-weight: 500;
 }
 </style>

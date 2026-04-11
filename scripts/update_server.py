@@ -3,7 +3,7 @@
 本地更新测试服务器
 
 模拟 Tauri updater endpoint，用于开发调试自动更新功能。
-启动后会在 http://localhost:8787 提供更新检查服务。
+同时支持安装版（NSIS）和便携版（portable）的更新检查。
 
 用法:
     python scripts/update_server.py                    # 默认模拟版本 99.0.0
@@ -14,6 +14,7 @@
     GET /update/{target}/{arch}/{current_version}
         - 返回 JSON 更新信息（如果有更新）
         - 返回 204（如果已是最新）
+        - 响应同时包含 url (NSIS 安装包) 和 portable_url (便携版 exe)
 """
 
 import json
@@ -32,6 +33,9 @@ def parse_args():
     parser.add_argument("--notes", default=None, help="更新日志内容")
     parser.add_argument(
         "--url", default=None, help="安装包下载 URL（可选，默认生成占位 URL）"
+    )
+    parser.add_argument(
+        "--portable-url", default=None, help="便携版下载 URL（可选，默认生成占位 URL）"
     )
     parser.add_argument(
         "--signature", default="", help="安装包签名（可选，测试时可留空）"
@@ -69,7 +73,7 @@ class UpdateHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
-        # 简单版本比较（不做完整 semver，测试用足够了）
+        # 简单版本比较
         try:
             current_parts = tuple(int(x) for x in current_version.split("."))
             latest_parts = tuple(int(x) for x in args.version.split("."))
@@ -79,7 +83,7 @@ class UpdateHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 return
         except ValueError:
-            pass  # 版本号格式异常，继续返回更新
+            pass
 
         # 构造更新响应
         notes = (
@@ -87,22 +91,32 @@ class UpdateHandler(BaseHTTPRequestHandler):
             or f"### v{args.version} 更新内容\n\n- 这是测试更新服务器生成的模拟更新\n- 新增自动更新功能\n- 修复若干已知问题"
         )
 
-        download_url = (
+        # NSIS 安装包 URL
+        nsis_url = (
             args.url
             or f"http://localhost:{args.port}/releases/danmuji-next_{args.version}_x64-setup.nsis.zip"
+        )
+
+        # 便携版 exe URL
+        portable_url = (
+            args.portable_url
+            or f"http://localhost:{args.port}/releases/danmuji-next_v{args.version}_windows_x64_portable.exe"
         )
 
         response = {
             "version": args.version,
             "notes": notes,
             "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "url": download_url,
+            "url": nsis_url,
             "signature": args.signature,
+            "portable_url": portable_url,
         }
 
         body = json.dumps(response, ensure_ascii=False, indent=2).encode("utf-8")
 
         print(f"  -> 200 发现更新 v{args.version}")
+        print(f"     url:          {nsis_url}")
+        print(f"     portable_url: {portable_url}")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -124,9 +138,11 @@ def main():
     print(f"=" * 50)
     print(f"  弹幕姬 本地更新测试服务器")
     print(f"=" * 50)
-    print(f"  地址:   http://localhost:{args.port}")
-    print(f"  端点:   /update/{{target}}/{{arch}}/{{current_version}}")
-    print(f"  模式:   {mode}")
+    print(f"  地址:     http://localhost:{args.port}")
+    print(f"  端点:     /update/{{target}}/{{arch}}/{{current_version}}")
+    print(f"  模式:     {mode}")
+    print(f"  安装版:   返回 url (NSIS)")
+    print(f"  便携版:   返回 portable_url (exe)")
     print(f"=" * 50)
     print(f"  等待请求中...\n")
 

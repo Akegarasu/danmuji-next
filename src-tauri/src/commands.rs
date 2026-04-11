@@ -836,3 +836,134 @@ pub async fn clear_all_videos(
     service.clear_all_videos().await;
     Ok(())
 }
+
+// ==================== 版本和更新 ====================
+
+/// 获取当前应用版本号
+#[tauri::command]
+pub fn get_app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+/// 检测是否为便携版（非安装版）
+/// 安装版（NSIS）会在安装目录下生成 `Uninstall danmuji-next.exe`
+#[tauri::command]
+pub fn is_portable() -> bool {
+    let Ok(exe_path) = std::env::current_exe() else {
+        return true; // 无法确定时按便携版处理
+    };
+    let Some(exe_dir) = exe_path.parent() else {
+        return true;
+    };
+    !exe_dir.join("Uninstall danmuji-next.exe").exists()
+}
+
+/// 便携版更新：检查更新
+/// 直接请求更新服务器，返回 JSON 字符串（由前端解析）
+#[tauri::command]
+pub async fn check_portable_update(url: String) -> Result<Option<String>, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
+
+    if resp.status().as_u16() == 204 {
+        return Ok(None); // 无更新
+    }
+
+    if !resp.status().is_success() {
+        return Err(format!("服务器返回状态码 {}", resp.status()));
+    }
+
+    let body = resp.text().await.map_err(|e| e.to_string())?;
+    Ok(Some(body))
+}
+
+/// 便携版更新：下载新版本并替换当前 exe
+/// 1. 下载新 exe 到临时文件
+/// 2. 生成 PowerShell 替换脚本
+/// 3. 启动脚本（脚本会等当前进程退出后替换文件并重启）
+#[tauri::command]
+pub async fn install_portable_update(download_url: String) -> Result<(), String> {
+    let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
+    let exe_dir = exe_path
+        .parent()
+        .ok_or("无法获取程序所在目录")?;
+
+    // 下载新版本到临时文件
+    let tmp_path = exe_dir.join("danmuji-next_update.tmp");
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let resp = client
+        .get(&download_url)
+        .send()
+        .await
+        .map_err(|e| format!("下载失败: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("下载失败，服务器返回状态码 {}", resp.status()));
+    }
+
+    let bytes = resp.bytes().await.map_err(|e| format!("读取下载数据失败: {}", e))?;
+    std::fs::write(&tmp_path, &bytes).map_err(|e| format!("保存临时文件失败: {}", e))?;
+
+    // 生成 PowerShell 替换脚本
+    let script_path = exe_dir.join("danmuji-next_updater.ps1");
+    let exe_path_str = exe_path.to_string_lossy();
+    let tmp_path_str = tmp_path.to_string_lossy();
+    let script_path_str = script_path.to_string_lossy();
+    let pid = std::process::id();
+
+    let script = format!(
+        r#"# danmuji-next portable updater script
+# 等待原进程退出
+try {{
+    $proc = Get-Process -Id {pid} -ErrorAction SilentlyContinue
+    if ($proc) {{
+        $proc.WaitForExit(30000) | Out-Null
+    }}
+}} catch {{}}
+Start-Sleep -Milliseconds 500
+
+# 替换 exe
+try {{
+    Move-Item -Path "{tmp_path_str}" -Destination "{exe_path_str}" -Force
+}} catch {{
+    # 如果直接替换失败（文件被占用），先删再移
+    Remove-Item -Path "{exe_path_str}" -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 200
+    Move-Item -Path "{tmp_path_str}" -Destination "{exe_path_str}" -Force
+}}
+
+# 重启应用
+Start-Process -FilePath "{exe_path_str}"
+
+# 删除自身脚本
+Remove-Item -Path "{script_path_str}" -Force -ErrorAction SilentlyContinue
+"#
+    );
+
+    std::fs::write(&script_path, &script)
+        .map_err(|e| format!("写入更新脚本失败: {}", e))?;
+
+    // 启动 PowerShell 脚本（隐藏窗口）
+    std::process::Command::new("powershell")
+        .args([
+            "-ExecutionPolicy",
+            "Bypass",
+            "-WindowStyle",
+            "Hidden",
+            "-File",
+            &script_path.to_string_lossy(),
+        ])
+        .spawn()
+        .map_err(|e| format!("启动更新脚本失败: {}", e))?;
+
+    Ok(())
+}

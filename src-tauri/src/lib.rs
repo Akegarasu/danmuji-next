@@ -195,6 +195,11 @@ pub fn run() {
             commands::remove_video_request,
             commands::clear_watched_videos,
             commands::clear_all_videos,
+            // 版本和更新
+            commands::get_app_version,
+            commands::is_portable,
+            commands::check_portable_update,
+            commands::install_portable_update,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
