@@ -1,13 +1,11 @@
 //! 直播数据状态管理
 //!
 //! LiveData 持有所有实时直播数据（弹幕、礼物、SC、统计等），
-//! 负责事件处理、数据聚合、礼物合并、点播检测等逻辑。
+//! 负责事件处理、数据聚合、礼物合并等逻辑。
+//! 扩展功能（点播、投票等）通过独立 Manager 管理。
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::LazyLock;
 
-use regex::Regex;
-use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
 use crate::archive::ArchiveEvent;
@@ -19,13 +17,9 @@ use crate::blivedm::{
 use crate::kv_store::VideoRequestStore;
 use crate::live_types::*;
 use crate::video_info::VideoInfo;
-
-/// BV/AV 号匹配正则（编译一次，全局复用）
-///
-/// 只提取 ID 本身，允许前后紧邻其他字符，避免依赖边界判断漏匹配。
-/// 使用 find_iter 而非 captures_iter，减少不必要的捕获开销。
-static VIDEO_ID_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i:BV[A-Z0-9]{10}|AV[0-9]+)").unwrap());
+use crate::video_request::VideoRequestManager;
+use crate::voting::VotingManager;
+use crate::kv_store::VotingStore;
 
 // ==================== 窗口订阅 ====================
 
@@ -56,10 +50,11 @@ pub struct LiveData {
     /// 统计数据
     pub(crate) stats: LiveStats,
 
-    /// 点播请求列表
-    pub(crate) video_requests: Vec<VideoRequestItem>,
-    /// 已见过的视频 ID（用于去重，小写）
-    video_request_ids: HashSet<String>,
+    /// 点播请求管理器
+    pub(crate) video_requests: VideoRequestManager,
+
+    /// 投票管理器
+    pub(crate) voting: VotingManager,
 
     /// 待发送的更新
     pub(crate) pending_updates: Vec<DataUpdate>,
@@ -73,8 +68,6 @@ pub struct LiveData {
     contributions_dirty: bool,
     /// 存档 channel sender（连接时设置）
     pub(crate) archive_tx: Option<mpsc::UnboundedSender<ArchiveEvent>>,
-    /// 点播数据持久化存储（内聚在 LiveData 中，变更时自动保存）
-    vr_store: Option<VideoRequestStore>,
 }
 
 impl Default for LiveData {
@@ -88,86 +81,46 @@ impl Default for LiveData {
             contribution_rank_full: Vec::new(),
             user_contributions: HashMap::new(),
             stats: LiveStats::default(),
-            video_requests: Vec::new(),
-            video_request_ids: HashSet::new(),
+            video_requests: VideoRequestManager::default(),
+            voting: VotingManager::default(),
             pending_updates: Vec::new(),
             pending_danmaku: Vec::new(),
             pending_gift_upserts: Vec::new(),
             stats_dirty: false,
             contributions_dirty: false,
             archive_tx: None,
-            vr_store: None,
         }
     }
 }
 
-/// 点播持久化数据（存入 KV Store）
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct PersistedVideoRequests {
-    requests: Vec<VideoRequestItem>,
-    seen_ids: HashSet<String>,
-}
-
-/// KV Store 中点播数据的 key
-const VIDEO_REQUESTS_KV_KEY: &str = "video_requests";
-
 impl LiveData {
-    /// 创建新实例，附带点播持久化存储
-    pub(crate) fn new(vr_store: VideoRequestStore) -> Self {
+    /// 创建新实例，附带扩展持久化存储
+    pub(crate) fn new(vr_store: VideoRequestStore, voting_store: VotingStore) -> Self {
+        let mut video_requests = VideoRequestManager::new(vr_store);
+        video_requests.load();
+
+        let mut voting = VotingManager::new(voting_store);
+        voting.load();
+
         Self {
-            vr_store: Some(vr_store),
+            video_requests,
+            voting,
             ..Self::default()
         }
     }
 
-    /// 清空直播数据（保留点播列表和存储引用）
+    /// 清空直播数据（保留扩展管理器状态和存储引用）
     pub fn clear(&mut self) {
-        let vr = std::mem::take(&mut self.video_requests);
-        let vr_ids = std::mem::take(&mut self.video_request_ids);
-        let vr_store = self.vr_store.take();
+        let video_requests = std::mem::take(&mut self.video_requests);
+        let voting = std::mem::take(&mut self.voting);
         *self = Self::default();
-        self.video_requests = vr;
-        self.video_request_ids = vr_ids;
-        self.vr_store = vr_store;
+        self.video_requests = video_requests;
+        self.voting = voting;
     }
 
     /// 从 KV Store 加载点播数据
     pub fn load_video_requests(&mut self) {
-        let Some(store) = &self.vr_store else { return };
-        if let Some(val) = store.get(VIDEO_REQUESTS_KV_KEY) {
-            match serde_json::from_value::<PersistedVideoRequests>(val) {
-                Ok(persisted) => {
-                    self.video_requests = persisted.requests;
-                    self.video_request_ids = persisted.seen_ids;
-                    log::info!(
-                        "Loaded {} video requests from KV store",
-                        self.video_requests.len()
-                    );
-                }
-                Err(e) => {
-                    log::warn!("Failed to parse persisted video requests: {}", e);
-                }
-            }
-        }
-    }
-
-    /// 保存点播数据到 KV Store
-    fn save_video_requests(&self) {
-        let Some(store) = &self.vr_store else { return };
-        let persisted = PersistedVideoRequests {
-            requests: self.video_requests.clone(),
-            seen_ids: self.video_request_ids.clone(),
-        };
-        match serde_json::to_value(&persisted) {
-            Ok(val) => {
-                if let Err(e) = store.set(VIDEO_REQUESTS_KV_KEY.to_string(), val) {
-                    log::error!("Failed to save video requests to KV store: {}", e);
-                }
-            }
-            Err(e) => {
-                log::error!("Failed to serialize video requests: {}", e);
-            }
-        }
+        self.video_requests.load();
     }
 
     /// 生成数据快照
@@ -212,7 +165,12 @@ impl LiveData {
                 None
             },
             video_requests: if event_types.contains(&EventType::VideoRequest) {
-                Some(self.video_requests.clone())
+                Some(self.video_requests.get_all())
+            } else {
+                None
+            },
+            voting_polls: if event_types.contains(&EventType::Voting) {
+                Some(self.voting.get_all_polls_for_snapshot())
             } else {
                 None
             },
@@ -241,7 +199,7 @@ impl LiveData {
             let _ = tx.send(ArchiveEvent::Danmaku(processed.clone()));
         }
 
-        let detected = self.detect_and_add_video_requests(
+        let (detected, vr_updates) = self.video_requests.detect_and_add(
             &processed.content,
             &processed.user.name,
             processed.user.uid,
@@ -249,6 +207,18 @@ impl LiveData {
             None,
             processed.timestamp,
         );
+        self.pending_updates.extend(vr_updates);
+
+        // 投票匹配（仅在有活跃投票时）
+        if self.voting.has_active_polls() {
+            let vote_updates = self.voting.try_vote(
+                &processed.content,
+                processed.user.uid,
+                &processed.user.name,
+                processed.timestamp,
+            );
+            self.pending_updates.extend(vote_updates);
+        }
 
         self.pending_danmaku.push(processed);
         detected
@@ -387,7 +357,7 @@ impl LiveData {
             &guard_level,
         );
 
-        let detected = self.detect_and_add_video_requests(
+        let (detected, vr_updates) = self.video_requests.detect_and_add(
             &processed.content,
             &processed.user.name,
             processed.user.uid,
@@ -395,6 +365,7 @@ impl LiveData {
             Some(price),
             processed.start_time,
         );
+        self.pending_updates.extend(vr_updates);
 
         self.pending_updates
             .push(DataUpdate::SuperChatAppend(processed));
@@ -531,120 +502,37 @@ impl LiveData {
         }
     }
 
-    // ==================== 点播请求 ====================
-
-    /// 从文本中检测 BV/AV号，创建点播请求
-    /// 返回需要异步获取视频信息的列表: (request_id, video_id, uid, sc_price)
-    fn detect_and_add_video_requests(
-        &mut self,
-        content: &str,
-        username: &str,
-        uid: u64,
-        source: VideoRequestSource,
-        sc_price: Option<u64>,
-        timestamp: i64,
-    ) -> Vec<(String, String, u64, Option<u64>)> {
-        let mut to_fetch = Vec::new();
-
-        for matched in VIDEO_ID_RE.find_iter(content) {
-            let video_id = matched.as_str().to_string();
-            let key = video_id.to_lowercase();
-
-            if self.video_request_ids.contains(&key) {
-                continue;
-            }
-            self.video_request_ids.insert(key);
-
-            let id = format!("vr_{}_{}", timestamp, uid);
-            let item = VideoRequestItem {
-                id: id.clone(),
-                video_id: video_id.clone(),
-                username: username.to_string(),
-                uid,
-                source: source.clone(),
-                sc_price,
-                timestamp: if timestamp < 1_000_000_000_000 {
-                    timestamp * 1000
-                } else {
-                    timestamp
-                },
-                watched: false,
-                video_info: None,
-                loading: true,
-                error: None,
-            };
-
-            self.video_requests.insert(0, item.clone());
-            self.pending_updates
-                .push(DataUpdate::VideoRequestAppend(item));
-            to_fetch.push((id, video_id, uid, sc_price));
-        }
-
-        if !to_fetch.is_empty() {
-            self.save_video_requests();
-        }
-        to_fetch
-    }
+    // ==================== 点播请求（代理到 Manager）====================
 
     /// 更新点播请求的视频信息
     pub fn update_video_request_info(&mut self, request_id: &str, info: Result<VideoInfo, String>) {
-        if let Some(item) = self.video_requests.iter_mut().find(|r| r.id == request_id) {
-            match info {
-                Ok(vi) => {
-                    item.video_info = Some(vi);
-                    item.loading = false;
-                    item.error = None;
-                }
-                Err(e) => {
-                    item.loading = false;
-                    item.error = Some(e);
-                }
-            }
-            self.pending_updates
-                .push(DataUpdate::VideoRequestUpdate(item.clone()));
-            self.save_video_requests();
+        if let Some(update) = self.video_requests.update_info(request_id, info) {
+            self.pending_updates.push(update);
         }
     }
 
     /// 标记点播为已看/未看
     pub fn set_video_watched(&mut self, request_id: &str, watched: bool) {
-        if let Some(item) = self.video_requests.iter_mut().find(|r| r.id == request_id) {
-            item.watched = watched;
-        }
-        self.pending_updates
-            .push(DataUpdate::VideoRequestSync(self.video_requests.clone()));
-        self.save_video_requests();
+        let update = self.video_requests.set_watched(request_id, watched);
+        self.pending_updates.push(update);
     }
 
     /// 删除点播请求
     pub fn remove_video_request(&mut self, request_id: &str) {
-        if let Some(item) = self.video_requests.iter().find(|r| r.id == request_id) {
-            self.video_request_ids.remove(&item.video_id.to_lowercase());
-        }
-        self.video_requests.retain(|r| r.id != request_id);
-        self.pending_updates
-            .push(DataUpdate::VideoRequestSync(self.video_requests.clone()));
-        self.save_video_requests();
+        let update = self.video_requests.remove(request_id);
+        self.pending_updates.push(update);
     }
 
     /// 清空已看的点播
     pub fn clear_watched_videos(&mut self) {
-        for item in self.video_requests.iter().filter(|r| r.watched) {
-            self.video_request_ids.remove(&item.video_id.to_lowercase());
-        }
-        self.video_requests.retain(|r| !r.watched);
-        self.pending_updates
-            .push(DataUpdate::VideoRequestSync(self.video_requests.clone()));
-        self.save_video_requests();
+        let update = self.video_requests.clear_watched();
+        self.pending_updates.push(update);
     }
 
     /// 清空所有点播
     pub fn clear_all_videos(&mut self) {
-        self.video_requests.clear();
-        self.video_request_ids.clear();
-        self.pending_updates
-            .push(DataUpdate::VideoRequestSync(self.video_requests.clone()));
-        self.save_video_requests();
+        let update = self.video_requests.clear_all();
+        self.pending_updates.push(update);
     }
 
     // ==================== 更新收集 ====================
@@ -678,53 +566,10 @@ impl LiveData {
             self.contributions_dirty = false;
         }
 
+        // 检查定时结束的投票
+        let expired = self.voting.check_expired_polls();
+        updates.extend(expired);
+
         updates
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_video_id_regex() {
-        // BV号 = BV + 恰好10位字母数字 = 12字符
-        // 嵌在中文中
-        assert!(VIDEO_ID_RE
-            .find_iter("点播BV1xx411c7mD谢谢")
-            .next()
-            .is_some());
-        assert!(VIDEO_ID_RE.find_iter("看看av12345吧").next().is_some());
-        // 独立出现
-        assert!(VIDEO_ID_RE.find_iter("BV1xx411c7mD").next().is_some());
-        assert!(VIDEO_ID_RE.find_iter("av999").next().is_some());
-        // 空格分隔
-        assert!(VIDEO_ID_RE
-            .find_iter("请看 BV1xx411c7mD 这个")
-            .next()
-            .is_some());
-
-        assert!(VIDEO_ID_RE.find_iter("abcBV1xx411c7mD").next().is_some());
-        assert!(VIDEO_ID_RE.find_iter("9BV1xx411c7mD").next().is_some());
-
-        assert!(VIDEO_ID_RE.find_iter("BV1xx411c7mDXYZ").next().is_some());
-        assert!(VIDEO_ID_RE.find_iter("av12345x").next().is_some());
-
-        let danmaku_list = vec![
-            "看看这个av123456",
-            "kkBV1xx411c7mD",
-            "BV1xx411c7mD这个！",
-            "！BV1xx411c7mD",
-        ];
-        for danmaku in danmaku_list {
-            assert!(VIDEO_ID_RE.find_iter(danmaku).next().is_some());
-        }
-
-        // find_iter 只提取 video ID 本身
-        let caps: Vec<String> = VIDEO_ID_RE
-            .find_iter("我想点播BV1xx411c7mD和av67890")
-            .map(|m| m.as_str().to_string())
-            .collect();
-        assert_eq!(caps, vec!["BV1xx411c7mD", "av67890"]);
     }
 }

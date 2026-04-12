@@ -9,6 +9,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useDanmakuStore } from '@/stores/danmaku'
 import { useSettingsStore } from '@/stores/settings'
 import { useVideoRequestStore } from '@/stores/video-request'
+import { useVotingStore } from '@/stores/voting'
 import type { DataUpdate, DataSnapshot, EventType } from '@/types'
 
 // ==================== 后端类型定义 ====================
@@ -220,6 +221,10 @@ function applySnapshot(snapshot: DataSnapshot, store: ReturnType<typeof useDanma
     const videoStore = useVideoRequestStore()
     videoStore.syncRequests(snapshot.video_requests)
   }
+  if (snapshot.voting_polls) {
+    const votingStore = useVotingStore()
+    votingStore.syncPolls(snapshot.voting_polls)
+  }
 
   console.log('[BliveClient] Applied snapshot')
 }
@@ -280,6 +285,18 @@ function processDataUpdate(update: DataUpdate, store: ReturnType<typeof useDanma
     case 'VideoRequestSync': {
       const videoStore = useVideoRequestStore()
       videoStore.syncRequests(update.data)
+      break
+    }
+
+    case 'VotingUpdate': {
+      const votingStore = useVotingStore()
+      votingStore.updatePoll(update.data)
+      break
+    }
+
+    case 'VotingSync': {
+      const votingStore = useVotingStore()
+      votingStore.syncPolls(update.data)
       break
     }
   }

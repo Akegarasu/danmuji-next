@@ -23,14 +23,16 @@ mod live_data;
 mod live_types;
 mod lock_state;
 mod video_info;
+mod video_request;
+mod voting;
 mod window_state;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use blive_service::BliveService;
-use config::{get_archive_db_path, get_video_request_kv_path, get_window_kv_path};
-use kv_store::{KVStore, VideoRequestStore};
+use config::{get_archive_db_path, get_video_request_kv_path, get_voting_kv_path, get_window_kv_path};
+use kv_store::{KVStore, VideoRequestStore, VotingStore};
 use lock_state::LockStateManager;
 use archive::ArchiveManager;
 use tauri::{
@@ -63,9 +65,10 @@ pub fn run() {
         ArchiveManager::new(get_archive_db_path()).expect("初始化存档数据库失败"),
     );
 
-    // 初始化弹幕服务（点播持久化存储内聚在 LiveData 中）
+    // 初始化弹幕服务（扩展持久化存储内聚在 LiveData 中）
     let video_request_store = VideoRequestStore::new(get_video_request_kv_path());
-    let blive_service = Arc::new(BliveService::new(video_request_store));
+    let voting_store = VotingStore::new(get_voting_kv_path());
+    let blive_service = Arc::new(BliveService::new(video_request_store, voting_store));
 
     // 初始化窗口锁定状态管理器，并从 KV 存储加载保存的状态
     let lock_manager = LockStateManager::new();
@@ -195,6 +198,11 @@ pub fn run() {
             commands::remove_video_request,
             commands::clear_watched_videos,
             commands::clear_all_videos,
+            // 投票
+            commands::create_poll,
+            commands::end_poll,
+            commands::delete_poll,
+            commands::get_poll_voters,
             // 版本和更新
             commands::get_app_version,
             commands::is_portable,

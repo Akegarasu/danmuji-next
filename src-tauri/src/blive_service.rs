@@ -20,10 +20,11 @@ use crate::blivedm::api::{
     get_contribution_rank, get_danmu_info, get_room_init, ContributionRankUser, RoomInfo,
 };
 use crate::blivedm::{BliveDmClient, Error as BliveError, Event};
-use crate::kv_store::VideoRequestStore;
+use crate::kv_store::{VideoRequestStore, VotingStore};
 use crate::live_data::{LiveData, WindowSubscription};
 use crate::live_types::*;
 use crate::video_info;
+use crate::voting::{Poll, VoteKeyType, Voter};
 
 // ==================== 服务状态 ====================
 
@@ -57,10 +58,10 @@ pub struct BliveService {
 }
 
 impl BliveService {
-    pub fn new(vr_store: VideoRequestStore) -> Self {
+    pub fn new(vr_store: VideoRequestStore, voting_store: VotingStore) -> Self {
         Self {
             state: RwLock::new(ServiceState::default()),
-            live_data: Arc::new(Mutex::new(LiveData::new(vr_store))),
+            live_data: Arc::new(Mutex::new(LiveData::new(vr_store, voting_store))),
             subscriptions: RwLock::new(HashMap::new()),
         }
     }
@@ -178,6 +179,46 @@ impl BliveService {
     pub async fn clear_all_videos(&self) {
         let mut data = self.live_data.lock().await;
         data.clear_all_videos();
+    }
+
+    // ==================== 投票管理 ====================
+
+    /// 创建投票
+    pub async fn create_poll(
+        &self,
+        title: String,
+        options: Vec<(String, String)>,
+        key_type: VoteKeyType,
+        duration_secs: Option<u64>,
+    ) -> Poll {
+        let mut data = self.live_data.lock().await;
+        let poll = data.voting.create_poll(title, options, key_type, duration_secs);
+        data.pending_updates.push(DataUpdate::VotingUpdate(poll.clone()));
+        poll
+    }
+
+    /// 结束投票
+    pub async fn end_poll(&self, poll_id: &str) -> Result<Poll, String> {
+        let mut data = self.live_data.lock().await;
+        let poll = data.voting.end_poll(poll_id).ok_or("投票不存在或已结束")?;
+        data.pending_updates.push(DataUpdate::VotingUpdate(poll.clone()));
+        Ok(poll)
+    }
+
+    /// 删除投票
+    pub async fn delete_poll(&self, poll_id: &str) {
+        let mut data = self.live_data.lock().await;
+        data.voting.delete_poll(poll_id);
+        let polls = data.voting.get_all_polls_for_snapshot();
+        data.pending_updates.push(DataUpdate::VotingSync(polls));
+    }
+
+    /// 获取投票选项的投票者列表
+    pub async fn get_poll_voters(&self, poll_id: &str, option_key: &str) -> Result<Vec<Voter>, String> {
+        let data = self.live_data.lock().await;
+        data.voting
+            .get_poll_voters(poll_id, option_key)
+            .ok_or_else(|| "投票或选项不存在".to_string())
     }
 
     pub async fn connect(

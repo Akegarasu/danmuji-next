@@ -89,3 +89,20 @@ impl std::ops::Deref for VideoRequestStore {
         &self.0
     }
 }
+
+/// 投票数据专用 KV 存储
+#[derive(Debug)]
+pub struct VotingStore(KVStore);
+
+impl VotingStore {
+    pub fn new(file_path: PathBuf) -> Self {
+        Self(KVStore::new(file_path))
+    }
+}
+
+impl std::ops::Deref for VotingStore {
+    type Target = KVStore;
+    fn deref(&self) -> &KVStore {
+        &self.0
+    }
+}

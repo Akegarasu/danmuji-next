@@ -8,6 +8,7 @@ use std::time::Duration;
 use crate::blivedm::api::ContributionRankUser;
 use crate::blivedm::{GuardLevel, Medal, User};
 use crate::video_info::VideoInfo;
+use crate::voting::Poll;
 
 // ==================== 常量 ====================
 
@@ -42,6 +43,8 @@ pub enum EventType {
     LiveStatus,
     /// 点播请求
     VideoRequest,
+    /// 投票
+    Voting,
 }
 
 // ==================== 连接状态 ====================
@@ -234,6 +237,10 @@ pub enum DataUpdate {
     VideoRequestAppend(VideoRequestItem),
     VideoRequestUpdate(VideoRequestItem),
     VideoRequestSync(Vec<VideoRequestItem>),
+    /// 投票更新（单个投票状态变化：创建/投票/结束）
+    VotingUpdate(Poll),
+    /// 投票全量同步（删除后）
+    VotingSync(Vec<Poll>),
 }
 
 impl DataUpdate {
@@ -252,6 +259,8 @@ impl DataUpdate {
             DataUpdate::VideoRequestAppend(_) => EventType::VideoRequest,
             DataUpdate::VideoRequestUpdate(_) => EventType::VideoRequest,
             DataUpdate::VideoRequestSync(_) => EventType::VideoRequest,
+            DataUpdate::VotingUpdate(_) => EventType::Voting,
+            DataUpdate::VotingSync(_) => EventType::Voting,
         }
     }
 }
@@ -293,6 +302,8 @@ pub struct DataSnapshot {
     pub stats: Option<LiveStats>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub video_requests: Option<Vec<VideoRequestItem>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub voting_polls: Option<Vec<Poll>>,
 }
 
 // ==================== 辅助函数 ====================

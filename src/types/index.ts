@@ -18,6 +18,7 @@ export type EventType =
   | 'stats'          // 统计数据
   | 'live_status'    // 直播状态
   | 'video_request'  // 点播请求
+  | 'voting'         // 投票
 
 /** 所有事件类型 */
 export const ALL_EVENT_TYPES: EventType[] = [
@@ -27,7 +28,8 @@ export const ALL_EVENT_TYPES: EventType[] = [
   'contribution_rank',
   'stats',
   'live_status',
-  'video_request'
+  'video_request',
+  'voting'
 ]
 
 // ==================== Tab 相关类型 ====================
@@ -286,6 +288,41 @@ export interface VideoRequestItem {
   error?: string
 }
 
+// ==================== 投票相关 ====================
+
+/** 投票选项标识类型 */
+export type VoteKeyType = 'letter' | 'number'
+
+/** 投票状态 */
+export type PollStatus = 'active' | 'ended'
+
+/** 投票人 */
+export interface Voter {
+  uid: number
+  username: string
+  timestamp: number
+}
+
+/** 投票选项 */
+export interface PollOption {
+  key: string
+  label: string
+  vote_count: number
+}
+
+/** 投票 */
+export interface Poll {
+  id: string
+  title: string
+  key_type: VoteKeyType
+  options: PollOption[]
+  status: PollStatus
+  voted_uids: Record<string, string>
+  total_votes: number
+  created_at: number
+  end_at: number | null
+}
+
 /** 数据更新类型（来自后端） */
 export type DataUpdate =
   | { type: 'DanmakuAppend'; data: ProcessedDanmaku[] }
@@ -300,6 +337,8 @@ export type DataUpdate =
   | { type: 'VideoRequestAppend'; data: VideoRequestItem }
   | { type: 'VideoRequestUpdate'; data: VideoRequestItem }
   | { type: 'VideoRequestSync'; data: VideoRequestItem[] }
+  | { type: 'VotingUpdate'; data: Poll }
+  | { type: 'VotingSync'; data: Poll[] }
 
 /** 数据快照（来自后端） */
 export interface DataSnapshot {
@@ -311,6 +350,7 @@ export interface DataSnapshot {
   contributions?: UserContribution[]
   stats?: LiveStats
   video_requests?: VideoRequestItem[]
+  voting_polls?: Poll[]
 }
 
 // ==================== 工具函数 ====================

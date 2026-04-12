@@ -19,6 +19,7 @@ use crate::blive_service::BliveService;
 use crate::live_types::{
     ConnectResult, ConnectionStatus, DataSnapshot, EventType, RoomInfoResponse, VideoRequestItem,
 };
+use crate::voting::{Poll, VoteKeyType, Voter};
 use crate::blivedm;
 use crate::config::get_config_path;
 use crate::crypto;
@@ -835,6 +836,54 @@ pub async fn clear_all_videos(
 ) -> Result<(), String> {
     service.clear_all_videos().await;
     Ok(())
+}
+
+// ==================== 投票操作 ====================
+
+/// 创建投票
+#[tauri::command]
+pub async fn create_poll(
+    service: State<'_, Arc<BliveService>>,
+    title: String,
+    options: Vec<(String, String)>,
+    key_type: String,
+    duration_secs: Option<u64>,
+) -> Result<Poll, String> {
+    let key_type = match key_type.as_str() {
+        "letter" => VoteKeyType::Letter,
+        "number" => VoteKeyType::Number,
+        _ => return Err("无效的选项类型".to_string()),
+    };
+    Ok(service.create_poll(title, options, key_type, duration_secs).await)
+}
+
+/// 结束投票
+#[tauri::command]
+pub async fn end_poll(
+    service: State<'_, Arc<BliveService>>,
+    poll_id: String,
+) -> Result<Poll, String> {
+    service.end_poll(&poll_id).await
+}
+
+/// 删除投票
+#[tauri::command]
+pub async fn delete_poll(
+    service: State<'_, Arc<BliveService>>,
+    poll_id: String,
+) -> Result<(), String> {
+    service.delete_poll(&poll_id).await;
+    Ok(())
+}
+
+/// 获取投票选项的投票者列表
+#[tauri::command]
+pub async fn get_poll_voters(
+    service: State<'_, Arc<BliveService>>,
+    poll_id: String,
+    option_key: String,
+) -> Result<Vec<Voter>, String> {
+    service.get_poll_voters(&poll_id, &option_key).await
 }
 
 // ==================== 版本和更新 ====================

@@ -3,11 +3,12 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import TitleBar from '@/components/common/TitleBar.vue'
 import VideoRequestTab from '@/components/extension/VideoRequestTab.vue'
+import VotingTab from '@/components/extension/VotingTab.vue'
 import { initWindowManager, cleanupWindowManager } from '@/services/window-manager'
 import { initBliveClient, cleanupBliveClient } from '@/services/blive-client'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 
-type ExtensionTabType = 'video-request'
+type ExtensionTabType = 'video-request' | 'voting'
 
 const appWindow = getCurrentWindow()
 const windowLabel = appWindow.label
@@ -19,18 +20,20 @@ const activeTab = ref<ExtensionTabType>('video-request')
 /** 扩展 Tab 配置 */
 const tabs: { type: ExtensionTabType; label: string }[] = [
   { type: 'video-request', label: '点播' },
+  { type: 'voting', label: '投票' },
 ]
 
 const currentComponent = computed(() => {
   switch (activeTab.value) {
     case 'video-request': return VideoRequestTab
+    case 'voting': return VotingTab
     default: return VideoRequestTab
   }
 })
 
 onMounted(async () => {
   await initWindowManager(windowLabel)
-  await initBliveClient(['video_request'])
+  await initBliveClient(['video_request', 'voting'])
   unlistenFocus = await appWindow.onFocusChanged(({ payload: focused }) => {
     isWindowFocused.value = focused
   })
