@@ -51,241 +51,178 @@ const openVideo = async (bvid: string) => {
 <template>
   <div class="video-request-tab">
     <!-- 工具栏 -->
-    <div class="toolbar">
+    <div class="ext-toolbar">
       <span class="count">
         <span class="label">待看</span>
-        <span class="badge">{{ videoStore.unwatchedCount }}</span>
+        <span class="ext-badge ext-badge--primary">{{ videoStore.unwatchedCount }}</span>
       </span>
-      <div class="actions">
-        <button class="tool-btn" @click="videoStore.clearWatched" title="清除已看">
+      <div class="toolbar-actions">
+        <button class="ext-btn" @click="videoStore.clearWatched" title="清除已看">
           清除已看
         </button>
-        <button class="tool-btn danger" @click="videoStore.clearAll" title="清空全部">
+        <button class="ext-btn ext-btn--danger" @click="videoStore.clearAll" title="清空全部">
           清空
         </button>
       </div>
     </div>
 
     <!-- 列表 -->
-    <div class="list-container">
-      <div v-if="unwatchedList.length === 0 && watchedList.length === 0" class="empty-state">
-        <div class="empty-icon">🎬</div>
-        <div class="empty-text">暂无点播请求</div>
-        <div class="empty-hint">观众在弹幕或 SC 中发送 BV/AV号 时会自动捕获</div>
+    <div class="ext-list">
+      <div v-if="unwatchedList.length === 0 && watchedList.length === 0" class="ext-empty">
+        <div class="ext-empty__icon">🎬</div>
+        <div class="ext-empty__title">暂无点播请求</div>
+        <div class="ext-empty__hint">观众在弹幕或 SC 中发送 BV/AV号 时会自动捕获</div>
       </div>
 
       <!-- 未看列表 -->
-      <div v-for="item in unwatchedList" :key="item.id" class="video-card animate-fade-in">
-        <div class="card-content">
-          <!-- 封面 -->
-          <div class="cover-wrapper" @click="item.video_info && openVideo(item.video_info.bvid)">
-            <template v-if="item.loading">
-              <div class="cover-placeholder loading">
-                <span class="spinner">⏳</span>
-              </div>
-            </template>
-            <template v-else-if="item.error">
-              <div class="cover-placeholder error">
-                <span>❌</span>
-              </div>
-            </template>
-            <template v-else-if="item.video_info">
-              <img
-                :src="item.video_info.cover"
-                class="cover"
-                referrerpolicy="no-referrer"
-                crossorigin="anonymous"
-              />
-              <span class="duration">{{ formatDuration(item.video_info.duration) }}</span>
-            </template>
-          </div>
+      <TransitionGroup name="ext-list">
+        <div v-for="item in unwatchedList" :key="item.id" class="video-card">
+          <div class="card-content">
+            <!-- 封面 -->
+            <div class="cover-wrapper" @click="item.video_info && openVideo(item.video_info.bvid)">
+              <template v-if="item.loading">
+                <div class="cover-placeholder loading">
+                  <span class="spinner"></span>
+                </div>
+              </template>
+              <template v-else-if="item.error">
+                <div class="cover-placeholder error">
+                  <span>✕</span>
+                </div>
+              </template>
+              <template v-else-if="item.video_info">
+                <img
+                  :src="item.video_info.cover"
+                  class="cover"
+                  referrerpolicy="no-referrer"
+                  crossorigin="anonymous"
+                />
+                <span class="duration">{{ formatDuration(item.video_info.duration) }}</span>
+              </template>
+            </div>
 
-          <!-- 信息 -->
-          <div class="info">
-            <div class="video-title" :title="item.video_info?.title || item.video_id"
-              @click="item.video_info && openVideo(item.video_info.bvid)">
-              {{ item.video_info?.title || item.video_id }}
+            <!-- 信息 -->
+            <div class="info">
+              <div class="video-title" :title="item.video_info?.title || item.video_id"
+                @click="item.video_info && openVideo(item.video_info.bvid)">
+                {{ item.video_info?.title || item.video_id }}
+              </div>
+              <div class="meta">
+                <span v-if="item.video_info" class="views">▶ {{ formatView(item.video_info.view) }}</span>
+                <span v-if="item.video_info" class="owner">{{ item.video_info.owner_name }}</span>
+              </div>
+              <div class="requester">
+                <span class="ext-badge" :class="item.source === 'superchat' ? 'ext-badge--pink' : 'ext-badge--blue'">
+                  {{ item.source === 'superchat' ? 'SC' : '弹幕' }}
+                </span>
+                <span v-if="item.source === 'superchat' && item.sc_price" class="sc-price">
+                  {{ formatScPrice(item.sc_price) }}
+                </span>
+                <span class="username">{{ item.username }}</span>
+                <span class="time">{{ formatTime(item.timestamp) }}</span>
+              </div>
             </div>
-            <div class="meta">
-              <span v-if="item.video_info" class="views">▶ {{ formatView(item.video_info.view) }}</span>
-              <span v-if="item.video_info" class="owner">{{ item.video_info.owner_name }}</span>
-            </div>
-            <div class="requester">
-              <span class="source-badge" :class="item.source">
-                {{ item.source === 'superchat' ? 'SC' : '弹幕' }}
-              </span>
-              <span v-if="item.source === 'superchat' && item.sc_price" class="sc-price">
-                {{ formatScPrice(item.sc_price) }}
-              </span>
-              <span class="username">{{ item.username }}</span>
-              <span class="time">{{ formatTime(item.timestamp) }}</span>
-            </div>
-          </div>
 
-          <!-- 操作 -->
-          <div class="card-actions">
-            <button class="action-btn watched-btn" @click="videoStore.markWatched(item.id)" title="标记已看">
-              ✓
-            </button>
-            <button class="action-btn remove-btn" @click="videoStore.removeRequest(item.id)" title="删除">
-              ✕
-            </button>
+            <!-- 操作 -->
+            <div class="card-actions">
+              <button class="ext-icon-btn ext-icon-btn--success" @click="videoStore.markWatched(item.id)" title="标记已看">
+                ✓
+              </button>
+              <button class="ext-icon-btn ext-icon-btn--danger" @click="videoStore.removeRequest(item.id)" title="删除">
+                ✕
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      </TransitionGroup>
 
       <!-- 已看分隔线 -->
-      <div v-if="watchedList.length > 0" class="watched-divider">
+      <div v-if="watchedList.length > 0" class="ext-divider">
         <span>已看 ({{ watchedList.length }})</span>
       </div>
 
       <!-- 已看列表 -->
-      <div v-for="item in watchedList" :key="item.id" class="video-card watched">
-        <div class="card-content">
-          <div class="cover-wrapper" @click="item.video_info && openVideo(item.video_info.bvid)">
-            <template v-if="item.video_info">
-              <img
-                :src="item.video_info.cover"
-                class="cover"
-                referrerpolicy="no-referrer"
-                crossorigin="anonymous"
-              />
-              <span class="duration">{{ formatDuration(item.video_info.duration) }}</span>
-            </template>
-            <template v-else>
-              <div class="cover-placeholder">
-                <span>🎬</span>
+      <TransitionGroup name="ext-list">
+        <div v-for="item in watchedList" :key="item.id" class="video-card watched">
+          <div class="card-content">
+            <div class="cover-wrapper" @click="item.video_info && openVideo(item.video_info.bvid)">
+              <template v-if="item.video_info">
+                <img
+                  :src="item.video_info.cover"
+                  class="cover"
+                  referrerpolicy="no-referrer"
+                  crossorigin="anonymous"
+                />
+                <span class="duration">{{ formatDuration(item.video_info.duration) }}</span>
+              </template>
+              <template v-else>
+                <div class="cover-placeholder">
+                  <span>🎬</span>
+                </div>
+              </template>
+            </div>
+
+            <div class="info">
+              <div class="video-title" :title="item.video_info?.title || item.video_id"
+                @click="item.video_info && openVideo(item.video_info.bvid)">
+                {{ item.video_info?.title || item.video_id }}
               </div>
-            </template>
-          </div>
-
-          <div class="info">
-            <div class="video-title" :title="item.video_info?.title || item.video_id"
-              @click="item.video_info && openVideo(item.video_info.bvid)">
-              {{ item.video_info?.title || item.video_id }}
+              <div class="requester">
+                <span class="ext-badge" :class="item.source === 'superchat' ? 'ext-badge--pink' : 'ext-badge--blue'">
+                  {{ item.source === 'superchat' ? 'SC' : '弹幕' }}
+                </span>
+                <span class="username">{{ item.username }}</span>
+              </div>
             </div>
-            <div class="requester">
-              <span class="source-badge" :class="item.source">
-                {{ item.source === 'superchat' ? 'SC' : '弹幕' }}
-              </span>
-              <span class="username">{{ item.username }}</span>
-            </div>
-          </div>
 
-          <div class="card-actions">
-            <button class="action-btn undo-btn" @click="videoStore.markWatched(item.id, false)" title="撤销">
-              ↩
-            </button>
-            <button class="action-btn remove-btn" @click="videoStore.removeRequest(item.id)" title="删除">
-              ✕
-            </button>
+            <div class="card-actions">
+              <button class="ext-icon-btn ext-icon-btn--primary" @click="videoStore.markWatched(item.id, false)" title="撤销">
+                ↩
+              </button>
+              <button class="ext-icon-btn ext-icon-btn--danger" @click="videoStore.removeRequest(item.id)" title="删除">
+                ✕
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      </TransitionGroup>
     </div>
   </div>
 </template>
 
 <style scoped lang="scss">
+@use '@/styles/extension-shared.scss';
+
 .video-request-tab {
   display: flex;
   flex-direction: column;
   height: 100%;
 }
 
-.toolbar {
+.count {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border-color);
-  flex-shrink: 0;
-
-  .count {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: var(--font-size-sm);
-    color: var(--text-secondary);
-
-    .badge {
-      background: var(--accent-primary);
-      color: white;
-      padding: 0 6px;
-      border-radius: 10px;
-      font-size: var(--font-size-xs);
-      min-width: 18px;
-      text-align: center;
-    }
-  }
-
-  .actions {
-    display: flex;
-    gap: 4px;
-  }
-
-  .tool-btn {
-    padding: 3px 8px;
-    border: none;
-    border-radius: var(--border-radius-sm);
-    background: var(--bg-hover);
-    color: var(--text-secondary);
-    font-size: var(--font-size-xs);
-    cursor: pointer;
-    transition: background 0.15s, color 0.15s;
-
-    &:hover {
-      background: var(--bg-active);
-      color: var(--text-primary);
-    }
-
-    &.danger:hover {
-      background: rgba(220, 60, 60, 0.2);
-      color: #dc3c3c;
-    }
-  }
+  gap: 6px;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
 }
 
-.list-container {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px;
-}
-
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 200px;
-  color: var(--text-muted);
-
-  .empty-icon {
-    font-size: 32px;
-    margin-bottom: 8px;
-  }
-
-  .empty-text {
-    font-size: var(--content-font-size-base);
-    margin-bottom: 4px;
-  }
-
-  .empty-hint {
-    font-size: var(--content-font-size-xs);
-    text-align: center;
-    padding: 0 20px;
-  }
-}
+// ==================== 视频卡片 ====================
 
 .video-card {
   margin-bottom: 8px;
   background: var(--bg-card);
   border-radius: var(--border-radius);
   overflow: hidden;
-  transition: opacity 0.2s;
+  transition: opacity 0.25s, transform 0.25s, box-shadow 0.25s;
+  border: 1px solid transparent;
+
+  &:hover {
+    border-color: rgba(92, 158, 255, 0.1);
+  }
 
   &.watched {
-    opacity: 0.5;
+    opacity: 0.45;
 
     &:hover {
       opacity: 0.7;
@@ -299,6 +236,8 @@ const openVideo = async (bvid: string) => {
   }
 }
 
+// ==================== 封面 ====================
+
 .cover-wrapper {
   position: relative;
   width: 120px;
@@ -308,22 +247,34 @@ const openVideo = async (bvid: string) => {
   overflow: hidden;
   cursor: pointer;
   background: var(--bg-hover);
+  transition: transform 0.2s;
+
+  &:hover {
+    transform: scale(1.03);
+  }
 
   .cover {
     width: 100%;
     height: 100%;
     object-fit: cover;
+    transition: filter 0.2s;
+  }
+
+  &:hover .cover {
+    filter: brightness(1.1);
   }
 
   .duration {
     position: absolute;
-    bottom: 2px;
-    right: 2px;
-    padding: 1px 4px;
-    background: rgba(0, 0, 0, 0.7);
+    bottom: 3px;
+    right: 3px;
+    padding: 1px 5px;
+    background: rgba(0, 0, 0, 0.75);
     color: white;
     font-size: 10px;
-    border-radius: 2px;
+    border-radius: 3px;
+    font-variant-numeric: tabular-nums;
+    backdrop-filter: blur(4px);
   }
 }
 
@@ -334,9 +285,20 @@ const openVideo = async (bvid: string) => {
   align-items: center;
   justify-content: center;
   font-size: 20px;
+  color: var(--text-muted);
 
   &.loading .spinner {
-    animation: spin 1s linear infinite;
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--border-color);
+    border-top-color: var(--accent-primary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  &.error {
+    color: #dc3c3c;
+    font-size: 14px;
   }
 }
 
@@ -344,6 +306,8 @@ const openVideo = async (bvid: string) => {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+
+// ==================== 信息 ====================
 
 .info {
   flex: 1;
@@ -363,6 +327,7 @@ const openVideo = async (bvid: string) => {
     -webkit-line-clamp: 2;
     line-clamp: 2;
     -webkit-box-orient: vertical;
+    transition: color 0.15s;
 
     &:hover {
       color: var(--accent-primary);
@@ -383,22 +348,6 @@ const openVideo = async (bvid: string) => {
     font-size: var(--content-font-size-xs);
     color: var(--text-secondary);
 
-    .source-badge {
-      padding: 0 4px;
-      border-radius: 2px;
-      font-size: 10px;
-
-      &.danmaku {
-        background: rgba(92, 158, 255, 0.2);
-        color: var(--accent-primary);
-      }
-
-      &.superchat {
-        background: rgba(255, 126, 179, 0.2);
-        color: var(--accent-secondary);
-      }
-    }
-
     .sc-price {
       color: var(--accent-secondary);
       font-weight: 500;
@@ -407,68 +356,17 @@ const openVideo = async (bvid: string) => {
     .time {
       margin-left: auto;
       color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
     }
   }
 }
+
+// ==================== 操作按钮 ====================
 
 .card-actions {
   display: flex;
   flex-direction: column;
   gap: 4px;
   flex-shrink: 0;
-
-  .action-btn {
-    width: 24px;
-    height: 24px;
-    border: none;
-    border-radius: var(--border-radius-sm);
-    background: transparent;
-    color: var(--text-muted);
-    cursor: pointer;
-    font-size: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: background 0.15s, color 0.15s;
-
-    &:hover {
-      background: var(--bg-hover);
-    }
-
-    &.watched-btn:hover {
-      background: rgba(34, 197, 94, 0.2);
-      color: #22c55e;
-    }
-
-    &.remove-btn:hover {
-      background: rgba(220, 60, 60, 0.2);
-      color: #dc3c3c;
-    }
-
-    &.undo-btn:hover {
-      background: rgba(92, 158, 255, 0.2);
-      color: var(--accent-primary);
-    }
-  }
-}
-
-.watched-divider {
-  display: flex;
-  align-items: center;
-  margin: 12px 0 8px;
-  font-size: var(--content-font-size-xs);
-  color: var(--text-muted);
-
-  &::before,
-  &::after {
-    content: '';
-    flex: 1;
-    height: 1px;
-    background: var(--border-color);
-  }
-
-  span {
-    padding: 0 8px;
-  }
 }
 </style>

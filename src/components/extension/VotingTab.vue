@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useVotingStore } from '@/stores/voting'
+import ExtSelect from '@/components/common/ExtSelect.vue'
+import type { SelectOption } from '@/components/common/ExtSelect.vue'
 import type { Poll, PollOption, Voter, VoteKeyType } from '@/types'
 
 const votingStore = useVotingStore()
@@ -16,6 +18,21 @@ const formOptions = ref<{ key: string; label: string }[]>([
   { key: 'A', label: '' },
   { key: 'B', label: '' },
 ])
+
+const keyTypeOptions: SelectOption[] = [
+  { value: 'letter', label: '字母 (A/B/C)' },
+  { value: 'number', label: '数字 (1/2/3)' },
+]
+
+const durationOptions: SelectOption[] = [
+  { value: 'none', label: '不限时' },
+  { value: '1m', label: '1 分钟' },
+  { value: '3m', label: '3 分钟' },
+  { value: '5m', label: '5 分钟' },
+  { value: '10m', label: '10 分钟' },
+  { value: '30m', label: '30 分钟' },
+  { value: 'custom', label: '自定义' },
+]
 
 /** 获取下一个选项键 */
 const getNextKey = (index: number): string => {
@@ -161,14 +178,18 @@ const formatTime = (ts: number): string => {
 <template>
   <div class="voting-tab">
     <!-- 工具栏 -->
-    <div class="toolbar">
-      <button class="tool-btn primary" @click="showCreateForm = !showCreateForm">
-        {{ showCreateForm ? '取消' : '创建投票' }}
+    <div class="ext-toolbar">
+      <button
+        class="ext-btn"
+        :class="showCreateForm ? 'ext-btn--danger' : 'ext-btn--primary'"
+        @click="showCreateForm = !showCreateForm"
+      >
+        {{ showCreateForm ? '取消' : '✦ 创建投票' }}
       </button>
       <div class="toolbar-right">
         <button
-          class="tool-btn"
-          :class="{ active: sortByVotes }"
+          class="ext-btn"
+          :class="{ 'ext-btn--active': sortByVotes }"
           @click="sortByVotes = !sortByVotes"
         >
           按票数排序
@@ -176,290 +197,228 @@ const formatTime = (ts: number): string => {
       </div>
     </div>
 
-    <div class="list-container">
+    <div class="ext-list">
       <!-- 创建表单 -->
-      <div v-if="showCreateForm" class="create-form">
-        <div class="form-group">
-          <label>标题</label>
-          <input
-            v-model="formTitle"
-            class="form-input"
-            placeholder="输入投票标题"
-            @keydown.enter="submitCreate"
-          />
-        </div>
-
-        <div class="form-group">
-          <label>选项</label>
-          <div class="options-list">
-            <div v-for="(opt, index) in formOptions" :key="index" class="option-row">
-              <span class="option-key">{{ opt.key }}</span>
-              <input
-                v-model="opt.label"
-                class="form-input option-input"
-                :placeholder="`选项 ${opt.key} 描述`"
-              />
-              <button
-                v-if="formOptions.length > 2"
-                class="option-remove"
-                @click="removeOption(index)"
-              >
-                x
-              </button>
-            </div>
-            <button class="add-option-btn" @click="addOption">+ 添加选项</button>
-          </div>
-        </div>
-
-        <div class="form-row">
-          <div class="form-group">
-            <label>类型</label>
-            <select v-model="formKeyType" class="form-select" @change="onKeyTypeChange">
-              <option value="letter">字母 (A/B/C)</option>
-              <option value="number">数字 (1/2/3)</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>时长</label>
-            <select v-model="formDuration" class="form-select">
-              <option value="none">不限时</option>
-              <option value="1m">1 分钟</option>
-              <option value="3m">3 分钟</option>
-              <option value="5m">5 分钟</option>
-              <option value="10m">10 分钟</option>
-              <option value="30m">30 分钟</option>
-              <option value="custom">自定义</option>
-            </select>
-          </div>
-          <div v-if="formDuration === 'custom'" class="form-group">
-            <label>分钟</label>
+      <Transition name="ext-expand">
+        <div v-if="showCreateForm" class="create-form">
+          <div class="ext-form-group">
+            <label>标题</label>
             <input
-              v-model.number="formCustomMinutes"
-              type="number"
-              class="form-input"
-              min="1"
-              max="1440"
-              style="width: 70px"
+              v-model="formTitle"
+              class="ext-input"
+              placeholder="输入投票标题"
+              @keydown.enter="submitCreate"
             />
           </div>
-        </div>
 
-        <button class="submit-btn" @click="submitCreate">开始投票</button>
-      </div>
+          <div class="ext-form-group">
+            <label>选项</label>
+            <div class="options-list">
+              <TransitionGroup name="ext-list">
+                <div v-for="(opt, index) in formOptions" :key="opt.key + index" class="option-row">
+                  <span class="option-key">{{ opt.key }}</span>
+                  <input
+                    v-model="opt.label"
+                    class="ext-input option-input"
+                    :placeholder="`选项 ${opt.key} 描述`"
+                  />
+                  <button
+                    v-if="formOptions.length > 2"
+                    class="ext-icon-btn ext-icon-btn--danger"
+                    @click="removeOption(index)"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </TransitionGroup>
+              <button class="add-option-btn" @click="addOption">+ 添加选项</button>
+            </div>
+          </div>
+
+          <div class="ext-form-row">
+            <div class="ext-form-group">
+              <label>类型</label>
+              <ExtSelect
+                :model-value="formKeyType"
+                :options="keyTypeOptions"
+                @update:model-value="v => { formKeyType = v as VoteKeyType; onKeyTypeChange() }"
+              />
+            </div>
+            <div class="ext-form-group">
+              <label>时长</label>
+              <ExtSelect
+                v-model="formDuration"
+                :options="durationOptions"
+              />
+            </div>
+            <div v-if="formDuration === 'custom'" class="ext-form-group">
+              <label>分钟</label>
+              <input
+                v-model.number="formCustomMinutes"
+                type="number"
+                class="ext-input ext-number-input"
+                min="1"
+                max="1440"
+              />
+            </div>
+          </div>
+
+          <button class="ext-btn ext-btn--submit" @click="submitCreate">开始投票</button>
+        </div>
+      </Transition>
 
       <!-- 空状态 -->
       <div
         v-if="votingStore.polls.length === 0 && !showCreateForm"
-        class="empty-state"
+        class="ext-empty"
       >
-        <div class="empty-text">暂无投票</div>
-        <div class="empty-hint">点击「创建投票」发起弹幕投票</div>
+        <div class="ext-empty__icon">📊</div>
+        <div class="ext-empty__title">暂无投票</div>
+        <div class="ext-empty__hint">点击「创建投票」发起弹幕投票</div>
       </div>
 
       <!-- 进行中的投票 -->
       <template v-if="votingStore.activePolls.length > 0">
-        <div class="section-divider">
+        <div class="ext-divider">
           <span>进行中 ({{ votingStore.activePolls.length }})</span>
         </div>
-        <div v-for="poll in votingStore.activePolls" :key="poll.id" class="poll-card active">
-          <div class="poll-header">
-            <div class="poll-title">{{ poll.title }}</div>
-            <div class="poll-actions">
-              <button class="action-btn end-btn" @click="votingStore.endPoll(poll.id)">结束</button>
-              <button class="action-btn delete-btn" @click="votingStore.deletePoll(poll.id)">删除</button>
-            </div>
-          </div>
-          <div class="poll-meta">
-            <span v-if="poll.end_at" class="countdown">
-              剩余 {{ formatCountdown(poll.end_at) }}
-            </span>
-            <span v-else class="no-limit">不限时</span>
-            <span class="total-votes">总票数: {{ poll.total_votes }}</span>
-          </div>
-          <div class="poll-options">
-            <div
-              v-for="option in sortedOptions(poll.options)"
-              :key="option.key"
-              class="option-bar"
-              @click="showVoters(poll.id, option.key)"
-            >
-              <div class="option-info">
-                <span class="option-key-badge">{{ option.key }}</span>
-                <span class="option-label">{{ option.label }}</span>
-              </div>
-              <div class="bar-container">
-                <div
-                  class="bar-fill"
-                  :style="{ width: `${(option.vote_count / getMaxVoteCount(poll)) * 100}%` }"
-                />
-              </div>
-              <div class="option-count">
-                {{ option.vote_count }}
-                <span class="option-percent">({{ getPercentage(option.vote_count, poll.total_votes) }}%)</span>
+        <TransitionGroup name="ext-list">
+          <div v-for="poll in votingStore.activePolls" :key="poll.id" class="ext-card poll-card active">
+            <div class="poll-header">
+              <div class="poll-title">{{ poll.title }}</div>
+              <div class="poll-actions">
+                <button class="ext-btn ext-btn--warning" @click="votingStore.endPoll(poll.id)">结束</button>
+                <button class="ext-btn ext-btn--danger" @click="votingStore.deletePoll(poll.id)">删除</button>
               </div>
             </div>
-          </div>
-          <!-- 投票者列表 -->
-          <div
-            v-if="viewingVoters?.pollId === poll.id"
-            class="voters-panel"
-          >
-            <div class="voters-header">
-              选项「{{ viewingVoters.optionKey }}」的投票者
-              <button class="voters-close" @click="viewingVoters = null">x</button>
+            <div class="poll-meta">
+              <span v-if="poll.end_at" class="countdown">
+                ⏱ {{ formatCountdown(poll.end_at) }}
+              </span>
+              <span v-else class="no-limit">∞ 不限时</span>
+              <span class="total-votes">{{ poll.total_votes }} 票</span>
             </div>
-            <div v-if="loadingVoters" class="voters-loading">加载中...</div>
-            <div v-else-if="viewingVoters.voters.length === 0" class="voters-empty">暂无投票者</div>
-            <div v-else class="voters-list">
-              <div v-for="voter in viewingVoters.voters" :key="voter.uid" class="voter-item">
-                <span class="voter-name">{{ voter.username }}</span>
-                <span class="voter-time">{{ formatTime(voter.timestamp) }}</span>
+            <div class="poll-options">
+              <div
+                v-for="option in sortedOptions(poll.options)"
+                :key="option.key"
+                class="option-bar"
+                @click="showVoters(poll.id, option.key)"
+              >
+                <div class="option-info">
+                  <span class="option-key-badge">{{ option.key }}</span>
+                  <span class="option-label">{{ option.label }}</span>
+                </div>
+                <div class="bar-container">
+                  <div
+                    class="bar-fill"
+                    :style="{ width: `${(option.vote_count / getMaxVoteCount(poll)) * 100}%` }"
+                  />
+                </div>
+                <div class="option-count">
+                  {{ option.vote_count }}
+                  <span class="option-percent">({{ getPercentage(option.vote_count, poll.total_votes) }}%)</span>
+                </div>
               </div>
             </div>
+            <!-- 投票者列表 -->
+            <Transition name="ext-expand">
+              <div
+                v-if="viewingVoters?.pollId === poll.id"
+                class="voters-panel"
+              >
+                <div class="voters-header">
+                  选项「{{ viewingVoters.optionKey }}」的投票者
+                  <button class="ext-icon-btn ext-icon-btn--close" @click="viewingVoters = null">✕</button>
+                </div>
+                <div v-if="loadingVoters" class="voters-loading">加载中...</div>
+                <div v-else-if="viewingVoters.voters.length === 0" class="voters-empty">暂无投票者</div>
+                <div v-else class="voters-list">
+                  <div v-for="voter in viewingVoters.voters" :key="voter.uid" class="voter-item ext-animate-fade">
+                    <span class="voter-name">{{ voter.username }}</span>
+                    <span class="voter-time">{{ formatTime(voter.timestamp) }}</span>
+                  </div>
+                </div>
+              </div>
+            </Transition>
           </div>
-        </div>
+        </TransitionGroup>
       </template>
 
       <!-- 已结束的投票 -->
       <template v-if="votingStore.endedPolls.length > 0">
-        <div class="section-divider">
+        <div class="ext-divider">
           <span>已结束 ({{ votingStore.endedPolls.length }})</span>
         </div>
-        <div v-for="poll in votingStore.endedPolls" :key="poll.id" class="poll-card ended">
-          <div class="poll-header">
-            <div class="poll-title">{{ poll.title }}</div>
-            <div class="poll-actions">
-              <button class="action-btn delete-btn" @click="votingStore.deletePoll(poll.id)">删除</button>
-            </div>
-          </div>
-          <div class="poll-meta">
-            <span class="ended-label">已结束</span>
-            <span class="total-votes">总票数: {{ poll.total_votes }}</span>
-          </div>
-          <div class="poll-options">
-            <div
-              v-for="option in sortedOptions(poll.options)"
-              :key="option.key"
-              class="option-bar"
-              @click="showVoters(poll.id, option.key)"
-            >
-              <div class="option-info">
-                <span class="option-key-badge">{{ option.key }}</span>
-                <span class="option-label">{{ option.label }}</span>
-              </div>
-              <div class="bar-container">
-                <div
-                  class="bar-fill ended"
-                  :style="{ width: `${(option.vote_count / getMaxVoteCount(poll)) * 100}%` }"
-                />
-              </div>
-              <div class="option-count">
-                {{ option.vote_count }}
-                <span class="option-percent">({{ getPercentage(option.vote_count, poll.total_votes) }}%)</span>
+        <TransitionGroup name="ext-list">
+          <div v-for="poll in votingStore.endedPolls" :key="poll.id" class="ext-card ext-card--dimmed poll-card ended">
+            <div class="poll-header">
+              <div class="poll-title">{{ poll.title }}</div>
+              <div class="poll-actions">
+                <button class="ext-btn ext-btn--danger" @click="votingStore.deletePoll(poll.id)">删除</button>
               </div>
             </div>
-          </div>
-          <!-- 投票者列表 -->
-          <div
-            v-if="viewingVoters?.pollId === poll.id"
-            class="voters-panel"
-          >
-            <div class="voters-header">
-              选项「{{ viewingVoters.optionKey }}」的投票者
-              <button class="voters-close" @click="viewingVoters = null">x</button>
+            <div class="poll-meta">
+              <span class="ended-label">已结束</span>
+              <span class="total-votes">{{ poll.total_votes }} 票</span>
             </div>
-            <div v-if="loadingVoters" class="voters-loading">加载中...</div>
-            <div v-else-if="viewingVoters.voters.length === 0" class="voters-empty">暂无投票者</div>
-            <div v-else class="voters-list">
-              <div v-for="voter in viewingVoters.voters" :key="voter.uid" class="voter-item">
-                <span class="voter-name">{{ voter.username }}</span>
-                <span class="voter-time">{{ formatTime(voter.timestamp) }}</span>
+            <div class="poll-options">
+              <div
+                v-for="option in sortedOptions(poll.options)"
+                :key="option.key"
+                class="option-bar"
+                @click="showVoters(poll.id, option.key)"
+              >
+                <div class="option-info">
+                  <span class="option-key-badge ended">{{ option.key }}</span>
+                  <span class="option-label">{{ option.label }}</span>
+                </div>
+                <div class="bar-container">
+                  <div
+                    class="bar-fill ended"
+                    :style="{ width: `${(option.vote_count / getMaxVoteCount(poll)) * 100}%` }"
+                  />
+                </div>
+                <div class="option-count">
+                  {{ option.vote_count }}
+                  <span class="option-percent">({{ getPercentage(option.vote_count, poll.total_votes) }}%)</span>
+                </div>
               </div>
             </div>
+            <!-- 投票者列表 -->
+            <Transition name="ext-expand">
+              <div
+                v-if="viewingVoters?.pollId === poll.id"
+                class="voters-panel"
+              >
+                <div class="voters-header">
+                  选项「{{ viewingVoters.optionKey }}」的投票者
+                  <button class="ext-icon-btn ext-icon-btn--close" @click="viewingVoters = null">✕</button>
+                </div>
+                <div v-if="loadingVoters" class="voters-loading">加载中...</div>
+                <div v-else-if="viewingVoters.voters.length === 0" class="voters-empty">暂无投票者</div>
+                <div v-else class="voters-list">
+                  <div v-for="voter in viewingVoters.voters" :key="voter.uid" class="voter-item ext-animate-fade">
+                    <span class="voter-name">{{ voter.username }}</span>
+                    <span class="voter-time">{{ formatTime(voter.timestamp) }}</span>
+                  </div>
+                </div>
+              </div>
+            </Transition>
           </div>
-        </div>
+        </TransitionGroup>
       </template>
     </div>
   </div>
 </template>
 
 <style scoped lang="scss">
+@use '@/styles/extension-shared.scss';
+
 .voting-tab {
   display: flex;
   flex-direction: column;
   height: 100%;
-}
-
-// ==================== 工具栏 ====================
-
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border-color);
-  flex-shrink: 0;
-
-  .toolbar-right {
-    display: flex;
-    gap: 4px;
-  }
-}
-
-.tool-btn {
-  padding: 3px 10px;
-  border: none;
-  border-radius: var(--border-radius-sm);
-  background: var(--bg-hover);
-  color: var(--text-secondary);
-  font-size: var(--font-size-xs);
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-
-  &:hover {
-    background: var(--bg-active);
-    color: var(--text-primary);
-  }
-
-  &.primary {
-    background: var(--accent-primary);
-    color: white;
-
-    &:hover {
-      filter: brightness(1.1);
-    }
-  }
-
-  &.active {
-    background: rgba(92, 158, 255, 0.2);
-    color: var(--accent-primary);
-  }
-}
-
-// ==================== 列表容器 ====================
-
-.list-container {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px;
-}
-
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 200px;
-  color: var(--text-muted);
-
-  .empty-text {
-    font-size: var(--content-font-size-base);
-    margin-bottom: 4px;
-  }
-
-  .empty-hint {
-    font-size: var(--content-font-size-xs);
-  }
 }
 
 // ==================== 创建表单 ====================
@@ -469,53 +428,7 @@ const formatTime = (ts: number): string => {
   border-radius: var(--border-radius);
   padding: 12px;
   margin-bottom: 8px;
-}
-
-.form-group {
-  margin-bottom: 8px;
-
-  label {
-    display: block;
-    font-size: var(--font-size-xs);
-    color: var(--text-secondary);
-    margin-bottom: 4px;
-  }
-}
-
-.form-input {
-  width: 100%;
-  padding: 5px 8px;
   border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-sm);
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font-size: var(--font-size-sm);
-  outline: none;
-  box-sizing: border-box;
-
-  &:focus {
-    border-color: var(--accent-primary);
-  }
-}
-
-.form-select {
-  padding: 5px 8px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-sm);
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font-size: var(--font-size-sm);
-  outline: none;
-
-  &:focus {
-    border-color: var(--accent-primary);
-  }
-}
-
-.form-row {
-  display: flex;
-  gap: 8px;
-  align-items: flex-end;
 }
 
 .options-list {
@@ -541,30 +454,10 @@ const formatTime = (ts: number): string => {
   .option-input {
     flex: 1;
   }
-
-  .option-remove {
-    width: 22px;
-    height: 22px;
-    border: none;
-    border-radius: var(--border-radius-sm);
-    background: transparent;
-    color: var(--text-muted);
-    cursor: pointer;
-    font-size: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-
-    &:hover {
-      background: rgba(220, 60, 60, 0.2);
-      color: #dc3c3c;
-    }
-  }
 }
 
 .add-option-btn {
-  padding: 4px 8px;
+  padding: 5px 8px;
   border: 1px dashed var(--border-color);
   border-radius: var(--border-radius-sm);
   background: transparent;
@@ -572,66 +465,20 @@ const formatTime = (ts: number): string => {
   font-size: var(--font-size-xs);
   cursor: pointer;
   margin-top: 2px;
+  transition: border-color 0.2s, color 0.2s, background 0.2s;
 
   &:hover {
     border-color: var(--accent-primary);
     color: var(--accent-primary);
-  }
-}
-
-.submit-btn {
-  width: 100%;
-  padding: 6px;
-  border: none;
-  border-radius: var(--border-radius-sm);
-  background: var(--accent-primary);
-  color: white;
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  cursor: pointer;
-  margin-top: 4px;
-
-  &:hover {
-    filter: brightness(1.1);
-  }
-}
-
-// ==================== 分隔线 ====================
-
-.section-divider {
-  display: flex;
-  align-items: center;
-  margin: 12px 0 8px;
-  font-size: var(--content-font-size-xs);
-  color: var(--text-muted);
-
-  &::before,
-  &::after {
-    content: '';
-    flex: 1;
-    height: 1px;
-    background: var(--border-color);
-  }
-
-  span {
-    padding: 0 8px;
+    background: rgba(92, 158, 255, 0.05);
   }
 }
 
 // ==================== 投票卡片 ====================
 
 .poll-card {
-  background: var(--bg-card);
-  border-radius: var(--border-radius);
-  padding: 10px 12px;
-  margin-bottom: 8px;
-
-  &.ended {
-    opacity: 0.6;
-
-    &:hover {
-      opacity: 0.8;
-    }
+  &.active {
+    border-color: rgba(92, 158, 255, 0.15);
   }
 }
 
@@ -659,32 +506,6 @@ const formatTime = (ts: number): string => {
   margin-left: 8px;
 }
 
-.action-btn {
-  padding: 2px 8px;
-  border: none;
-  border-radius: var(--border-radius-sm);
-  background: var(--bg-hover);
-  color: var(--text-secondary);
-  font-size: var(--font-size-xs);
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-
-  &:hover {
-    background: var(--bg-active);
-    color: var(--text-primary);
-  }
-
-  &.end-btn:hover {
-    background: rgba(255, 160, 40, 0.2);
-    color: #ffa028;
-  }
-
-  &.delete-btn:hover {
-    background: rgba(220, 60, 60, 0.2);
-    color: #dc3c3c;
-  }
-}
-
 .poll-meta {
   display: flex;
   gap: 12px;
@@ -695,6 +516,7 @@ const formatTime = (ts: number): string => {
   .countdown {
     color: var(--accent-primary);
     font-weight: 500;
+    font-variant-numeric: tabular-nums;
   }
 
   .ended-label {
@@ -704,6 +526,11 @@ const formatTime = (ts: number): string => {
   .no-limit {
     color: var(--text-muted);
   }
+
+  .total-votes {
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+  }
 }
 
 // ==================== 选项柱状图 ====================
@@ -711,7 +538,7 @@ const formatTime = (ts: number): string => {
 .poll-options {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .option-bar {
@@ -719,8 +546,9 @@ const formatTime = (ts: number): string => {
   align-items: center;
   gap: 8px;
   cursor: pointer;
-  padding: 3px 0;
+  padding: 4px 6px;
   border-radius: var(--border-radius-sm);
+  transition: background 0.15s;
 
   &:hover {
     background: var(--bg-hover);
@@ -747,6 +575,12 @@ const formatTime = (ts: number): string => {
   font-size: 11px;
   font-weight: 600;
   flex-shrink: 0;
+  transition: background 0.2s, color 0.2s;
+
+  &.ended {
+    background: rgba(107, 107, 107, 0.15);
+    color: var(--text-muted);
+  }
 }
 
 .option-label {
@@ -762,21 +596,26 @@ const formatTime = (ts: number): string => {
   flex: 1;
   height: 18px;
   background: var(--bg-hover);
-  border-radius: 3px;
+  border-radius: 4px;
   overflow: hidden;
   min-width: 40px;
 }
 
 .bar-fill {
   height: 100%;
-  background: var(--accent-primary);
-  border-radius: 3px;
-  transition: width 0.3s ease;
+  background: linear-gradient(90deg, var(--accent-primary), #7ab4ff);
+  border-radius: 4px;
+  transition: width 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
   min-width: 2px;
+  animation: extBarGrow 0.5s ease-out;
 
   &.ended {
-    background: var(--text-muted);
+    background: linear-gradient(90deg, #555, #6b6b6b);
   }
+}
+
+@keyframes extBarGrow {
+  from { width: 0; }
 }
 
 .option-count {
@@ -786,6 +625,7 @@ const formatTime = (ts: number): string => {
   min-width: 60px;
   text-align: right;
   flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 
   .option-percent {
     color: var(--text-muted);
@@ -816,19 +656,6 @@ const formatTime = (ts: number): string => {
   border-bottom: 1px solid var(--border-color);
 }
 
-.voters-close {
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 12px;
-  padding: 0 4px;
-
-  &:hover {
-    color: var(--text-primary);
-  }
-}
-
 .voters-loading,
 .voters-empty {
   text-align: center;
@@ -847,7 +674,13 @@ const formatTime = (ts: number): string => {
   display: flex;
   justify-content: space-between;
   font-size: var(--content-font-size-xs);
-  padding: 2px 0;
+  padding: 2px 4px;
+  border-radius: 2px;
+  transition: background 0.15s;
+
+  &:hover {
+    background: var(--bg-hover);
+  }
 
   .voter-name {
     color: var(--text-primary);
@@ -855,6 +688,7 @@ const formatTime = (ts: number): string => {
 
   .voter-time {
     color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
   }
 }
 </style>
