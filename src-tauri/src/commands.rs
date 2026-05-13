@@ -888,6 +888,9 @@ pub async fn get_poll_voters(
 
 // ==================== 版本和更新 ====================
 
+/// COS 防盗链 Referer
+const UPDATE_REFERER: &str = "https://updater.anzu.link";
+
 /// 获取当前应用版本号
 #[tauri::command]
 pub fn get_app_version() -> String {
@@ -895,7 +898,8 @@ pub fn get_app_version() -> String {
 }
 
 /// 检测是否为便携版（非安装版）
-/// 安装版（NSIS）会在安装目录下生成 `Uninstall danmuji-next.exe`
+/// 安装版（NSIS）会在安装目录下生成 `Uninstall danmuji-next.exe`，
+/// 或路径位于 `AppData\Local` 下（NSIS 默认安装路径）
 #[tauri::command]
 pub fn is_portable() -> bool {
     let Ok(exe_path) = std::env::current_exe() else {
@@ -904,11 +908,21 @@ pub fn is_portable() -> bool {
     let Some(exe_dir) = exe_path.parent() else {
         return true;
     };
-    !exe_dir.join("Uninstall danmuji-next.exe").exists()
+    // 安装版特征1：存在卸载程序
+    if exe_dir.join("uninstall.exe").exists() {
+        return false;
+    }
+    // 安装版特征2：路径位于 AppData\Local 下（NSIS 默认安装目录）
+    if let Some(local_app_data) = dirs::data_local_dir() {
+        if exe_dir.starts_with(&local_app_data) {
+            return false;
+        }
+    }
+    true
 }
 
 /// 便携版更新：检查更新
-/// 直接请求更新服务器，返回 JSON 字符串（由前端解析）
+/// 请求 COS 上的静态 update.json，返回 JSON 字符串（由前端解析和版本比较）
 #[tauri::command]
 pub async fn check_portable_update(url: String) -> Result<Option<String>, String> {
     let client = reqwest::Client::builder()
@@ -916,7 +930,12 @@ pub async fn check_portable_update(url: String) -> Result<Option<String>, String
         .build()
         .map_err(|e| e.to_string())?;
 
-    let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
+    let resp = client
+        .get(&url)
+        .header("Referer", UPDATE_REFERER)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
 
     if resp.status().as_u16() == 204 {
         return Ok(None); // 无更新
@@ -951,6 +970,7 @@ pub async fn install_portable_update(download_url: String) -> Result<(), String>
 
     let resp = client
         .get(&download_url)
+        .header("Referer", UPDATE_REFERER)
         .send()
         .await
         .map_err(|e| format!("下载失败: {}", e))?;

@@ -33,3 +33,5 @@ __pycache__/
 .git_old
 
 docs/WINDOW_SYSTEM.md
+
+scripts/cos_upload.py

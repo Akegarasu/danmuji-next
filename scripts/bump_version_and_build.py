@@ -153,7 +153,6 @@ def update_versions(old_version: str, new_version: str) -> None:
     replace_json_version(ROOT / "package.json", old_version, new_version)
     replace_cargo_toml_version(ROOT / "src-tauri" / "Cargo.toml", old_version, new_version)
     replace_json_version(ROOT / "src-tauri" / "tauri.conf.json", old_version, new_version)
-    replace_cargo_lock_version(ROOT / "src-tauri" / "Cargo.lock", old_version, new_version)
 
 
 def run_tauri_build() -> None:

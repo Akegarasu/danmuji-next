@@ -4,6 +4,9 @@
  * 同时支持安装版（NSIS，通过 tauri-plugin-updater）和便携版（portable，自定义更新流程）。
  * 启动时自动检测运行模式，调用对应的更新逻辑。
  *
+ * 更新清单托管 静态存储，
+ * 通过 Referer 白名单防盗链保护下载资源。
+ *
  * - 后台异步检查：启动后 15s 首次检查，之后每小时检查一次
  * - 检查失败静默处理，不对用户展示
  */
@@ -26,6 +29,17 @@ export interface DownloadProgress {
   total: number | null
 }
 
+// ==================== 常量 ====================
+
+/** COS 防盗链 Referer */
+const REFERER = 'https://updater.anzu.link'
+
+/** 更新清单地址（与 tauri.conf.json 中 endpoints 一致） */
+const UPDATE_ENDPOINT = 'https://akiba-1301838591.cos.ap-shanghai.myqcloud.com/update.json'
+
+const CHECK_INTERVAL = 60 * 60 * 1000 // 1小时
+const INITIAL_DELAY = 15_000 // 启动后15秒首次检查
+
 // ==================== 模块级状态 ====================
 
 let checkTimer: ReturnType<typeof setInterval> | null = null
@@ -35,11 +49,21 @@ let portableDownloadUrl: string | null = null
 /** 缓存：是否为便携版 */
 let _isPortable: boolean | null = null
 
-const CHECK_INTERVAL = 60 * 60 * 1000 // 1小时
-const INITIAL_DELAY = 15_000 // 启动后15秒首次检查
+// ==================== 工具函数 ====================
 
-/** 更新检查端点（与 tauri.conf.json 中的 endpoints 一致） */
-const UPDATE_ENDPOINT = 'http://localhost:8787/update/{{target}}/{{arch}}/{{current_version}}'
+/**
+ * 简单 semver 比较：remote 是否比 current 更新
+ * 仅支持 x.y.z 格式
+ */
+function isNewerVersion(current: string, remote: string): boolean {
+  const c = current.split('.').map(Number)
+  const r = remote.split('.').map(Number)
+  for (let i = 0; i < Math.max(c.length, r.length); i++) {
+    if ((r[i] || 0) > (c[i] || 0)) return true
+    if ((r[i] || 0) < (c[i] || 0)) return false
+  }
+  return false
+}
 
 // ==================== 检测运行模式 ====================
 
@@ -59,7 +83,9 @@ export async function getAppVersion(): Promise<string> {
 // ==================== 安装版更新（tauri-plugin-updater）====================
 
 async function checkInstallerUpdate(): Promise<UpdateInfo | null> {
-  const update = await check()
+  const update = await check({
+    headers: { Referer: REFERER },
+  })
   if (!update) return null
 
   pendingUpdate = update
@@ -78,45 +104,46 @@ async function installInstallerUpdate(
   let downloaded = 0
   let total: number | null = null
 
-  await pendingUpdate.downloadAndInstall((event) => {
-    switch (event.event) {
-      case 'Started':
-        total = event.data.contentLength ?? null
-        break
-      case 'Progress':
-        downloaded += event.data.chunkLength
-        onProgress?.({ downloaded, total })
-        break
-      case 'Finished':
-        break
-    }
-  })
+  await pendingUpdate.downloadAndInstall(
+    (event) => {
+      switch (event.event) {
+        case 'Started':
+          total = event.data.contentLength ?? null
+          break
+        case 'Progress':
+          downloaded += event.data.chunkLength
+          onProgress?.({ downloaded, total })
+          break
+        case 'Finished':
+          break
+      }
+    },
+    { headers: { Referer: REFERER } }
+  )
 
   await relaunch()
 }
 
 // ==================== 便携版更新（自定义流程）====================
 
-/** 构造便携版更新检查 URL */
-async function buildPortableCheckUrl(): Promise<string> {
-  const version = await getAppVersion()
-  // 模板变量替换
-  return UPDATE_ENDPOINT
-    .replace('{{target}}', 'windows')
-    .replace('{{arch}}', 'x86_64')
-    .replace('{{current_version}}', version)
-}
-
 async function checkPortableUpdate(): Promise<UpdateInfo | null> {
-  const url = await buildPortableCheckUrl()
-  const body = await invoke<string | null>('check_portable_update', { url })
+  // COS 静态清单：始终返回最新版本 JSON，需要客户端比较版本号
+  const body = await invoke<string | null>('check_portable_update', {
+    url: UPDATE_ENDPOINT,
+  })
 
   if (!body) return null
 
   const data = JSON.parse(body)
 
+  // 客户端 semver 比较（静态 JSON 没有服务端版本过滤）
+  const currentVersion = await getAppVersion()
+  if (!isNewerVersion(currentVersion, data.version)) {
+    return null
+  }
+
   // 缓存 portable 下载 URL
-  portableDownloadUrl = data.portable_url || data.url || null
+  portableDownloadUrl = data.portable_url || null
 
   return {
     version: data.version,
