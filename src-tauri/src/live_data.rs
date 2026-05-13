@@ -11,8 +11,8 @@ use tokio::sync::mpsc;
 use crate::archive::ArchiveEvent;
 use crate::blivedm::api::ContributionRankUser;
 use crate::blivedm::{
-    CoinType, Danmaku, DanmakuType, Gift, GuardBuy, GuardLevel, OnlineRankCount, OnlineRankV2,
-    SuperChat,
+    CoinType, Danmaku, DanmakuType, Gift, GuardBuy, GuardLevel, InteractWord, OnlineRankCount,
+    OnlineRankV2, SuperChat,
 };
 use crate::kv_store::VideoRequestStore;
 use crate::live_types::*;
@@ -47,6 +47,8 @@ pub struct LiveData {
     pub(crate) contribution_rank_full: Vec<ContributionRankUser>,
     /// 用户贡献 map: uid -> contribution
     user_contributions: HashMap<u64, UserContribution>,
+    /// 进入直播间列表
+    pub(crate) interact_word_list: VecDeque<ProcessedInteractWord>,
     /// 统计数据
     pub(crate) stats: LiveStats,
 
@@ -62,6 +64,8 @@ pub struct LiveData {
     pending_danmaku: Vec<ProcessedDanmaku>,
     /// 待发送的礼物更新（批量）
     pending_gift_upserts: Vec<GiftUpsert>,
+    /// 待发送的入场通知（批量）
+    pending_interact_words: Vec<ProcessedInteractWord>,
     /// 统计是否有变化
     stats_dirty: bool,
     /// 贡献排行是否有变化
@@ -77,6 +81,7 @@ impl Default for LiveData {
             gift_list: VecDeque::with_capacity(MAX_GIFT_LIST),
             gift_merge_index: HashMap::new(),
             superchat_list: Vec::with_capacity(MAX_SUPERCHAT_LIST),
+            interact_word_list: VecDeque::with_capacity(MAX_INTERACT_WORD_LIST),
             online_rank: Vec::new(),
             contribution_rank_full: Vec::new(),
             user_contributions: HashMap::new(),
@@ -86,6 +91,7 @@ impl Default for LiveData {
             pending_updates: Vec::new(),
             pending_danmaku: Vec::new(),
             pending_gift_upserts: Vec::new(),
+            pending_interact_words: Vec::new(),
             stats_dirty: false,
             contributions_dirty: false,
             archive_tx: None,
@@ -171,6 +177,11 @@ impl LiveData {
             },
             voting_polls: if event_types.contains(&EventType::Voting) {
                 Some(self.voting.get_all_polls_for_snapshot())
+            } else {
+                None
+            },
+            interact_word_list: if event_types.contains(&EventType::InteractWord) {
+                Some(self.interact_word_list.iter().cloned().collect())
             } else {
                 None
             },
@@ -458,6 +469,22 @@ impl LiveData {
         self.stats_dirty = true;
     }
 
+    /// 处理进入直播间
+    pub fn process_interact_word(&mut self, iw: InteractWord) {
+        let processed = ProcessedInteractWord {
+            id: format!("iw_{}_{}", iw.timestamp, iw.user.uid),
+            user: convert_user(&iw.user),
+            timestamp: iw.timestamp,
+        };
+
+        self.interact_word_list.push_back(processed.clone());
+        if self.interact_word_list.len() > MAX_INTERACT_WORD_LIST {
+            self.interact_word_list.pop_front();
+        }
+
+        self.pending_interact_words.push(processed);
+    }
+
     /// 设置贡献排行完整列表
     pub fn set_contribution_rank_full(&mut self, rank: Vec<ContributionRankUser>) {
         self.contribution_rank_full = rank.clone();
@@ -550,6 +577,12 @@ impl LiveData {
         if !self.pending_gift_upserts.is_empty() {
             updates.push(DataUpdate::GiftUpsert(std::mem::take(
                 &mut self.pending_gift_upserts,
+            )));
+        }
+
+        if !self.pending_interact_words.is_empty() {
+            updates.push(DataUpdate::InteractWordAppend(std::mem::take(
+                &mut self.pending_interact_words,
             )));
         }
 

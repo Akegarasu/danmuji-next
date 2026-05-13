@@ -55,6 +55,17 @@ export const useSettingsStore = defineStore('settings', () => {
   const audienceShowEnterMsg = computed(() => settings.value.display.audienceShowEnterMsg)
   const audienceShowMedal = computed(() => settings.value.display.audienceShowMedal)
 
+  // 入场通知设置
+  const entryShowEnabled = computed(() => settings.value.display.entryShowEnabled)
+  const entryFilterAll = computed(() => settings.value.display.entryFilterAll)
+  const entryFilterCaptain = computed(() => settings.value.display.entryFilterCaptain)
+  const entryFilterAdmiral = computed(() => settings.value.display.entryFilterAdmiral)
+  const entryFilterGovernor = computed(() => settings.value.display.entryFilterGovernor)
+  const entryFilterSpecialFollow = computed(() => settings.value.display.entryFilterSpecialFollow)
+  const entryShowMedal = computed(() => settings.value.display.entryShowMedal)
+  const entryShowGuard = computed(() => settings.value.display.entryShowGuard)
+  const entryPanelHeight = computed(() => settings.value.display.entryPanelHeight)
+
   // ==================== 加载/保存 ====================
 
   /**
@@ -223,6 +234,15 @@ export const useSettingsStore = defineStore('settings', () => {
     audienceSortType,
     audienceShowEnterMsg,
     audienceShowMedal,
+    entryShowEnabled,
+    entryFilterAll,
+    entryFilterCaptain,
+    entryFilterAdmiral,
+    entryFilterGovernor,
+    entryFilterSpecialFollow,
+    entryShowMedal,
+    entryShowGuard,
+    entryPanelHeight,
     // 方法
     loadSettings,
     saveSettings,

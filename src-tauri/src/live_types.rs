@@ -19,6 +19,7 @@ pub const DATA_PUSH_INTERVAL: Duration = Duration::from_millis(100);
 pub const MAX_DANMAKU_LIST: usize = 10000;
 pub const MAX_GIFT_LIST: usize = 5000;
 pub const MAX_SUPERCHAT_LIST: usize = 2000;
+pub const MAX_INTERACT_WORD_LIST: usize = 500;
 
 /// 礼物合并时间窗口（秒）
 pub const GIFT_MERGE_WINDOW_SECS: i64 = 5;
@@ -45,6 +46,8 @@ pub enum EventType {
     VideoRequest,
     /// 投票
     Voting,
+    /// 进入直播间
+    InteractWord,
 }
 
 // ==================== 连接状态 ====================
@@ -169,6 +172,14 @@ pub struct ProcessedOnlineRankUser {
     pub guard_level: u8,
 }
 
+/// 处理后的进入直播间消息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessedInteractWord {
+    pub id: String,
+    pub user: ProcessedUser,
+    pub timestamp: i64,
+}
+
 /// 用户贡献统计
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserContribution {
@@ -241,6 +252,8 @@ pub enum DataUpdate {
     VotingUpdate(Poll),
     /// 投票全量同步（删除后）
     VotingSync(Vec<Poll>),
+    /// 进入直播间通知
+    InteractWordAppend(Vec<ProcessedInteractWord>),
 }
 
 impl DataUpdate {
@@ -261,6 +274,7 @@ impl DataUpdate {
             DataUpdate::VideoRequestSync(_) => EventType::VideoRequest,
             DataUpdate::VotingUpdate(_) => EventType::Voting,
             DataUpdate::VotingSync(_) => EventType::Voting,
+            DataUpdate::InteractWordAppend(_) => EventType::InteractWord,
         }
     }
 }
@@ -304,6 +318,8 @@ pub struct DataSnapshot {
     pub video_requests: Option<Vec<VideoRequestItem>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub voting_polls: Option<Vec<Poll>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interact_word_list: Option<Vec<ProcessedInteractWord>>,
 }
 
 // ==================== 辅助函数 ====================

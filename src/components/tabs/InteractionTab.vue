@@ -9,6 +9,7 @@ import { useSettingsStore } from '@/stores/settings'
 import DanmakuItem from '@/components/items/DanmakuItem.vue'
 import GiftItem from '@/components/items/GiftItem.vue'
 import SuperChatItem from '@/components/items/SuperChatItem.vue'
+import EntryPanel from '@/components/common/EntryPanel.vue'
 import ContextMenu from '@/components/common/ContextMenu.vue'
 import SilentDialog from '@/components/common/SilentDialog.vue'
 import type { MenuItem } from '@/components/common/ContextMenu.vue'
@@ -255,6 +256,9 @@ onUnmounted(() => {
         ↓ 回到底部
       </button>
     </Transition>
+
+    <!-- 入场通知面板 -->
+    <EntryPanel />
 
     <ContextMenu ref="contextMenuRef" :items="dynamicMenuItems" />
 

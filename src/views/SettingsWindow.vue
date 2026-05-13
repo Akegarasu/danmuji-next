@@ -362,6 +362,47 @@ const audienceShowMedal = computed({
   set: (v) => settingsStore.updateDisplaySettings({ audienceShowMedal: v })
 })
 
+// 入场通知设置
+const entryShowEnabled = computed({
+  get: () => settings.value.display.entryShowEnabled,
+  set: (v) => settingsStore.updateDisplaySettings({ entryShowEnabled: v })
+})
+
+const entryShowMedal = computed({
+  get: () => settings.value.display.entryShowMedal,
+  set: (v) => settingsStore.updateDisplaySettings({ entryShowMedal: v })
+})
+
+const entryShowGuard = computed({
+  get: () => settings.value.display.entryShowGuard,
+  set: (v) => settingsStore.updateDisplaySettings({ entryShowGuard: v })
+})
+
+const entryFilterAll = computed({
+  get: () => settings.value.display.entryFilterAll,
+  set: (v) => settingsStore.updateDisplaySettings({ entryFilterAll: v })
+})
+
+const entryFilterCaptain = computed({
+  get: () => settings.value.display.entryFilterCaptain,
+  set: (v) => settingsStore.updateDisplaySettings({ entryFilterCaptain: v })
+})
+
+const entryFilterAdmiral = computed({
+  get: () => settings.value.display.entryFilterAdmiral,
+  set: (v) => settingsStore.updateDisplaySettings({ entryFilterAdmiral: v })
+})
+
+const entryFilterGovernor = computed({
+  get: () => settings.value.display.entryFilterGovernor,
+  set: (v) => settingsStore.updateDisplaySettings({ entryFilterGovernor: v })
+})
+
+const entryFilterSpecialFollow = computed({
+  get: () => settings.value.display.entryFilterSpecialFollow,
+  set: (v) => settingsStore.updateDisplaySettings({ entryFilterSpecialFollow: v })
+})
+
 // ==================== 特别关注 ====================
 
 const newSpecialUid = ref('')
@@ -770,19 +811,50 @@ const openProjectUrl = async () => {
             <input v-model="audienceShowMedal" type="checkbox" class="toggle-checkbox" />
           </div>
 
-          <!-- <div class="setting-group">
-            <label class="setting-label">排序方式</label>
-            <select v-model="audienceSortType" class="setting-select">
-              <option v-for="opt in sortOptions" :key="opt.value" :value="opt.value">
-                {{ opt.label }}
-              </option>
-            </select>
-          </div> -->
+          <h3 class="section-title" style="margin-top: 24px;">入场通知</h3>
 
-          <!-- <div class="setting-group toggle">
-            <label class="setting-label">显示进入提示</label>
-            <input v-model="audienceShowEnterMsg" type="checkbox" class="toggle-checkbox" />
-          </div> -->
+          <div class="setting-group toggle">
+            <label class="setting-label">显示进房事件</label>
+            <input v-model="entryShowEnabled" type="checkbox" class="toggle-checkbox" />
+          </div>
+
+          <template v-if="entryShowEnabled">
+            <div class="setting-group toggle">
+              <label class="setting-label">显示粉丝勋章</label>
+              <input v-model="entryShowMedal" type="checkbox" class="toggle-checkbox" />
+            </div>
+
+            <div class="setting-group toggle">
+              <label class="setting-label">显示舰队标识</label>
+              <input v-model="entryShowGuard" type="checkbox" class="toggle-checkbox" />
+            </div>
+
+            <div class="setting-group">
+              <label class="setting-label">显示范围</label>
+              <div class="checkbox-group">
+                <label class="checkbox-item">
+                  <input type="checkbox" v-model="entryFilterAll" />
+                  <span>全部</span>
+                </label>
+                <label class="checkbox-item" :class="{ disabled: entryFilterAll }">
+                  <input type="checkbox" v-model="entryFilterCaptain" :disabled="entryFilterAll" />
+                  <span>舰长</span>
+                </label>
+                <label class="checkbox-item" :class="{ disabled: entryFilterAll }">
+                  <input type="checkbox" v-model="entryFilterAdmiral" :disabled="entryFilterAll" />
+                  <span>提督</span>
+                </label>
+                <label class="checkbox-item" :class="{ disabled: entryFilterAll }">
+                  <input type="checkbox" v-model="entryFilterGovernor" :disabled="entryFilterAll" />
+                  <span>总督</span>
+                </label>
+                <label class="checkbox-item" :class="{ disabled: entryFilterAll }">
+                  <input type="checkbox" v-model="entryFilterSpecialFollow" :disabled="entryFilterAll" />
+                  <span>特别关注</span>
+                </label>
+              </div>
+            </div>
+          </template>
         </div>
 
         <!-- 特别关注 -->
@@ -1368,6 +1440,33 @@ const openProjectUrl = async () => {
     background: var(--accent-primary);
     border-radius: 50%;
     cursor: pointer;
+  }
+}
+
+.checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+}
+
+.checkbox-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+
+  input[type="checkbox"] {
+    accent-color: var(--accent-primary);
+    cursor: pointer;
+  }
+
+  &.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+
+    input { cursor: not-allowed; }
   }
 }
 

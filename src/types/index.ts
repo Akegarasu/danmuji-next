@@ -10,7 +10,7 @@
 // ==================== 事件类型（用于订阅）====================
 
 /** 事件类型（与后端对应） */
-export type EventType = 
+export type EventType =
   | 'danmaku'        // 弹幕
   | 'gift'           // 礼物
   | 'super_chat'     // SuperChat
@@ -19,6 +19,7 @@ export type EventType =
   | 'live_status'    // 直播状态
   | 'video_request'  // 点播请求
   | 'voting'         // 投票
+  | 'interact_word'  // 进入直播间
 
 /** 所有事件类型 */
 export const ALL_EVENT_TYPES: EventType[] = [
@@ -29,7 +30,8 @@ export const ALL_EVENT_TYPES: EventType[] = [
   'stats',
   'live_status',
   'video_request',
-  'voting'
+  'voting',
+  'interact_word'
 ]
 
 // ==================== Tab 相关类型 ====================
@@ -38,11 +40,11 @@ export type TabType = 'interaction' | 'danmaku' | 'gift' | 'superchat' | 'audien
 
 /** Tab 类型到订阅事件类型的映射 */
 export const TAB_EVENT_TYPES: Record<TabType, EventType[]> = {
-  interaction: ['danmaku', 'gift', 'super_chat', 'stats', 'live_status'],
+  interaction: ['danmaku', 'gift', 'super_chat', 'stats', 'live_status', 'interact_word'],
   danmaku: ['danmaku', 'live_status'],
   gift: ['gift', 'super_chat', 'stats', 'live_status'],
   superchat: ['super_chat', 'stats', 'live_status'],
-  audience: ['contribution_rank', 'stats', 'live_status']
+  audience: ['contribution_rank', 'stats', 'live_status', 'interact_word']
 }
 
 /** 互动 Tab 合并时间线项 */
@@ -98,6 +100,17 @@ export interface DisplaySettings {
   audienceSortType: AudienceSortType
   audienceShowEnterMsg: boolean
   audienceShowMedal: boolean
+
+  // 入场通知设置
+  entryShowEnabled: boolean
+  entryFilterAll: boolean
+  entryFilterCaptain: boolean
+  entryFilterAdmiral: boolean
+  entryFilterGovernor: boolean
+  entryFilterSpecialFollow: boolean
+  entryShowMedal: boolean
+  entryShowGuard: boolean
+  entryPanelHeight: number
 }
 
 /** 用户登录信息 */
@@ -138,7 +151,16 @@ export const DEFAULT_DISPLAY_SETTINGS: DisplaySettings = {
   scMergeWithGift: false,
   audienceSortType: 'enterTime',
   audienceShowEnterMsg: true,
-  audienceShowMedal: true
+  audienceShowMedal: true,
+  entryShowEnabled: true,
+  entryFilterAll: true,
+  entryFilterCaptain: false,
+  entryFilterAdmiral: false,
+  entryFilterGovernor: false,
+  entryFilterSpecialFollow: false,
+  entryShowMedal: true,
+  entryShowGuard: true,
+  entryPanelHeight: 150
 }
 
 /** 默认窗口设置 */
@@ -218,6 +240,13 @@ export interface ProcessedOnlineRankUser {
   rank: number
   score: string
   guard_level: number
+}
+
+/** 处理后的进入直播间消息（来自后端） */
+export interface ProcessedInteractWord {
+  id: string
+  user: ProcessedUser
+  timestamp: number
 }
 
 /** 用户贡献统计（来自后端） */
@@ -339,6 +368,7 @@ export type DataUpdate =
   | { type: 'VideoRequestSync'; data: VideoRequestItem[] }
   | { type: 'VotingUpdate'; data: Poll }
   | { type: 'VotingSync'; data: Poll[] }
+  | { type: 'InteractWordAppend'; data: ProcessedInteractWord[] }
 
 /** 数据快照（来自后端） */
 export interface DataSnapshot {
@@ -351,6 +381,7 @@ export interface DataSnapshot {
   stats?: LiveStats
   video_requests?: VideoRequestItem[]
   voting_polls?: Poll[]
+  interact_word_list?: ProcessedInteractWord[]
 }
 
 // ==================== 工具函数 ====================

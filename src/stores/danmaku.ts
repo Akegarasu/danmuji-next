@@ -5,11 +5,12 @@
 
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { 
+import type {
   ProcessedDanmaku,
   ProcessedGift,
   ProcessedSuperChat,
   ProcessedOnlineRankUser,
+  ProcessedInteractWord,
   UserContribution,
   LiveStats,
   GiftUpsert,
@@ -20,6 +21,7 @@ import type {
 const MAX_DANMAKU = 10000
 const MAX_GIFTS = 5000
 const MAX_SUPERCHAT = 2000
+const MAX_INTERACT_WORDS = 500
 
 export const useDanmakuStore = defineStore('danmaku', () => {
   // ==================== 数据列表 ====================
@@ -35,7 +37,10 @@ export const useDanmakuStore = defineStore('danmaku', () => {
   
   /** SC 列表 */
   const superChatList = ref<ProcessedSuperChat[]>([])
-  
+
+  /** 进入直播间列表 */
+  const interactWordList = ref<ProcessedInteractWord[]>([])
+
   /** 贡献排行实时更新（ONLINE_RANK_V2，前几名） */
   const contributionRankLive = ref<ProcessedOnlineRankUser[]>([])
   
@@ -82,6 +87,11 @@ export const useDanmakuStore = defineStore('danmaku', () => {
   /** 设置 SC 列表（快照同步） */
   const setSuperChatList = (items: ProcessedSuperChat[]) => {
     superChatList.value = items.slice(0, MAX_SUPERCHAT)
+  }
+
+  /** 设置入场列表（快照同步） */
+  const setInteractWordList = (items: ProcessedInteractWord[]) => {
+    interactWordList.value = items.slice(-MAX_INTERACT_WORDS)
   }
 
   // ==================== 数据更新方法（供 blive-client 调用）====================
@@ -140,6 +150,14 @@ export const useDanmakuStore = defineStore('danmaku', () => {
     }
   }
 
+  /** 追加入场通知 */
+  const appendInteractWords = (items: ProcessedInteractWord[]) => {
+    interactWordList.value.push(...items)
+    if (interactWordList.value.length > MAX_INTERACT_WORDS) {
+      interactWordList.value.splice(0, interactWordList.value.length - MAX_INTERACT_WORDS)
+    }
+  }
+
   /** 更新贡献排行实时数据 */
   const updateContributionRankLive = (rank: ProcessedOnlineRankUser[]) => {
     contributionRankLive.value = rank
@@ -178,6 +196,7 @@ export const useDanmakuStore = defineStore('danmaku', () => {
     giftList.value = []
     giftMergeIndex.value.clear()
     superChatList.value = []
+    interactWordList.value = []
     contributionRankLive.value = []
     contributionRankFull.value = []
     contributions.value = []
@@ -195,6 +214,7 @@ export const useDanmakuStore = defineStore('danmaku', () => {
     danmakuList,
     giftList,
     superChatList,
+    interactWordList,
     contributionRankLive,
     contributionRankFull,
     contributions,
@@ -208,11 +228,13 @@ export const useDanmakuStore = defineStore('danmaku', () => {
     setDanmakuList,
     setGiftList,
     setSuperChatList,
-    
+    setInteractWordList,
+
     // 数据更新方法
     appendDanmaku,
     upsertGifts,
     appendSuperChat,
+    appendInteractWords,
     updateContributionRankLive,
     updateContributionRankFull,
     updateStats,

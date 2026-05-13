@@ -144,7 +144,8 @@ const ALL_EVENT_TYPES: EventType[] = [
   'super_chat',
   'contribution_rank',
   'stats',
-  'live_status'
+  'live_status',
+  'interact_word'
 ]
 
 /**
@@ -225,6 +226,9 @@ function applySnapshot(snapshot: DataSnapshot, store: ReturnType<typeof useDanma
     const votingStore = useVotingStore()
     votingStore.syncPolls(snapshot.voting_polls)
   }
+  if (snapshot.interact_word_list) {
+    store.setInteractWordList(snapshot.interact_word_list)
+  }
 
   console.log('[BliveClient] Applied snapshot')
 }
@@ -299,6 +303,10 @@ function processDataUpdate(update: DataUpdate, store: ReturnType<typeof useDanma
       votingStore.syncPolls(update.data)
       break
     }
+
+    case 'InteractWordAppend':
+      store.appendInteractWords(update.data)
+      break
   }
 }
 

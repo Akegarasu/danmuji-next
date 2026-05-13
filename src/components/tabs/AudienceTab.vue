@@ -4,6 +4,7 @@ import { useDanmakuStore } from '@/stores/danmaku'
 import { useSettingsStore } from '@/stores/settings'
 import { formatPrice, getMedalGradient } from '@/types'
 import { refreshContributionRank } from '@/services/blive-client'
+import EntryPanel from '@/components/common/EntryPanel.vue'
 import ContextMenu from '@/components/common/ContextMenu.vue'
 import type { MenuItem } from '@/components/common/ContextMenu.vue'
 import { invoke } from '@tauri-apps/api/core'
@@ -203,6 +204,9 @@ const copyUsername = () => {
         <span class="text">等待观众加入...</span>
       </div>
     </div>
+
+    <!-- 入场通知面板 -->
+    <EntryPanel />
 
     <ContextMenu ref="contextMenuRef" :items="menuItems" />
   </div>

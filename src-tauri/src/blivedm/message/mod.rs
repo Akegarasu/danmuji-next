@@ -3,6 +3,7 @@
 mod danmaku;
 mod gift;
 mod guard;
+mod interact_word;
 mod live_status;
 mod online_rank_count;
 mod online_rank_v2;
@@ -12,6 +13,7 @@ mod user;
 pub use danmaku::*;
 pub use gift::*;
 pub use guard::*;
+pub use interact_word::*;
 pub use live_status::*;
 pub use online_rank_count::*;
 pub use online_rank_v2::*;
@@ -46,6 +48,8 @@ pub enum Event {
     OnlineRankCount(OnlineRankCount),
     /// 高能用户排行榜
     OnlineRankV2(OnlineRankV2),
+    /// 进入直播间
+    InteractWord(InteractWord),
     /// 原始事件（未解析的 CMD）
     Raw { cmd: String, payload: Value },
 }
@@ -116,9 +120,12 @@ fn parse_notification(json_str: &str) -> Option<Event> {
             let online_rank_v2 = OnlineRankV2::parse(&value)?;
             Some(Event::OnlineRankV2(online_rank_v2))
         }
+        "INTERACT_WORD" => {
+            let iw = InteractWord::parse(&value)?;
+            Some(Event::InteractWord(iw))
+        }
         // 其他已知但不处理的 CMD
-        "INTERACT_WORD"
-        | "ENTRY_EFFECT"
+        "ENTRY_EFFECT"
         | "COMBO_SEND"
         | "WATCHED_CHANGE"
         | "STOP_LIVE_ROOM_LIST"

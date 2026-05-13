@@ -498,6 +498,7 @@ impl BliveService {
             Event::GuardBuy(guard) => data.process_guard_buy(guard),
             Event::OnlineRankV2(rank) => data.process_online_rank(rank),
             Event::OnlineRankCount(count) => data.process_online_count(count),
+            Event::InteractWord(iw) => data.process_interact_word(iw),
             Event::LiveStart(live_data) => {
                 log::info!(
                     "Live started: room_id={}, live_time={}",
