@@ -37,8 +37,8 @@ const REFERER = 'https://updater.anzu.link'
 /** 更新清单地址（与 tauri.conf.json 中 endpoints 一致） */
 const UPDATE_ENDPOINT = 'https://akiba-1301838591.cos.ap-shanghai.myqcloud.com/update.json'
 
-const CHECK_INTERVAL = 60 * 60 * 1000 // 1小时
-const INITIAL_DELAY = 15_000 // 启动后15秒首次检查
+const CHECK_INTERVAL = 2 * 60 * 60 * 1000 // 2小时
+const INITIAL_DELAY = 10_000 // 启动后10秒首次检查
 
 // ==================== 模块级状态 ====================
 

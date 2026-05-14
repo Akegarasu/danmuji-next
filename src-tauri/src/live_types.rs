@@ -22,7 +22,7 @@ pub const MAX_SUPERCHAT_LIST: usize = 2000;
 pub const MAX_INTERACT_WORD_LIST: usize = 500;
 
 /// 礼物合并时间窗口（秒）
-pub const GIFT_MERGE_WINDOW_SECS: i64 = 5;
+pub const GIFT_MERGE_WINDOW_SECS: i64 = 10;
 
 // ==================== 事件类型（用于订阅）====================
 
