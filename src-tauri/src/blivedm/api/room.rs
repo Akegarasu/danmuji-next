@@ -60,38 +60,38 @@ pub async fn get_room_init(client: &Client, room_id: u64) -> Result<RoomInfo> {
     }
 
     // 获取更详细的房间信息（包括标题）
-    let title = get_room_title(client, resp.data.room_id).await.ok();
+    // let title = get_room_title(client, resp.data.room_id).await.ok();
 
     Ok(RoomInfo {
         room_id: resp.data.room_id,
         short_id: resp.data.short_id,
         uid: resp.data.uid,
         live_status: resp.data.live_status,
-        title: title.unwrap_or_default(),
+        title: "".to_string(),
     })
 }
 
-/// 获取房间标题
-async fn get_room_title(client: &Client, room_id: u64) -> Result<String> {
-    let url = format!(
-        "https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id={}",
-        room_id
-    );
 
-    let resp: ApiResponse<RoomInfoData> = client
-        .get(&url)
-        .header("User-Agent", USER_AGENT)
-        .send()
-        .await?
-        .json()
-        .await?;
+// async fn get_room_title(client: &Client, room_id: u64) -> Result<String> {
+//     let url = format!(
+//         "https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id={}",
+//         room_id
+//     );
 
-    if resp.code != 0 {
-        return Err(Error::Api {
-            code: resp.code,
-            message: resp.message,
-        });
-    }
+//     let resp: ApiResponse<RoomInfoData> = client
+//         .get(&url)
+//         .header("User-Agent", USER_AGENT)
+//         .send()
+//         .await?
+//         .json()
+//         .await?;
 
-    Ok(resp.data.room_info.title)
-}
+//     if resp.code != 0 {
+//         return Err(Error::Api {
+//             code: resp.code,
+//             message: resp.message,
+//         });
+//     }
+
+//     Ok(resp.data.room_info.title)
+// }
