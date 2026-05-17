@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onUnmounted, watch } from 'vue'
 import { useDanmakuStore } from '@/stores/danmaku'
 import { useSettingsStore } from '@/stores/settings'
 import { formatEventTime, getMedalGradient } from '@/types'
+import { useAutoScroll } from '@/composables/useAutoScroll'
 
 const danmakuStore = useDanmakuStore()
 const settingsStore = useSettingsStore()
@@ -13,10 +14,12 @@ const panelHeight = ref(settingsStore.entryPanelHeight)
 const isDragging = ref(false)
 let startY = 0
 let startHeight = 0
+let keepBottomAfterResize = false
 
 const startResize = (e: MouseEvent) => {
   e.preventDefault()
   isDragging.value = true
+  keepBottomAfterResize = autoScroll.value
   startY = e.clientY
   startHeight = panelHeight.value
   document.addEventListener('mousemove', onMouseMove)
@@ -33,6 +36,10 @@ const onMouseUp = () => {
   document.removeEventListener('mousemove', onMouseMove)
   document.removeEventListener('mouseup', onMouseUp)
   settingsStore.updateDisplaySettings({ entryPanelHeight: panelHeight.value })
+  if (keepBottomAfterResize) {
+    requestAnimationFrame(() => scrollToBottom())
+  }
+  keepBottomAfterResize = false
 }
 
 watch(() => settingsStore.entryPanelHeight, (v) => {
@@ -56,30 +63,13 @@ const filteredEntries = computed(() => {
 
 // ==================== 自动滚动 ====================
 
-const listRef = ref<HTMLElement>()
-const autoScroll = ref(true)
-const isScrolling = ref(false)
-let resizeObserver: ResizeObserver | null = null
+const { listRef, autoScroll, onScroll, scrollToBottom } = useAutoScroll(
+  () => filteredEntries.value.length
+)
 
-const doScrollToBottom = () => {
-  if (!listRef.value) return
-  isScrolling.value = true
-  listRef.value.scrollTo({ top: listRef.value.scrollHeight, behavior: 'instant' })
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => { isScrolling.value = false })
-  })
-}
-
-watch(() => filteredEntries.value.length, () => {
-  if (autoScroll.value && listRef.value) {
-    requestAnimationFrame(() => doScrollToBottom())
-  }
-})
-
-const onScroll = () => {
-  if (isScrolling.value || !listRef.value) return
-  const el = listRef.value
-  autoScroll.value = el.scrollHeight - el.scrollTop - el.clientHeight < 50
+const onEntryListScroll = () => {
+  if (isDragging.value) return
+  onScroll()
 }
 
 // ==================== 工具函数 ====================
@@ -93,24 +83,7 @@ const getGuardName = (level: number) => {
   }
 }
 
-// ==================== 生命周期 ====================
-
-onMounted(() => {
-  if (listRef.value) {
-    resizeObserver = new ResizeObserver(() => {
-      if (autoScroll.value) {
-        requestAnimationFrame(() => doScrollToBottom())
-      }
-    })
-    resizeObserver.observe(listRef.value)
-  }
-})
-
 onUnmounted(() => {
-  if (resizeObserver) {
-    resizeObserver.disconnect()
-    resizeObserver = null
-  }
   document.removeEventListener('mousemove', onMouseMove)
   document.removeEventListener('mouseup', onMouseUp)
 })
@@ -127,7 +100,7 @@ onUnmounted(() => {
       <div class="handle-line" />
     </div>
 
-    <div ref="listRef" class="entry-list" @scroll="onScroll">
+    <div ref="listRef" class="entry-list" @scroll="onEntryListScroll">
       <div
         v-for="entry in filteredEntries"
         :key="entry.id"
