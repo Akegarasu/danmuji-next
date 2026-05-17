@@ -5,7 +5,7 @@
 
 import { ref, watch, onMounted, onUnmounted, type WatchSource } from 'vue'
 
-export function useAutoScroll(watchSource: WatchSource<number>) {
+export function useAutoScroll(watchSource: WatchSource<unknown>) {
   const listRef = ref<HTMLElement>()
   const autoScroll = ref(true)
   const isScrolling = ref(false) // 防止程序化滚动触发检测
