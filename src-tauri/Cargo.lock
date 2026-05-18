@@ -755,7 +755,7 @@ dependencies = [
 
 [[package]]
 name = "danmuji-next"
-version = "1.9.1"
+version = "2.0.0"
 dependencies = [
  "base64 0.22.1",
  "brotli 7.0.0",
