@@ -120,7 +120,7 @@ defineExpose({ show, hide })
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 8px 12px;
+  padding: 6px 8px;
   background: transparent;
   border: none;
   color: var(--text-primary);

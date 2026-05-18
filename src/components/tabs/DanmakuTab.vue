@@ -88,7 +88,7 @@ const menuItems = computed<MenuItem[]>(() => ([
     action: () => currentDanmaku.value && copyUsername(currentDanmaku.value.user.name)
   },
   {
-    label: '复制弹幕内容',
+    label: '复制弹幕',
     icon: '📝',
     action: () => currentDanmaku.value && copyContent(currentDanmaku.value.content, '弹幕内容')
   },
