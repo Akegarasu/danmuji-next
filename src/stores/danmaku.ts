@@ -21,7 +21,7 @@ import type {
 const MAX_DANMAKU = 10000
 const MAX_GIFTS = 5000
 const MAX_SUPERCHAT = 2000
-const MAX_INTERACT_WORDS = 500
+const MAX_INTERACT_WORDS = 1000
 
 export const useDanmakuStore = defineStore('danmaku', () => {
   // ==================== 数据列表 ====================
