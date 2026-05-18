@@ -2,13 +2,13 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useDanmakuStore } from '@/stores/danmaku'
 import { useSettingsStore } from '@/stores/settings'
+import VirtualList from '@/components/common/VirtualList.vue'
 import GiftItem from '@/components/items/GiftItem.vue'
 import SuperChatItem from '@/components/items/SuperChatItem.vue'
 import ContextMenu from '@/components/common/ContextMenu.vue'
 import type { MenuItem } from '@/components/common/ContextMenu.vue'
 import type { ProcessedGift, ProcessedSuperChat } from '@/types'
 import { formatPrice } from '@/types'
-import { useAutoScroll } from '@/composables/useAutoScroll'
 import { useContextMenuActions } from '@/composables/useContextMenuActions'
 
 const danmakuStore = useDanmakuStore()
@@ -57,10 +57,30 @@ const isSuperChat = (item: ProcessedGift | ProcessedSuperChat): item is Processe
 
 // ==================== Composables ====================
 
-const { listRef, autoScroll, onScroll, scrollToBottom: _scrollToBottom } = useAutoScroll(
-  () => mergedList.value.length
-)
 const { openUserPage, copyUsername } = useContextMenuActions()
+
+// ==================== 虚拟列表 ====================
+
+type GiftTimelineItem = ProcessedGift | ProcessedSuperChat
+
+type VirtualListExpose = {
+  scrollToBottom: () => void
+}
+
+const virtualListRef = ref<VirtualListExpose | null>(null)
+const autoScroll = ref(true)
+
+const giftItemKey = (item: GiftTimelineItem) => `${isSuperChat(item) ? 'sc' : 'gift'}-${item.id}`
+const giftLayoutVersion = computed(() => [
+  settingsStore.mainWindowSettings.fontSize,
+  settingsStore.giftShowTime,
+  settingsStore.giftShowMedal,
+  settingsStore.scMergeWithGift
+].join('|'))
+
+const scrollToBottom = () => {
+  virtualListRef.value?.scrollToBottom()
+}
 
 // ==================== 右键菜单 ====================
 
@@ -121,12 +141,17 @@ onUnmounted(() => {
       </span>
     </div>
 
-    <div
-      ref="listRef"
+    <VirtualList
+      ref="virtualListRef"
+      v-model:auto-scroll="autoScroll"
       class="gift-list"
-      @scroll="onScroll"
+      :items="mergedList"
+      :item-key="giftItemKey"
+      :estimate-size="62"
+      :overscan="10"
+      :layout-version="giftLayoutVersion"
     >
-      <template v-for="item in mergedList" :key="item.id">
+      <template #default="{ item }">
         <SuperChatItem
           v-if="isSuperChat(item)"
           :superchat="item"
@@ -143,14 +168,16 @@ onUnmounted(() => {
         />
       </template>
 
-      <div v-if="mergedList.length === 0" class="empty-state">
-        <span class="text">等待礼物中...</span>
-      </div>
-    </div>
+      <template #empty>
+        <div class="empty-state">
+          <span class="text">等待礼物中...</span>
+        </div>
+      </template>
+    </VirtualList>
 
     <!-- 回到底部按钮 -->
     <Transition name="fade">
-      <button v-if="!autoScroll" class="scroll-btn" @click="_scrollToBottom">
+      <button v-if="!autoScroll" class="scroll-btn" @click="scrollToBottom">
         ↓ 回到底部
       </button>
     </Transition>

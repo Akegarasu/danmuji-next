@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useDanmakuStore } from '@/stores/danmaku'
+import { useSettingsStore } from '@/stores/settings'
+import VirtualList from '@/components/common/VirtualList.vue'
 import SuperChatItem from '@/components/items/SuperChatItem.vue'
 import ContextMenu from '@/components/common/ContextMenu.vue'
 import type { MenuItem } from '@/components/common/ContextMenu.vue'
@@ -9,8 +11,12 @@ import { formatPrice } from '@/types'
 import { invoke } from '@tauri-apps/api/core'
 
 const danmakuStore = useDanmakuStore()
+const settingsStore = useSettingsStore()
 const contextMenuRef = ref<InstanceType<typeof ContextMenu>>()
 const currentSC = ref<ProcessedSuperChat | null>(null)
+
+const superChatItemKey = (sc: ProcessedSuperChat) => sc.id
+const superChatLayoutVersion = computed(() => settingsStore.mainWindowSettings.fontSize)
 
 const menuItems = ref<MenuItem[]>([
   {
@@ -70,18 +76,29 @@ const copyContent = () => {
       </span>
     </div>
     
-    <div class="sc-list">
-      <SuperChatItem
-        v-for="sc in danmakuStore.superChatList"
-        :key="sc.id"
-        :superchat="sc"
-        @contextmenu="handleContextMenu($event, sc)"
-      />
-      
-      <div v-if="danmakuStore.superChatList.length === 0" class="empty-state">
-        <span class="text">等待 SuperChat...</span>
-      </div>
-    </div>
+    <VirtualList
+      class="sc-list"
+      :items="danmakuStore.superChatList"
+      :item-key="superChatItemKey"
+      :estimate-size="112"
+      :overscan="6"
+      :stick-to-bottom="false"
+      :auto-scroll="false"
+      :layout-version="superChatLayoutVersion"
+    >
+      <template #default="{ item: sc }">
+        <SuperChatItem
+          :superchat="sc"
+          @contextmenu="handleContextMenu($event, sc)"
+        />
+      </template>
+
+      <template #empty>
+        <div class="empty-state">
+          <span class="text">等待 SuperChat...</span>
+        </div>
+      </template>
+    </VirtualList>
     
     <ContextMenu ref="contextMenuRef" :items="menuItems" />
   </div>

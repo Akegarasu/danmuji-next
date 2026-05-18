@@ -6,6 +6,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useDanmakuStore } from '@/stores/danmaku'
 import { useSettingsStore } from '@/stores/settings'
+import VirtualList from '@/components/common/VirtualList.vue'
 import DanmakuItem from '@/components/items/DanmakuItem.vue'
 import GiftItem from '@/components/items/GiftItem.vue'
 import SuperChatItem from '@/components/items/SuperChatItem.vue'
@@ -14,7 +15,6 @@ import ContextMenu from '@/components/common/ContextMenu.vue'
 import SilentDialog from '@/components/common/SilentDialog.vue'
 import type { MenuItem } from '@/components/common/ContextMenu.vue'
 import type { ProcessedDanmaku, ProcessedGift, ProcessedSuperChat, InteractionItem } from '@/types'
-import { useAutoScroll } from '@/composables/useAutoScroll'
 import { useToast } from '@/composables/useToast'
 import { useContextMenuActions } from '@/composables/useContextMenuActions'
 
@@ -77,11 +77,31 @@ const mergedTimeline = computed<InteractionItem[]>(() => {
   return result
 })
 
-// ==================== 自动滚动 ====================
+// ==================== 虚拟列表 ====================
 
-const { listRef, autoScroll, onScroll, scrollToBottom } = useAutoScroll(
-  () => mergedTimeline.value.length
-)
+type VirtualListExpose = {
+  scrollToBottom: () => void
+}
+
+const virtualListRef = ref<VirtualListExpose | null>(null)
+const autoScroll = ref(true)
+
+const interactionItemKey = (item: InteractionItem) => `${item.kind}-${item.data.id}`
+const interactionLayoutVersion = computed(() => [
+  settingsStore.mainWindowSettings.fontSize,
+  settingsStore.danmakuShowMedal,
+  settingsStore.danmakuShowGuard,
+  settingsStore.danmakuShowAdmin,
+  settingsStore.danmakuShowTime,
+  settingsStore.danmakuShowGuardBorder,
+  settingsStore.danmakuEmoticonSize,
+  settingsStore.giftShowTime,
+  settingsStore.giftShowMedal
+].join('|'))
+
+const scrollToBottom = () => {
+  virtualListRef.value?.scrollToBottom()
+}
 
 // ==================== 右键菜单 ====================
 
@@ -213,8 +233,17 @@ onUnmounted(() => {
 
 <template>
   <div class="interaction-tab">
-    <div ref="listRef" class="interaction-list" @scroll="onScroll">
-      <template v-for="item in mergedTimeline" :key="item.kind + '-' + item.data.id">
+    <VirtualList
+      ref="virtualListRef"
+      v-model:auto-scroll="autoScroll"
+      class="interaction-list"
+      :items="mergedTimeline"
+      :item-key="interactionItemKey"
+      :estimate-size="42"
+      :overscan="16"
+      :layout-version="interactionLayoutVersion"
+    >
+      <template #default="{ item }">
         <DanmakuItem
           v-if="item.kind === 'danmaku'"
           :message="item.data"
@@ -243,12 +272,14 @@ onUnmounted(() => {
         />
       </template>
 
-      <div v-if="mergedTimeline.length === 0" class="empty-state">
-        <span class="icon">✨</span>
-        <span class="text">等待互动中...</span>
-        <span class="text" style="font-size: var(--font-size-xs); color: var(--text-muted);">{{ getRandomTip() }}</span>
-      </div>
-    </div>
+      <template #empty>
+        <div class="empty-state">
+          <span class="icon">✨</span>
+          <span class="text">等待互动中...</span>
+          <span class="text" style="font-size: var(--font-size-xs); color: var(--text-muted);">{{ getRandomTip() }}</span>
+        </div>
+      </template>
+    </VirtualList>
 
     <!-- 回到底部按钮 -->
     <Transition name="fade">

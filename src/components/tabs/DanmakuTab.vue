@@ -2,12 +2,12 @@
 import { ref, computed } from 'vue'
 import { useDanmakuStore } from '@/stores/danmaku'
 import { useSettingsStore } from '@/stores/settings'
+import VirtualList from '@/components/common/VirtualList.vue'
 import DanmakuItem from '@/components/items/DanmakuItem.vue'
 import ContextMenu from '@/components/common/ContextMenu.vue'
 import SilentDialog from '@/components/common/SilentDialog.vue'
 import type { MenuItem } from '@/components/common/ContextMenu.vue'
 import type { ProcessedDanmaku } from '@/types'
-import { useAutoScroll } from '@/composables/useAutoScroll'
 import { useToast } from '@/composables/useToast'
 import { useContextMenuActions } from '@/composables/useContextMenuActions'
 
@@ -16,11 +16,32 @@ const settingsStore = useSettingsStore()
 
 // ==================== Composables ====================
 
-const { listRef, autoScroll, onScroll, scrollToBottom } = useAutoScroll(
-  () => danmakuStore.danmakuList.length
-)
 const { showToast, toastMessage, toastType, showToastMessage } = useToast()
 const { openUserPage, copyUsername, copyContent, toggleSpecialFollow } = useContextMenuActions(showToastMessage)
+
+// ==================== 虚拟列表 ====================
+
+type VirtualListExpose = {
+  scrollToBottom: () => void
+}
+
+const virtualListRef = ref<VirtualListExpose | null>(null)
+const autoScroll = ref(true)
+
+const danmakuItemKey = (msg: ProcessedDanmaku) => msg.id
+const danmakuLayoutVersion = computed(() => [
+  settingsStore.mainWindowSettings.fontSize,
+  settingsStore.danmakuShowMedal,
+  settingsStore.danmakuShowGuard,
+  settingsStore.danmakuShowAdmin,
+  settingsStore.danmakuShowTime,
+  settingsStore.danmakuShowGuardBorder,
+  settingsStore.danmakuEmoticonSize
+].join('|'))
+
+const scrollToBottom = () => {
+  virtualListRef.value?.scrollToBottom()
+}
 
 // ==================== 右键菜单 ====================
 
@@ -109,20 +130,38 @@ const getRandomTip = () => {
 
 <template>
   <div class="danmaku-tab">
-    <div ref="listRef" class="danmaku-list" @scroll="onScroll">
-      <DanmakuItem v-for="msg in danmakuStore.danmakuList" :key="msg.id" :message="msg"
-        :show-medal="settingsStore.danmakuShowMedal" :show-guard="settingsStore.danmakuShowGuard"
-        :show-admin="settingsStore.danmakuShowAdmin" :show-time="settingsStore.danmakuShowTime"
-        :show-guard-border="settingsStore.danmakuShowGuardBorder" :emoticon-size="settingsStore.danmakuEmoticonSize"
-        :is-special-follow="settingsStore.isSpecialFollow(msg.user.uid)"
-        @contextmenu="handleContextMenu($event, msg)" />
+    <VirtualList
+      ref="virtualListRef"
+      v-model:auto-scroll="autoScroll"
+      class="danmaku-list"
+      :items="danmakuStore.danmakuList"
+      :item-key="danmakuItemKey"
+      :estimate-size="34"
+      :overscan="16"
+      :layout-version="danmakuLayoutVersion"
+    >
+      <template #default="{ item: msg }">
+        <DanmakuItem
+          :message="msg"
+          :show-medal="settingsStore.danmakuShowMedal"
+          :show-guard="settingsStore.danmakuShowGuard"
+          :show-admin="settingsStore.danmakuShowAdmin"
+          :show-time="settingsStore.danmakuShowTime"
+          :show-guard-border="settingsStore.danmakuShowGuardBorder"
+          :emoticon-size="settingsStore.danmakuEmoticonSize"
+          :is-special-follow="settingsStore.isSpecialFollow(msg.user.uid)"
+          @contextmenu="handleContextMenu($event, msg)"
+        />
+      </template>
 
-      <div v-if="danmakuStore.danmakuList.length === 0" class="empty-state">
-        <span class="icon">💬</span>
-        <span class="text">等待弹幕中...</span>
-        <span class="text" style="font-size: var(--font-size-xs); color: var(--text-muted);">{{ getRandomTip() }}</span>
-      </div>
-    </div>
+      <template #empty>
+        <div class="empty-state">
+          <span class="icon">💬</span>
+          <span class="text">等待弹幕中...</span>
+          <span class="text" style="font-size: var(--font-size-xs); color: var(--text-muted);">{{ getRandomTip() }}</span>
+        </div>
+      </template>
+    </VirtualList>
 
     <!-- 回到底部按钮 -->
     <Transition name="fade">
