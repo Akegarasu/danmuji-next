@@ -34,7 +34,30 @@ const isMainWindow = computed(() => currentLabel === 'main')
 
 // 锁定状态（鼠标穿透）
 const isLocked = ref(false)
+const showLockHint = ref(false)
 let lockUnlisten: UnlistenFn | null = null
+let lockHintTimer: ReturnType<typeof setTimeout> | null = null
+const LOCK_HINT_DURATION = 3000
+
+const showLockUnlockHint = () => {
+  if (lockHintTimer) {
+    clearTimeout(lockHintTimer)
+  }
+
+  showLockHint.value = true
+  lockHintTimer = setTimeout(() => {
+    showLockHint.value = false
+    lockHintTimer = null
+  }, LOCK_HINT_DURATION)
+}
+
+const hideLockUnlockHint = () => {
+  showLockHint.value = false
+  if (lockHintTimer) {
+    clearTimeout(lockHintTimer)
+    lockHintTimer = null
+  }
+}
 
 // 连接状态显示
 const isConnected = computed(() => danmakuStore.isConnected)
@@ -102,6 +125,7 @@ const toggleLock = async () => {
     } else {
       // 当前是解锁状态，锁定
       await invoke('lock_window', { label: currentLabel })
+      showLockUnlockHint()
     }
     // 状态会通过 window-lock-change 事件更新
   } catch (e) {
@@ -130,6 +154,9 @@ const initLockListener = async () => {
   const eventName = `window-lock-change:${currentLabel}`
   lockUnlisten = await listen<boolean>(eventName, (event) => {
     isLocked.value = event.payload
+    if (!event.payload) {
+      hideLockUnlockHint()
+    }
     emit('lock-change', event.payload)
   })
 }
@@ -144,6 +171,7 @@ onUnmounted(() => {
   if (lockUnlisten) {
     lockUnlisten()
   }
+  hideLockUnlockHint()
 })
 </script>
 
@@ -208,6 +236,14 @@ onUnmounted(() => {
         ✕
       </button>
     </div>
+
+    <Teleport to="body">
+      <Transition name="lock-hint">
+        <div v-if="showLockHint" class="lock-hint">
+          已锁定，可在任务栏托盘图标右键菜单解锁
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
@@ -351,5 +387,36 @@ onUnmounted(() => {
       }
     }
   }
+}
+
+.lock-hint {
+  position: fixed;
+  top: calc(var(--title-bar-height) + 8px);
+  left: 50%;
+  z-index: 3000;
+  max-width: calc(100vw - 24px);
+  padding: 7px 12px;
+  border: 1px solid rgba(92, 158, 255, 0.35);
+  border-radius: var(--border-radius);
+  background: rgba(32, 32, 32, 0.96);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
+  text-align: center;
+  white-space: normal;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.lock-hint-enter-active,
+.lock-hint-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.lock-hint-enter-from,
+.lock-hint-leave-to {
+  opacity: 0;
+  transform: translate(-50%, -4px);
 }
 </style>
