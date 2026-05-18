@@ -161,7 +161,7 @@ const dynamicMenuItems = computed<MenuItem[]>(() => {
   // 弹幕和 SC 可以复制内容
   if (currentItem.value.kind === 'danmaku') {
     items.push({
-      label: '复制弹幕内容',
+      label: '复制弹幕',
       icon: '📝',
       action: () => currentItem.value?.kind === 'danmaku' && copyContent(currentItem.value.data.content, '弹幕内容')
     })
@@ -233,60 +233,62 @@ onUnmounted(() => {
 
 <template>
   <div class="interaction-tab">
-    <VirtualList
-      ref="virtualListRef"
-      v-model:auto-scroll="autoScroll"
-      class="interaction-list"
-      :items="mergedTimeline"
-      :item-key="interactionItemKey"
-      :estimate-size="42"
-      :overscan="16"
-      :layout-version="interactionLayoutVersion"
-    >
-      <template #default="{ item }">
-        <DanmakuItem
-          v-if="item.kind === 'danmaku'"
-          :message="item.data"
-          :show-medal="settingsStore.danmakuShowMedal"
-          :show-guard="settingsStore.danmakuShowGuard"
-          :show-admin="settingsStore.danmakuShowAdmin"
-          :show-time="settingsStore.danmakuShowTime"
-          :show-guard-border="settingsStore.danmakuShowGuardBorder"
-          :emoticon-size="settingsStore.danmakuEmoticonSize"
-          :is-special-follow="settingsStore.isSpecialFollow(item.data.user.uid)"
-          @contextmenu="handleContextMenu($event, { kind: 'danmaku', data: item.data })"
-        />
-        <GiftItem
-          v-else-if="item.kind === 'gift'"
-          :gift="item.data"
-          :show-time="settingsStore.giftShowTime"
-          :show-medal="settingsStore.giftShowMedal"
-          :is-special-follow="settingsStore.isSpecialFollow(item.data.user.uid)"
-          :expired="isGiftExpired(item.data)"
-          @contextmenu="handleContextMenu($event, { kind: 'gift', data: item.data })"
-        />
-        <SuperChatItem
-          v-else
-          :superchat="item.data"
-          @contextmenu="handleContextMenu($event, { kind: 'superchat', data: item.data })"
-        />
-      </template>
+    <div class="timeline-area">
+      <VirtualList
+        ref="virtualListRef"
+        v-model:auto-scroll="autoScroll"
+        class="interaction-list"
+        :items="mergedTimeline"
+        :item-key="interactionItemKey"
+        :estimate-size="42"
+        :overscan="16"
+        :layout-version="interactionLayoutVersion"
+      >
+        <template #default="{ item }">
+          <DanmakuItem
+            v-if="item.kind === 'danmaku'"
+            :message="item.data"
+            :show-medal="settingsStore.danmakuShowMedal"
+            :show-guard="settingsStore.danmakuShowGuard"
+            :show-admin="settingsStore.danmakuShowAdmin"
+            :show-time="settingsStore.danmakuShowTime"
+            :show-guard-border="settingsStore.danmakuShowGuardBorder"
+            :emoticon-size="settingsStore.danmakuEmoticonSize"
+            :is-special-follow="settingsStore.isSpecialFollow(item.data.user.uid)"
+            @contextmenu="handleContextMenu($event, { kind: 'danmaku', data: item.data })"
+          />
+          <GiftItem
+            v-else-if="item.kind === 'gift'"
+            :gift="item.data"
+            :show-time="settingsStore.giftShowTime"
+            :show-medal="settingsStore.giftShowMedal"
+            :is-special-follow="settingsStore.isSpecialFollow(item.data.user.uid)"
+            :expired="isGiftExpired(item.data)"
+            @contextmenu="handleContextMenu($event, { kind: 'gift', data: item.data })"
+          />
+          <SuperChatItem
+            v-else
+            :superchat="item.data"
+            @contextmenu="handleContextMenu($event, { kind: 'superchat', data: item.data })"
+          />
+        </template>
 
-      <template #empty>
-        <div class="empty-state">
-          <span class="icon">✨</span>
-          <span class="text">等待互动中...</span>
-          <span class="text" style="font-size: var(--font-size-xs); color: var(--text-muted);">{{ getRandomTip() }}</span>
-        </div>
-      </template>
-    </VirtualList>
+        <template #empty>
+          <div class="empty-state">
+            <span class="icon">✨</span>
+            <span class="text">等待互动中...</span>
+            <span class="text" style="font-size: var(--font-size-xs); color: var(--text-muted);">{{ getRandomTip() }}</span>
+          </div>
+        </template>
+      </VirtualList>
 
-    <!-- 回到底部按钮 -->
-    <Transition name="fade">
-      <button v-if="!autoScroll" class="scroll-btn" @click="scrollToBottom">
-        ↓ 回到底部
-      </button>
-    </Transition>
+      <!-- 回到底部按钮 -->
+      <Transition name="fade">
+        <button v-if="!autoScroll" class="scroll-btn" @click="scrollToBottom">
+          ↓ 回到底部
+        </button>
+      </Transition>
+    </div>
 
     <!-- 入场通知面板 -->
     <EntryPanel />
@@ -321,6 +323,13 @@ onUnmounted(() => {
   height: 100%;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+
+.timeline-area {
+  flex: 1;
+  min-height: 0;
+  display: flex;
   position: relative;
   overflow: hidden;
 }

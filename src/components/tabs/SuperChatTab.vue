@@ -15,8 +15,19 @@ const settingsStore = useSettingsStore()
 const contextMenuRef = ref<InstanceType<typeof ContextMenu>>()
 const currentSC = ref<ProcessedSuperChat | null>(null)
 
+type VirtualListExpose = {
+  scrollToBottom: () => void
+}
+
+const virtualListRef = ref<VirtualListExpose | null>(null)
+const autoScroll = ref(true)
+const orderedSuperChatList = computed(() => [...danmakuStore.superChatList].reverse())
 const superChatItemKey = (sc: ProcessedSuperChat) => sc.id
 const superChatLayoutVersion = computed(() => settingsStore.mainWindowSettings.fontSize)
+
+const scrollToBottom = () => {
+  virtualListRef.value?.scrollToBottom()
+}
 
 const menuItems = ref<MenuItem[]>([
   {
@@ -77,13 +88,13 @@ const copyContent = () => {
     </div>
     
     <VirtualList
+      ref="virtualListRef"
+      v-model:auto-scroll="autoScroll"
       class="sc-list"
-      :items="danmakuStore.superChatList"
+      :items="orderedSuperChatList"
       :item-key="superChatItemKey"
       :estimate-size="112"
       :overscan="6"
-      :stick-to-bottom="false"
-      :auto-scroll="false"
       :layout-version="superChatLayoutVersion"
     >
       <template #default="{ item: sc }">
@@ -99,6 +110,13 @@ const copyContent = () => {
         </div>
       </template>
     </VirtualList>
+
+    <!-- 回到底部按钮 -->
+    <Transition name="fade">
+      <button v-if="!autoScroll" class="scroll-btn" @click="scrollToBottom">
+        ↓ 回到底部
+      </button>
+    </Transition>
     
     <ContextMenu ref="contextMenuRef" :items="menuItems" />
   </div>
@@ -110,6 +128,7 @@ const copyContent = () => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
 }
 
 .stats-bar {
@@ -149,5 +168,34 @@ const copyContent = () => {
   .text {
     font-size: var(--font-size-sm);
   }
+}
+
+.scroll-btn {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 16px;
+  background: var(--bg-active);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition: background 0.15s;
+
+  &:hover {
+    background: var(--bg-hover);
+  }
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>
