@@ -49,6 +49,15 @@ const shouldAutoRefresh = computed(() =>
   danmakuStore.isConnected
 )
 
+const autoRefreshDebugState = () => ({
+  active: isTabActive.value,
+  enabled: settingsStore.audienceAutoRefreshEnabled,
+  sortType: settingsStore.audienceSortType,
+  hasCookie: !!settingsStore.settings.cookie,
+  connected: danmakuStore.isConnected,
+  intervalSeconds: autoRefreshIntervalSeconds.value
+})
+
 const pinSpecialFollowUsers = (list: DisplayUser[]): DisplayUser[] => {
   return list
     .map((user, index) => ({
@@ -118,22 +127,25 @@ const totalCount = computed(() => danmakuStore.contributionRankFull.length)
 
 // 刷新贡献排行榜
 const refreshRank = async (silent = false) => {
+  const source = silent ? 'auto' : 'manual'
   const cookie = settingsStore.settings.cookie
   if (!cookie) {
-    if (!silent) console.warn('[AudienceTab] 无法刷新：未设置 Cookie')
+    console.warn(`[AudienceTab] ${source} refresh skipped: missing cookie`)
     return
   }
 
   if (isRefreshing.value) {
+    console.log(`[AudienceTab] ${source} refresh skipped: request already in progress`)
     return
   }
 
   isRefreshing.value = true
   try {
+    console.log(`[AudienceTab] ${source} refresh command sent`, autoRefreshDebugState())
     await refreshContributionRank(cookie)
-    if (!silent) console.log('[AudienceTab] 贡献排行榜已刷新')
+    console.log(`[AudienceTab] ${source} refresh command accepted`)
   } catch (error) {
-    console.error(silent ? '[AudienceTab] 自动刷新贡献排行榜失败:' : '[AudienceTab] 刷新贡献排行榜失败:', error)
+    console.error(`[AudienceTab] ${source} refresh command failed:`, error)
   } finally {
     isRefreshing.value = false
   }
@@ -147,16 +159,21 @@ const clearAutoRefreshTimer = () => {
   if (autoRefreshTimer !== null) {
     window.clearInterval(autoRefreshTimer)
     autoRefreshTimer = null
+    console.log('[AudienceTab] auto refresh timer cleared')
   }
 }
 
 const resetAutoRefreshTimer = () => {
   clearAutoRefreshTimer()
-  if (!shouldAutoRefresh.value) return
+  if (!shouldAutoRefresh.value) {
+    console.log('[AudienceTab] auto refresh timer not started', autoRefreshDebugState())
+    return
+  }
 
   autoRefreshTimer = window.setInterval(() => {
     void refreshRank(true)
   }, autoRefreshIntervalSeconds.value * 1000)
+  console.log('[AudienceTab] auto refresh timer started', autoRefreshDebugState())
 }
 
 watch([shouldAutoRefresh, autoRefreshIntervalSeconds], resetAutoRefreshTimer, { immediate: true })

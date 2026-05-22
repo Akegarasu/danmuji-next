@@ -167,6 +167,19 @@ export async function initBliveClient(eventTypes?: EventType[]): Promise<void> {
   const snapshot = await getDataSnapshot(typesToSubscribe)
   applySnapshot(snapshot, danmakuStore)
 
+  // 新窗口可能在直播间已连接后才打开，需要主动同步一次当前连接状态
+  try {
+    const status = await getConnectionStatus()
+    if (status === 'connected' || status === 'reconnecting') {
+      danmakuStore.setConnected(true)
+    } else if (status === 'disconnected' || typeof status === 'object') {
+      danmakuStore.setConnected(false)
+    }
+    console.log('[BliveClient] Initial status synced:', status)
+  } catch (e) {
+    console.warn('[BliveClient] Failed to sync initial status:', e)
+  }
+
   // 监听连接状态变化（全局广播，所有窗口都需要）
   statusUnlisten = await listen<ConnectionStatus>('blive-status', (event) => {
     if (event.payload === 'connected') {
@@ -185,6 +198,14 @@ export async function initBliveClient(eventTypes?: EventType[]): Promise<void> {
   const dataEventName = `blive-data:${currentWindowLabel}`
   dataUnlisten = await listen<DataUpdate[]>(dataEventName, (event) => {
     const updates = event.payload
+    const contributionRankFull = updates.find((update) => update.type === 'ContributionRankFull')
+    if (contributionRankFull?.type === 'ContributionRankFull') {
+      console.log('[BliveClient] ContributionRankFull received:', {
+        windowLabel: currentWindowLabel,
+        count: contributionRankFull.data.length,
+        topUid: contributionRankFull.data[0]?.uid ?? null
+      })
+    }
 
     for (const update of updates) {
       processDataUpdate(update, danmakuStore)

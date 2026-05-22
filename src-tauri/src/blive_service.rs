@@ -86,8 +86,18 @@ impl BliveService {
 
         let room_info = match room_info {
             Some(info) => info,
-            None => return Err("未连接房间".to_string()),
+            None => {
+                log::warn!("[ContributionRank] refresh skipped: room is not connected");
+                return Err("未连接房间".to_string());
+            }
         };
+
+        log::info!(
+            "[ContributionRank] refresh requested: room_id={}, ruid={}, has_cookie={}",
+            room_info.room_id,
+            room_info.uid,
+            !cookie.is_empty()
+        );
 
         let http_client = reqwest::Client::new();
         match get_contribution_rank(
@@ -102,13 +112,21 @@ impl BliveService {
         {
             Ok(rank) => {
                 let list = rank.list.clone();
+                log::info!(
+                    "[ContributionRank] refresh success: count={}, top_uid={:?}",
+                    list.len(),
+                    list.first().map(|user| user.uid)
+                );
                 self.live_data
                     .lock()
                     .await
                     .set_contribution_rank_full(list.clone());
                 Ok(list)
             }
-            Err(e) => Err(format!("获取贡献排行榜失败: {}", e)),
+            Err(e) => {
+                log::warn!("[ContributionRank] refresh failed: {}", e);
+                Err(format!("获取贡献排行榜失败: {}", e))
+            }
         }
     }
 
