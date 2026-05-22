@@ -15,9 +15,9 @@
     "jsx": "preserve",
 
     /* Path aliases */
-    "baseUrl": ".",
+    // "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     },
 
     /* Linting */

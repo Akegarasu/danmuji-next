@@ -185,6 +185,7 @@ pub fn run() {
             commands::get_archive_sessions,
             commands::get_archive_session_detail,
             commands::search_archive_danmaku,
+            commands::lookup_archive_user_names,
             commands::search_archive_gifts,
             commands::search_archive_superchat,
             commands::delete_archive_session,

@@ -100,6 +100,10 @@ export interface DisplaySettings {
   audienceSortType: AudienceSortType
   audienceShowEnterMsg: boolean
   audienceShowMedal: boolean
+  /** 自动刷新贡献榜 */
+  audienceAutoRefreshEnabled: boolean
+  /** 自动刷新间隔（秒） */
+  audienceAutoRefreshIntervalSeconds: number
 
   // 入场通知设置
   entryShowEnabled: boolean
@@ -152,6 +156,8 @@ export const DEFAULT_DISPLAY_SETTINGS: DisplaySettings = {
   audienceSortType: 'enterTime',
   audienceShowEnterMsg: true,
   audienceShowMedal: true,
+  audienceAutoRefreshEnabled: false,
+  audienceAutoRefreshIntervalSeconds: 120,
   entryShowEnabled: true,
   entryFilterAll: true,
   entryFilterCaptain: false,
@@ -465,6 +471,12 @@ export interface ArchivedDanmaku {
   timestamp: number
   is_emoticon: boolean
   emoticon_url?: string
+}
+
+/** 存档中的用户名称 */
+export interface ArchivedUserName {
+  uid: number
+  name: string
 }
 
 /** 存档礼物 */

@@ -54,6 +54,8 @@ export const useSettingsStore = defineStore('settings', () => {
   const audienceSortType = computed(() => settings.value.display.audienceSortType)
   const audienceShowEnterMsg = computed(() => settings.value.display.audienceShowEnterMsg)
   const audienceShowMedal = computed(() => settings.value.display.audienceShowMedal)
+  const audienceAutoRefreshEnabled = computed(() => settings.value.display.audienceAutoRefreshEnabled)
+  const audienceAutoRefreshIntervalSeconds = computed(() => settings.value.display.audienceAutoRefreshIntervalSeconds)
 
   // 入场通知设置
   const entryShowEnabled = computed(() => settings.value.display.entryShowEnabled)
@@ -234,6 +236,8 @@ export const useSettingsStore = defineStore('settings', () => {
     audienceSortType,
     audienceShowEnterMsg,
     audienceShowMedal,
+    audienceAutoRefreshEnabled,
+    audienceAutoRefreshIntervalSeconds,
     entryShowEnabled,
     entryFilterAll,
     entryFilterCaptain,

@@ -16,6 +16,7 @@ import {
   getCurrentRoomInfo,
   type ConnectionStatus
 } from '@/services/blive-client'
+import { lookupArchiveUserNames } from '@/services/archive'
 import { checkForUpdate, getAppVersion, isPortable, type UpdateInfo } from '@/services/updater'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
@@ -362,6 +363,27 @@ const audienceShowMedal = computed({
   set: (v) => settingsStore.updateDisplaySettings({ audienceShowMedal: v })
 })
 
+const audienceAutoRefreshEnabled = computed({
+  get: () => settings.value.display.audienceAutoRefreshEnabled,
+  set: (v) => settingsStore.updateDisplaySettings({ audienceAutoRefreshEnabled: v })
+})
+
+const clampAudienceRefreshInterval = (seconds: number) =>
+  Math.min(300, Math.max(10, Number.isFinite(seconds) ? Math.round(seconds) : 120))
+
+const audienceAutoRefreshIntervalSeconds = computed({
+  get: () => settings.value.display.audienceAutoRefreshIntervalSeconds,
+  set: (v) => settingsStore.updateDisplaySettings({
+    audienceAutoRefreshIntervalSeconds: clampAudienceRefreshInterval(v)
+  })
+})
+
+const audienceAutoRefreshIntervalLabel = computed(() => {
+  const seconds = audienceAutoRefreshIntervalSeconds.value
+  if (seconds % 60 === 0) return `${seconds / 60} 分钟`
+  return `${seconds} 秒`
+})
+
 // 入场通知设置
 const entryShowEnabled = computed({
   get: () => settings.value.display.entryShowEnabled,
@@ -406,6 +428,9 @@ const entryFilterSpecialFollow = computed({
 // ==================== 特别关注 ====================
 
 const newSpecialUid = ref('')
+const specialFollowNames = ref<Record<number, string>>({})
+const specialFollowNamesLoading = ref(false)
+let specialFollowNamesLoadId = 0
 
 const addSpecialUid = () => {
   const uid = parseInt(newSpecialUid.value.trim(), 10)
@@ -417,6 +442,51 @@ const addSpecialUid = () => {
 const removeSpecialUid = (uid: number) => {
   settingsStore.removeSpecialFollow(uid)
 }
+
+const getSpecialFollowLabel = (uid: number) => {
+  const name = specialFollowNames.value[uid]
+  return name ? `${name}（${uid}）` : `UID: ${uid}`
+}
+
+const loadSpecialFollowNames = async () => {
+  const uids = [...settingsStore.specialFollowUids]
+  const loadId = ++specialFollowNamesLoadId
+
+  if (uids.length === 0) {
+    specialFollowNames.value = {}
+    specialFollowNamesLoading.value = false
+    return
+  }
+
+  specialFollowNamesLoading.value = true
+
+  try {
+    const users = await lookupArchiveUserNames(uids)
+    if (loadId !== specialFollowNamesLoadId) return
+
+    const nextNames: Record<number, string> = {}
+    for (const user of users) {
+      nextNames[user.uid] = user.name
+    }
+    specialFollowNames.value = nextNames
+  } catch (e) {
+    console.warn('[Settings] 查询特别关注用户名失败:', e)
+  } finally {
+    if (loadId === specialFollowNamesLoadId) {
+      specialFollowNamesLoading.value = false
+    }
+  }
+}
+
+watch(
+  () => [activeSection.value, settingsStore.specialFollowUids.join(',')],
+  () => {
+    if (activeSection.value === 'special-follow') {
+      void loadSpecialFollowNames()
+    }
+  },
+  { immediate: true }
+)
 
 // ==================== 屏蔽词 ====================
 
@@ -811,6 +881,38 @@ const openProjectUrl = async () => {
             <input v-model="audienceShowMedal" type="checkbox" class="toggle-checkbox" />
           </div>
 
+          <div class="setting-group toggle">
+            <label class="setting-label">自动刷新贡献榜</label>
+            <input v-model="audienceAutoRefreshEnabled" type="checkbox" class="toggle-checkbox" />
+          </div>
+
+          <div v-if="audienceAutoRefreshEnabled" class="setting-group">
+            <label class="setting-label">
+              刷新间隔
+              <span class="value">{{ audienceAutoRefreshIntervalLabel }}</span>
+            </label>
+            <div class="range-input-row">
+              <input
+                v-model.number="audienceAutoRefreshIntervalSeconds"
+                type="range"
+                min="10"
+                max="300"
+                step="10"
+                class="setting-slider"
+              />
+              <input
+                v-model.number="audienceAutoRefreshIntervalSeconds"
+                type="number"
+                min="10"
+                max="300"
+                step="10"
+                class="setting-number-input"
+              />
+              <span class="interval-unit">秒</span>
+            </div>
+            <div class="setting-hint">可设置 10 秒到 5 分钟。</div>
+          </div>
+
           <h3 class="section-title" style="margin-top: 24px;">入场通知</h3>
 
           <div class="setting-group toggle">
@@ -881,7 +983,10 @@ const openProjectUrl = async () => {
           </div>
 
           <div class="setting-group">
-            <label class="setting-label">已关注列表</label>
+            <label class="setting-label">
+              已关注列表
+              <span v-if="specialFollowNamesLoading" class="value">查询中...</span>
+            </label>
             <div v-if="settingsStore.specialFollowUids.length === 0" class="special-follow-empty">
               暂无特别关注
             </div>
@@ -891,7 +996,7 @@ const openProjectUrl = async () => {
                 :key="uid"
                 class="special-follow-item"
               >
-                <span class="special-follow-uid">UID: {{ uid }}</span>
+                <span class="special-follow-uid">{{ getSpecialFollowLabel(uid) }}</span>
                 <button class="special-follow-remove-btn" @click="removeSpecialUid(uid)">×</button>
               </div>
             </div>
@@ -1443,6 +1548,37 @@ const openProjectUrl = async () => {
   }
 }
 
+.range-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  .setting-slider {
+    flex: 1;
+  }
+}
+
+.setting-number-input {
+  width: 64px;
+  padding: 6px 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  outline: none;
+
+  &:focus {
+    border-color: var(--accent-primary);
+  }
+}
+
+.interval-unit {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
 .checkbox-group {
   display: flex;
   flex-wrap: wrap;
@@ -1605,7 +1741,9 @@ const openProjectUrl = async () => {
   .special-follow-uid {
     font-size: var(--font-size-sm);
     color: var(--text-primary);
-    font-family: monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .special-follow-remove-btn {

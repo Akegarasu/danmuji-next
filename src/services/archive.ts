@@ -8,6 +8,7 @@ import type {
   ArchiveSession,
   PagedResult,
   ArchivedDanmaku,
+  ArchivedUserName,
   ArchivedGift,
   ArchivedSuperChat,
 } from '@/types'
@@ -32,6 +33,10 @@ export const searchArchiveDanmaku = async (
     page,
     pageSize,
   })
+}
+
+export const lookupArchiveUserNames = async (uids: number[]): Promise<ArchivedUserName[]> => {
+  return await invoke<ArchivedUserName[]>('lookup_archive_user_names', { uids })
 }
 
 export const searchArchiveGifts = async (

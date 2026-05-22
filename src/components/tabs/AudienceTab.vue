@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onActivated, onDeactivated, onUnmounted, ref, watch } from 'vue'
 import { useDanmakuStore } from '@/stores/danmaku'
 import { useSettingsStore } from '@/stores/settings'
 import { formatPrice, getMedalGradient } from '@/types'
@@ -18,6 +18,8 @@ const isRefreshing = ref(false)
 // 右键菜单
 const contextMenuRef = ref<InstanceType<typeof ContextMenu>>()
 const currentUser = ref<DisplayUser | null>(null)
+const isTabActive = ref(true)
+let autoRefreshTimer: number | null = null
 
 // 用于显示的用户项类型
 interface DisplayUser {
@@ -32,23 +34,54 @@ interface DisplayUser {
   medalColor?: string
 }
 
+const normalizeRefreshInterval = (seconds: number) =>
+  Math.min(300, Math.max(10, Number.isFinite(seconds) ? Math.round(seconds) : 120))
+
+const autoRefreshIntervalSeconds = computed(() =>
+  normalizeRefreshInterval(settingsStore.audienceAutoRefreshIntervalSeconds)
+)
+
+const shouldAutoRefresh = computed(() =>
+  isTabActive.value &&
+  settingsStore.audienceAutoRefreshEnabled &&
+  settingsStore.audienceSortType !== 'giftValue' &&
+  !!settingsStore.settings.cookie &&
+  danmakuStore.isConnected
+)
+
+const pinSpecialFollowUsers = (list: DisplayUser[]): DisplayUser[] => {
+  return list
+    .map((user, index) => ({
+      user,
+      index,
+      isSpecialFollow: settingsStore.isSpecialFollow(user.uid)
+    }))
+    .sort((a, b) => {
+      if (a.isSpecialFollow !== b.isSpecialFollow) {
+        return a.isSpecialFollow ? -1 : 1
+      }
+      return a.index - b.index
+    })
+    .map(({ user }) => user)
+}
+
 // 根据排序类型选择数据源
 const displayList = computed((): DisplayUser[] => {
   const sortType = settingsStore.audienceSortType
   
   if (sortType === 'giftValue') {
     // 使用本场贡献排行（礼物/SC 贡献）
-    return danmakuStore.contributions.map((c, index) => ({
+    return pinSpecialFollowUsers(danmakuStore.contributions.map((c, index) => ({
       uid: c.uid,
       name: c.name,
       face: c.face,
       guardLevel: c.guard_level,
       score: formatPrice(c.total_value) || '',
       rank: index + 1
-    }))
+    })))
   } else {
     // 使用贡献排行榜（API 获取的完整列表）
-    return danmakuStore.contributionRankFull.map(u => ({
+    return pinSpecialFollowUsers(danmakuStore.contributionRankFull.map(u => ({
       uid: u.uid,
       name: u.name,
       face: u.face,
@@ -58,7 +91,7 @@ const displayList = computed((): DisplayUser[] => {
       medalName: u.medal_name,
       medalLevel: u.medal_level,
       medalColor: u.medal_color
-    }))
+    })))
   }
 })
 
@@ -84,25 +117,77 @@ const sortLabel = computed(() => {
 const totalCount = computed(() => danmakuStore.contributionRankFull.length)
 
 // 刷新贡献排行榜
-const handleRefresh = async () => {
+const refreshRank = async (silent = false) => {
   const cookie = settingsStore.settings.cookie
   if (!cookie) {
-    console.warn('[AudienceTab] 无法刷新：未设置 Cookie')
+    if (!silent) console.warn('[AudienceTab] 无法刷新：未设置 Cookie')
+    return
+  }
+
+  if (isRefreshing.value) {
     return
   }
 
   isRefreshing.value = true
   try {
     await refreshContributionRank(cookie)
-    console.log('[AudienceTab] 贡献排行榜已刷新')
+    if (!silent) console.log('[AudienceTab] 贡献排行榜已刷新')
   } catch (error) {
-    console.error('[AudienceTab] 刷新贡献排行榜失败:', error)
+    console.error(silent ? '[AudienceTab] 自动刷新贡献排行榜失败:' : '[AudienceTab] 刷新贡献排行榜失败:', error)
   } finally {
     isRefreshing.value = false
   }
 }
 
+const handleRefresh = async () => {
+  await refreshRank(false)
+}
+
+const clearAutoRefreshTimer = () => {
+  if (autoRefreshTimer !== null) {
+    window.clearInterval(autoRefreshTimer)
+    autoRefreshTimer = null
+  }
+}
+
+const resetAutoRefreshTimer = () => {
+  clearAutoRefreshTimer()
+  if (!shouldAutoRefresh.value) return
+
+  autoRefreshTimer = window.setInterval(() => {
+    void refreshRank(true)
+  }, autoRefreshIntervalSeconds.value * 1000)
+}
+
+watch([shouldAutoRefresh, autoRefreshIntervalSeconds], resetAutoRefreshTimer, { immediate: true })
+
+onActivated(() => {
+  isTabActive.value = true
+})
+
+onDeactivated(() => {
+  isTabActive.value = false
+  clearAutoRefreshTimer()
+})
+
+onUnmounted(() => {
+  clearAutoRefreshTimer()
+})
+
 // ==================== 右键菜单 ====================
+
+const isCurrentSpecialFollow = computed(() =>
+  currentUser.value ? settingsStore.isSpecialFollow(currentUser.value.uid) : false
+)
+
+const toggleCurrentSpecialFollow = () => {
+  if (!currentUser.value) return
+  if (settingsStore.isSpecialFollow(currentUser.value.uid)) {
+    settingsStore.removeSpecialFollow(currentUser.value.uid)
+  } else {
+    settingsStore.addSpecialFollow(currentUser.value.uid)
+  }
+}
 
 const menuItems = computed<MenuItem[]>(() => ([
   {
@@ -114,6 +199,12 @@ const menuItems = computed<MenuItem[]>(() => ([
     label: '复制用户名',
     icon: '📋',
     action: () => copyUsername()
+  },
+  { divider: true, label: '', action: () => { } },
+  {
+    label: isCurrentSpecialFollow.value ? '取消特别关注' : '特别关注',
+    icon: '⭐',
+    action: () => toggleCurrentSpecialFollow()
   }
 ]))
 
@@ -163,17 +254,20 @@ const copyUsername = () => {
     
     <div class="audience-list">
       <div 
-        v-for="(user, index) in displayList"
+        v-for="user in displayList"
         :key="user.uid"
         class="audience-item"
-        :class="{ 'has-guard': user.guardLevel > 0 }"
+        :class="{
+          'has-guard': user.guardLevel > 0,
+          'is-special-follow': settingsStore.isSpecialFollow(user.uid)
+        }"
         @contextmenu="handleContextMenu($event, user)"
       >
-        <div class="rank-badge" v-if="index < 3">
-          {{ ['🥇', '🥈', '🥉'][index] }}
+        <div class="rank-badge" v-if="user.rank <= 3">
+          {{ ['🥇', '🥈', '🥉'][user.rank - 1] }}
         </div>
         <div class="rank-num" v-else>
-          {{ index + 1 }}
+          {{ user.rank }}
         </div>
         
         <div class="user-info">
@@ -295,6 +389,19 @@ const copyUsername = () => {
   &.has-guard {
     background: rgba(91, 142, 201, 0.1);
   }
+
+  &.is-special-follow {
+    background: rgba(245, 200, 66, 0.12);
+    border-left: 3px solid #f5c842;
+
+    &:hover {
+      background: rgba(245, 200, 66, 0.2);
+    }
+
+    .name {
+      color: var(--accent-gold);
+    }
+  }
 }
 
 .rank-badge {
@@ -343,6 +450,12 @@ const copyUsername = () => {
   flex-shrink: 0;
   line-height: 1.3;
   opacity: 0.9;
+}
+
+.special-badge {
+  flex-shrink: 0;
+  font-size: 0.85em;
+  line-height: 1;
 }
 
 .name {

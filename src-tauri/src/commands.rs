@@ -13,7 +13,8 @@ use std::sync::Mutex;
 
 use crate::auth::{self, QRCodeData, QRCodeStatus, UserInfo};
 use crate::archive::{
-    ArchiveManager, ArchiveSession, ArchivedDanmaku, ArchivedGift, ArchivedSuperChat, PagedResult,
+    ArchiveManager, ArchiveSession, ArchivedDanmaku, ArchivedGift, ArchivedSuperChat,
+    ArchivedUserName, PagedResult,
 };
 use crate::blive_service::BliveService;
 use crate::live_types::{
@@ -691,6 +692,15 @@ pub async fn search_archive_danmaku(
     archive
         .search_danmaku(session_id, &query, page, page_size)
         .await
+}
+
+/// 批量查询 UID 对应的最近用户名
+#[tauri::command]
+pub async fn lookup_archive_user_names(
+    archive: State<'_, Arc<ArchiveManager>>,
+    uids: Vec<u64>,
+) -> Result<Vec<ArchivedUserName>, String> {
+    archive.lookup_user_names(uids).await
 }
 
 /// 搜索存档礼物

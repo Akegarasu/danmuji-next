@@ -8,7 +8,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, Mutex};
 
@@ -155,6 +155,12 @@ pub struct ArchivedSuperChat {
     pub background_color: String,
     pub duration: u32,
     pub start_time: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArchivedUserName {
+    pub uid: u64,
+    pub name: String,
 }
 
 // ==================== ArchiveManager ====================
@@ -591,6 +597,62 @@ impl ArchiveManager {
             page,
             page_size,
         })
+    }
+
+    pub async fn lookup_user_names(&self, uids: Vec<u64>) -> Result<Vec<ArchivedUserName>, String> {
+        let mut uids = uids
+            .into_iter()
+            .filter(|uid| *uid > 0)
+            .collect::<Vec<_>>();
+        uids.sort_unstable();
+        uids.dedup();
+
+        if uids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let db = self.db.lock().await;
+        db.execute_batch(
+            r#"
+CREATE INDEX IF NOT EXISTS idx_danmaku_user_latest ON danmaku(user_uid, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_gifts_user_latest ON gifts(user_uid, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_sc_user_latest ON super_chats(user_uid, start_time DESC);
+"#,
+        )
+        .map_err(|e| format!("初始化用户查询索引失败: {}", e))?;
+
+        let mut result = Vec::new();
+
+        for uid in uids {
+            let mut latest: Option<(String, i64)> = None;
+            for sql in [
+                "SELECT user_name, timestamp FROM danmaku WHERE user_uid = ?1 AND user_name <> '' ORDER BY timestamp DESC LIMIT 1",
+                "SELECT user_name, timestamp FROM gifts WHERE user_uid = ?1 AND user_name <> '' ORDER BY timestamp DESC LIMIT 1",
+                "SELECT user_name, start_time FROM super_chats WHERE user_uid = ?1 AND user_name <> '' ORDER BY start_time DESC LIMIT 1",
+            ] {
+                let row = db
+                    .query_row(sql, params![uid as i64], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                    })
+                    .optional()
+                    .map_err(|e| e.to_string())?;
+
+                if let Some((name, timestamp)) = row {
+                    if latest
+                        .as_ref()
+                        .map_or(true, |(_, latest_timestamp)| timestamp > *latest_timestamp)
+                    {
+                        latest = Some((name, timestamp));
+                    }
+                }
+            }
+
+            if let Some((name, _)) = latest {
+                result.push(ArchivedUserName { uid, name });
+            }
+        }
+
+        Ok(result)
     }
 
     pub async fn search_gifts(
