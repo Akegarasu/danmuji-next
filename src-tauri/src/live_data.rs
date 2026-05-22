@@ -241,7 +241,7 @@ impl LiveData {
         let merge_key = format!("{}_{}_{}", gift.sender_uid, gift.gift_id, time_bucket);
 
         let value = if gift.coin_type == CoinType::Gold {
-            gift.price as u64 / 100
+            gift.total_coin as u64 / 100
         } else {
             0
         };

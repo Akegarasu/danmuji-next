@@ -240,7 +240,7 @@ onUnmounted(() => {
     <Teleport to="body">
       <Transition name="lock-hint">
         <div v-if="showLockHint" class="lock-hint">
-          已锁定，可在任务栏托盘图标右键菜单解锁
+          已锁定，可在电脑右下角任务栏托盘图标右键菜单解锁
         </div>
       </Transition>
     </Teleport>
