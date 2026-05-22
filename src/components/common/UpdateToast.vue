@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { downloadAndInstall, type UpdateInfo, type DownloadProgress } from '@/services/updater'
+import { createLogger } from '@/services/logger'
 
 const props = defineProps<{
   updateInfo: UpdateInfo
@@ -15,6 +16,7 @@ const emit = defineEmits<{
 const isDownloading = ref(false)
 const progress = ref<DownloadProgress>({ downloaded: 0, total: null })
 const downloadError = ref('')
+const logger = createLogger('UpdateToast')
 
 // 自动关闭计时器
 let autoCloseTimer: ReturnType<typeof setTimeout> | null = null
@@ -70,7 +72,7 @@ async function doUpdate() {
       progress.value = p
     })
   } catch (e) {
-    console.error('[updater] 下载安装失败:', e)
+    logger.error('下载安装失败:', e)
     downloadError.value = String(e)
     isDownloading.value = false
     // 失败后重新启动自动关闭

@@ -19,6 +19,9 @@ import {
   searchArchiveSuperChat,
   deleteArchiveSession,
 } from '@/services/archive'
+import { createLogger } from '@/services/logger'
+
+const logger = createLogger('ArchiveStore')
 
 export const useArchiveStore = defineStore('archive', () => {
   const sessions = ref<ArchiveSession[]>([])
@@ -43,7 +46,7 @@ export const useArchiveStore = defineStore('archive', () => {
     try {
       sessions.value = await getArchiveSessions()
     } catch (e) {
-      console.error('Failed to load archive sessions:', e)
+      logger.error('Failed to load archive sessions:', e)
     }
   }
 
@@ -81,7 +84,7 @@ export const useArchiveStore = defineStore('archive', () => {
         scResult.value = { items: [], total: 0, page: p, page_size: ps }
       }
     } catch (e) {
-      console.error('Archive search failed:', e)
+      logger.error('Archive search failed:', e)
     } finally {
       loading.value = false
     }
@@ -98,7 +101,7 @@ export const useArchiveStore = defineStore('archive', () => {
         scResult.value = { items: [], total: 0, page: 1, page_size: 50 }
       }
     } catch (e) {
-      console.error('Failed to delete archive session:', e)
+      logger.error('Failed to delete archive session:', e)
     }
   }
 

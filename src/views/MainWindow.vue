@@ -14,8 +14,10 @@ import { useSettingsStore } from '@/stores/settings'
 import { startAutoCheck, stopAutoCheck, type UpdateInfo } from '@/services/updater'
 import type { TabType } from '@/types'
 import type { UnlistenFn } from '@tauri-apps/api/event'
+import { createLogger } from '@/services/logger'
 
 const settingsStore = useSettingsStore()
+const logger = createLogger('MainWindow')
 const activeTab = ref<TabType>('interaction')
 const isLocked = ref(false)
 const isWindowFocused = ref(true)
@@ -50,7 +52,7 @@ const popOutTab = async (tabType: TabType) => {
   try {
     await createTabWindow(tabType, tab.label)
   } catch (e) {
-    console.error('Failed to create tab window:', e)
+    logger.error('Failed to create tab window:', e)
   }
 }
 

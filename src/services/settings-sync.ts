@@ -12,9 +12,11 @@ import type { UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useSettingsStore } from '@/stores/settings'
 import { applyCurrentSettings } from './settings-applier'
+import { createLogger } from '@/services/logger'
 
 // 事件名称
 const SETTINGS_UPDATED_EVENT = 'settings-updated'
+const logger = createLogger('SettingsSync')
 
 let unlistenFn: UnlistenFn | null = null
 let currentWindowLabel = ''
@@ -25,9 +27,9 @@ let currentWindowLabel = ''
 export const broadcastSettingsUpdate = async () => {
   try {
     await emit(SETTINGS_UPDATED_EVENT, { source: currentWindowLabel })
-    console.log('[SettingsSync] Broadcasted settings update')
+    logger.debug('Broadcasted settings update')
   } catch (e) {
-    console.error('[SettingsSync] Failed to broadcast:', e)
+    logger.error('Failed to broadcast:', e)
   }
 }
 
@@ -40,7 +42,7 @@ const handleSettingsUpdate = async (event: { payload: { source: string } }) => {
     return
   }
   
-  console.log('[SettingsSync] Received settings update from:', event.payload.source)
+  logger.debug('Received settings update from:', event.payload.source)
   
   // 从后端重新加载设置
   const settingsStore = useSettingsStore()
@@ -64,9 +66,9 @@ export const initSettingsSync = async () => {
     
     unlistenFn = await listen(SETTINGS_UPDATED_EVENT, handleSettingsUpdate)
     
-    console.log('[SettingsSync] Initialized for window:', currentWindowLabel)
+    logger.debug('Initialized for window:', currentWindowLabel)
   } catch (e) {
-    console.error('[SettingsSync] Failed to initialize:', e)
+    logger.error('Failed to initialize:', e)
   }
 }
 

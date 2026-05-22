@@ -7,6 +7,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import type { UnlistenFn } from '@tauri-apps/api/event'
+import { createLogger } from '@/services/logger'
 
 // ==================== 类型定义 ====================
 
@@ -38,6 +39,8 @@ const TAB_TITLES: Record<string, string> = {
   'audience': '观众'
 }
 
+const logger = createLogger('WindowManager')
+
 // ==================== 常量配置 ====================
 
 /** 去抖延迟时间（毫秒） */
@@ -60,7 +63,7 @@ export const getSavedWindowState = async (label: string): Promise<WindowState | 
   try {
     return await invoke<WindowState | null>('get_saved_window_state', { label })
   } catch (e) {
-    console.error(`[WindowManager] Failed to get saved state for ${label}:`, e)
+    logger.error(`Failed to get saved state for ${label}:`, e)
     return null
   }
 }
@@ -76,10 +79,10 @@ export const saveWindowState = async (label: string): Promise<boolean> => {
     // 保存到 KV 存储
     await invoke('save_window_state', { label, state })
     
-    console.log(`[WindowManager] Saved state for ${label}:`, state)
+    logger.debug(`Saved state for ${label}:`, state)
     return true
   } catch (e) {
-    console.error(`[WindowManager] Failed to save state for ${label}:`, e)
+    logger.error(`Failed to save state for ${label}:`, e)
     return false
   }
 }
@@ -92,15 +95,15 @@ export const restoreWindowState = async (label: string): Promise<boolean> => {
     const state = await getSavedWindowState(label)
     
     if (!state || state.width < MIN_VALID_SIZE || state.height < MIN_VALID_SIZE) {
-      console.log(`[WindowManager] No valid saved state for ${label}`)
+      logger.debug(`No valid saved state for ${label}`)
       return false
     }
     
     await invoke('set_window_state', { label, state })
-    console.log(`[WindowManager] Restored state for ${label}:`, state)
+    logger.debug(`Restored state for ${label}:`, state)
     return true
   } catch (e) {
-    console.error(`[WindowManager] Failed to restore state for ${label}:`, e)
+    logger.error(`Failed to restore state for ${label}:`, e)
     return false
   }
 }
@@ -141,12 +144,11 @@ export const startWindowStateTracking = async (label: string): Promise<void> => 
     
     // 监听窗口移动和调整大小
     const unlistenMove = await window.onMoved(() => {
-      // console.log(`[WindowManager] Window ${label} moved`)
       debouncedSave()
     })
     
     const unlistenResize = await window.onResized(() => {
-      console.log(`[WindowManager] Window ${label} resized`)
+      logger.debug(`Window ${label} resized`)
       debouncedSave()
     })
     
@@ -157,9 +159,9 @@ export const startWindowStateTracking = async (label: string): Promise<void> => 
       debounceTimer: null
     })
     
-    console.log(`[WindowManager] Started tracking for ${label}`)
+    logger.debug(`Started tracking for ${label}`)
   } catch (e) {
-    console.error(`[WindowManager] Failed to start tracking for ${label}:`, e)
+    logger.error(`Failed to start tracking for ${label}:`, e)
   }
 }
 
@@ -180,7 +182,7 @@ export const stopWindowStateTracking = async (label: string): Promise<void> => {
   listener.unlistenResize?.()
   
   activeListeners.delete(label)
-  console.log(`[WindowManager] Stopped tracking for ${label}`)
+  logger.debug(`Stopped tracking for ${label}`)
 }
 
 // ==================== 窗口生命周期管理 ====================
@@ -189,7 +191,7 @@ export const stopWindowStateTracking = async (label: string): Promise<void> => {
  * 初始化窗口管理器（恢复状态并开始监听）
  */
 export const initWindowManager = async (label: string): Promise<void> => {
-  console.log(`[WindowManager] Initializing for ${label}`)
+  logger.debug(`Initializing for ${label}`)
   
   try {
     // 恢复窗口状态
@@ -198,7 +200,7 @@ export const initWindowManager = async (label: string): Promise<void> => {
     // 开始监听窗口变化
     await startWindowStateTracking(label)
   } catch (e) {
-    console.error(`[WindowManager] Failed to initialize for ${label}:`, e)
+    logger.error(`Failed to initialize for ${label}:`, e)
   }
 }
 
@@ -206,7 +208,7 @@ export const initWindowManager = async (label: string): Promise<void> => {
  * 清理窗口管理器（保存状态并停止监听）
  */
 export const cleanupWindowManager = async (label: string): Promise<void> => {
-  console.log(`[WindowManager] Cleaning up for ${label}`)
+  logger.debug(`Cleaning up for ${label}`)
   
   try {
     // 停止监听（会清除去抖定时器）
@@ -215,7 +217,7 @@ export const cleanupWindowManager = async (label: string): Promise<void> => {
     // 最后保存一次状态
     await saveWindowState(label)
   } catch (e) {
-    console.error(`[WindowManager] Failed to cleanup for ${label}:`, e)
+    logger.error(`Failed to cleanup for ${label}:`, e)
   }
 }
 
@@ -227,9 +229,9 @@ export const cleanupWindowManager = async (label: string): Promise<void> => {
 export const setWindowOpenState = async (label: string, isOpen: boolean): Promise<void> => {
   try {
     await invoke('set_window_open_state', { label, isOpen })
-    console.log(`[WindowManager] Set ${label} open state to ${isOpen}`)
+    logger.debug(`Set ${label} open state to ${isOpen}`)
   } catch (e) {
-    console.error(`[WindowManager] Failed to set open state for ${label}:`, e)
+    logger.error(`Failed to set open state for ${label}:`, e)
   }
 }
 
@@ -240,7 +242,7 @@ export const getPreviouslyOpenWindows = async (): Promise<WindowInfo[]> => {
   try {
     return await invoke<WindowInfo[]>('get_previously_open_windows')
   } catch (e) {
-    console.error(`[WindowManager] Failed to get previously open windows:`, e)
+    logger.error(`Failed to get previously open windows:`, e)
     return []
   }
 }
@@ -260,9 +262,9 @@ export const createTabWindow = async (
     await invoke('create_tab_window', { label, title, tabType })
     // 标记窗口为打开状态
     await setWindowOpenState(label, true)
-    console.log(`[WindowManager] Created tab window: ${label}`)
+    logger.debug(`Created tab window: ${label}`)
   } catch (e) {
-    console.error(`[WindowManager] Failed to create tab window ${label}:`, e)
+    logger.error(`Failed to create tab window ${label}:`, e)
     throw e
   }
 }
@@ -275,9 +277,9 @@ export const createSettingsWindow = async (): Promise<void> => {
     await invoke('create_settings_window')
     // 标记窗口为打开状态
     await setWindowOpenState('settings', true)
-    console.log(`[WindowManager] Created settings window`)
+    logger.debug('Created settings window')
   } catch (e) {
-    console.error(`[WindowManager] Failed to create settings window:`, e)
+    logger.error('Failed to create settings window:', e)
     throw e
   }
 }
@@ -289,9 +291,9 @@ export const createArchiveWindow = async (): Promise<void> => {
   try {
     await invoke('create_archive_window')
     await setWindowOpenState('archive', true)
-    console.log(`[WindowManager] Created archive window`)
+    logger.debug('Created archive window')
   } catch (e) {
-    console.error(`[WindowManager] Failed to create archive window:`, e)
+    logger.error('Failed to create archive window:', e)
     throw e
   }
 }
@@ -303,9 +305,9 @@ export const createExtensionWindow = async (): Promise<void> => {
   try {
     await invoke('create_extension_window')
     await setWindowOpenState('extension', true)
-    console.log(`[WindowManager] Created extension window`)
+    logger.debug('Created extension window')
   } catch (e) {
-    console.error(`[WindowManager] Failed to create extension window:`, e)
+    logger.error('Failed to create extension window:', e)
     throw e
   }
 }
@@ -324,9 +326,9 @@ export const closeWindow = async (label: string): Promise<void> => {
     // 关闭窗口
     await invoke('close_window', { label })
     
-    console.log(`[WindowManager] Closed window: ${label}`)
+    logger.debug(`Closed window: ${label}`)
   } catch (e) {
-    console.error(`[WindowManager] Failed to close window ${label}:`, e)
+    logger.error(`Failed to close window ${label}:`, e)
     throw e
   }
 }
@@ -340,7 +342,7 @@ export const restorePreviouslyOpenWindows = async (): Promise<void> => {
   try {
     const windows = await getPreviouslyOpenWindows()
     
-    console.log(`[WindowManager] Found ${windows.length} previously open windows to restore`)
+    logger.debug(`Found ${windows.length} previously open windows to restore`)
     
     for (const { label } of windows) {
       // 解析窗口类型
@@ -348,19 +350,19 @@ export const restorePreviouslyOpenWindows = async (): Promise<void> => {
         const tabType = label.replace('tab-', '')
         const title = TAB_TITLES[tabType] || tabType
         await createTabWindow(tabType, title)
-        console.log(`[WindowManager] Restored tab window: ${label}`)
+        logger.debug(`Restored tab window: ${label}`)
       } else if (label === 'settings') {
         await createSettingsWindow()
-        console.log(`[WindowManager] Restored settings window`)
+        logger.debug('Restored settings window')
       } else if (label === 'archive') {
         await createArchiveWindow()
-        console.log(`[WindowManager] Restored archive window`)
+        logger.debug('Restored archive window')
       } else if (label === 'extension') {
         await createExtensionWindow()
-        console.log(`[WindowManager] Restored extension window`)
+        logger.debug('Restored extension window')
       }
     }
   } catch (e) {
-    console.error(`[WindowManager] Failed to restore previously open windows:`, e)
+    logger.error('Failed to restore previously open windows:', e)
   }
 }

@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import type { ProcessedGift } from '@/types'
 import { formatEventTime, formatPrice, getMedalGradient } from '@/types'
 import { getGiftIcon, getGuardIcon } from '@/services/gift-icons'
+import { createLogger } from '@/services/logger'
 
 const props = withDefaults(defineProps<{
   gift: ProcessedGift
@@ -16,6 +17,7 @@ const props = withDefaults(defineProps<{
   isSpecialFollow: false,
   expired: false
 })
+const logger = createLogger('GiftItem')
 
 // 是否是大航海购买
 const isGuardBuy = computed(() => !!props.gift.guard_level)
@@ -42,7 +44,7 @@ const giftIconUrl = computed(() => {
   }
 
   if (props.gift.gift_icon) {
-    console.log("giftIconUrl from ws: ", props.gift.gift_icon)
+    logger.debug('giftIconUrl from ws:', props.gift.gift_icon)
     if (props.gift.gift_icon.endsWith('.webp')) {
       return props.gift.gift_icon
     } else if (props.gift.gift_icon.endsWith('.png')) {

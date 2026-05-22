@@ -22,10 +22,12 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { AudienceSortType } from '@/types'
 import type { UserInfo } from '@/services/auth'
+import { createLogger } from '@/services/logger'
 
 const settingsStore = useSettingsStore()
 const danmakuStore = useDanmakuStore()
 const { settings, isSaving, isLoggedIn, userInfo } = storeToRefs(settingsStore)
+const logger = createLogger('SettingsWindow')
 
 // ==================== 登录相关 ====================
 
@@ -110,7 +112,7 @@ const initConnectionStatus = async () => {
       danmakuStore.setConnected(false)
     }
   } catch (e) {
-    console.error('[Settings] Failed to get connection status:', e)
+    logger.error('Failed to get connection status:', e)
   }
 }
 
@@ -470,7 +472,7 @@ const loadSpecialFollowNames = async () => {
     }
     specialFollowNames.value = nextNames
   } catch (e) {
-    console.warn('[Settings] 查询特别关注用户名失败:', e)
+    logger.warn('查询特别关注用户名失败:', e)
   } finally {
     if (loadId === specialFollowNamesLoadId) {
       specialFollowNamesLoading.value = false

@@ -11,6 +11,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { useVideoRequestStore } from '@/stores/video-request'
 import { useVotingStore } from '@/stores/voting'
 import type { DataUpdate, DataSnapshot, EventType } from '@/types'
+import { createLogger } from '@/services/logger'
 
 // ==================== 后端类型定义 ====================
 
@@ -53,6 +54,7 @@ export type SilentDuration = 'scene' | '2h' | '4h' | '24h' | '7d' | 'forever'
 let statusUnlisten: UnlistenFn | null = null
 let dataUnlisten: UnlistenFn | null = null
 let currentWindowLabel: string | null = null
+const logger = createLogger('BliveClient')
 
 // ==================== 连接相关 API ====================
 
@@ -175,9 +177,9 @@ export async function initBliveClient(eventTypes?: EventType[]): Promise<void> {
     } else if (status === 'disconnected' || typeof status === 'object') {
       danmakuStore.setConnected(false)
     }
-    console.log('[BliveClient] Initial status synced:', status)
+    logger.debug('Initial status synced:', status)
   } catch (e) {
-    console.warn('[BliveClient] Failed to sync initial status:', e)
+    logger.warn('Failed to sync initial status:', e)
   }
 
   // 监听连接状态变化（全局广播，所有窗口都需要）
@@ -188,10 +190,10 @@ export async function initBliveClient(eventTypes?: EventType[]): Promise<void> {
       danmakuStore.setConnected(false)
     } else if (typeof event.payload === 'object' && 'error' in event.payload) {
       danmakuStore.setConnected(false)
-      console.error('[BliveClient] Connection error:', event.payload.error.message)
+      logger.error('Connection error:', event.payload.error.message)
     }
 
-    console.log('[BliveClient] Status changed:', event.payload)
+    logger.debug('Status changed:', event.payload)
   })
 
   // 监听数据更新（使用带窗口标签的事件名，确保只接收发给当前窗口的事件）
@@ -200,7 +202,7 @@ export async function initBliveClient(eventTypes?: EventType[]): Promise<void> {
     const updates = event.payload
     const contributionRankFull = updates.find((update) => update.type === 'ContributionRankFull')
     if (contributionRankFull?.type === 'ContributionRankFull') {
-      console.log('[BliveClient] ContributionRankFull received:', {
+      logger.debug('ContributionRankFull received:', {
         windowLabel: currentWindowLabel,
         count: contributionRankFull.data.length,
         topUid: contributionRankFull.data[0]?.uid ?? null
@@ -212,7 +214,7 @@ export async function initBliveClient(eventTypes?: EventType[]): Promise<void> {
     }
   })
 
-  console.log(`[BliveClient] Initialized for window ${currentWindowLabel}`,
+  logger.debug(`Initialized for window ${currentWindowLabel}`,
     eventTypes ? `with events: ${eventTypes.join(', ')}` : '(all events)')
 }
 
@@ -251,7 +253,7 @@ function applySnapshot(snapshot: DataSnapshot, store: ReturnType<typeof useDanma
     store.setInteractWordList(snapshot.interact_word_list)
   }
 
-  console.log('[BliveClient] Applied snapshot')
+  logger.debug('Applied snapshot')
 }
 
 /** 处理数据更新 */
@@ -286,12 +288,12 @@ function processDataUpdate(update: DataUpdate, store: ReturnType<typeof useDanma
       break
 
     case 'LiveStart':
-      console.log('[BliveClient] Live started')
+      logger.debug('Live started')
       store.updateRoomInfo({ liveStatus: 1 })
       break
 
     case 'LiveStop':
-      console.log('[BliveClient] Live stopped')
+      logger.debug('Live stopped')
       store.updateRoomInfo({ liveStatus: 0 })
       break
 
@@ -338,7 +340,7 @@ export async function cleanupBliveClient(): Promise<void> {
     try {
       await unsubscribeEvents(currentWindowLabel)
     } catch (e) {
-      console.error('[BliveClient] Failed to unsubscribe:', e)
+      logger.error('Failed to unsubscribe:', e)
     }
   }
 
@@ -353,7 +355,7 @@ export async function cleanupBliveClient(): Promise<void> {
 
   currentWindowLabel = null
 
-  console.log('[BliveClient] Cleaned up')
+  logger.debug('Cleaned up')
 }
 
 /** 自动连接（如果有保存的房间号和 Cookie） */
@@ -365,17 +367,17 @@ export async function autoConnect(): Promise<void> {
   const cookie = settingsStore.settings.cookie
 
   if (!roomId || !cookie) {
-    console.log('[BliveClient] Auto connect skipped: missing roomId or cookie')
+    logger.debug('Auto connect skipped: missing roomId or cookie')
     return
   }
 
   const roomIdNum = parseInt(roomId, 10)
   if (isNaN(roomIdNum) || roomIdNum <= 0) {
-    console.log('[BliveClient] Auto connect skipped: invalid roomId')
+    logger.debug('Auto connect skipped: invalid roomId')
     return
   }
 
-  console.log('[BliveClient] Auto connecting to room:', roomIdNum)
+  logger.debug('Auto connecting to room:', roomIdNum)
   const result = await connectRoom(roomIdNum, cookie)
 
   if (result.success && result.room_info) {
@@ -386,6 +388,6 @@ export async function autoConnect(): Promise<void> {
       liveStatus: result.room_info.live_status
     })
   } else {
-    console.error('[BliveClient] Auto connect failed:', result.message)
+    logger.error('Auto connect failed:', result.message)
   }
 }

@@ -6,6 +6,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { exit } from '@tauri-apps/plugin-process'
 import { createSettingsWindow, createArchiveWindow, createExtensionWindow, closeWindow } from '@/services/window-manager'
 import { useDanmakuStore } from '@/stores/danmaku'
+import { createLogger } from '@/services/logger'
 
 const props = withDefaults(defineProps<{
   title: string
@@ -25,6 +26,7 @@ const emit = defineEmits<{
 }>()
 
 const danmakuStore = useDanmakuStore()
+const logger = createLogger('TitleBar')
 
 const appWindow = getCurrentWindow()
 const currentLabel = props.windowLabel || appWindow.label
@@ -94,7 +96,7 @@ const openSettings = async () => {
   try {
     await createSettingsWindow()
   } catch (e) {
-    console.error('Failed to open settings:', e)
+    logger.error('Failed to open settings:', e)
   }
 }
 
@@ -102,7 +104,7 @@ const openArchive = async () => {
   try {
     await createArchiveWindow()
   } catch (e) {
-    console.error('Failed to open archive:', e)
+    logger.error('Failed to open archive:', e)
   }
 }
 
@@ -110,14 +112,14 @@ const openExtension = async () => {
   try {
     await createExtensionWindow()
   } catch (e) {
-    console.error('Failed to open extension:', e)
+    logger.error('Failed to open extension:', e)
   }
 }
 
 // 切换锁定状态（通过后端命令）
 const toggleLock = async () => {
-  console.log('toggleLock', isLocked.value)
-  console.log('currentLabel', currentLabel)
+  logger.debug('toggleLock', isLocked.value)
+  logger.debug('currentLabel', currentLabel)
   try {
     if (isLocked.value) {
       // 当前是锁定状态，解锁
@@ -129,7 +131,7 @@ const toggleLock = async () => {
     }
     // 状态会通过 window-lock-change 事件更新
   } catch (e) {
-    console.error('Failed to toggle lock:', e)
+    logger.error('Failed to toggle lock:', e)
   }
 }
 
@@ -146,7 +148,7 @@ const initLockListener = async () => {
       emit('lock-change', true)
     }
   } catch (e) {
-    console.error('Failed to get lock state:', e)
+    logger.error('Failed to get lock state:', e)
   }
 
   // 监听锁定状态变化事件（托盘解锁时会触发）

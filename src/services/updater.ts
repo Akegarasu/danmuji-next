@@ -15,6 +15,7 @@ import { check, type Update } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
 import { exit } from '@tauri-apps/plugin-process'
 import { invoke } from '@tauri-apps/api/core'
+import { createLogger } from '@/services/logger'
 
 /** 更新信息（传递给 UI 组件） */
 export interface UpdateInfo {
@@ -38,6 +39,7 @@ const REFERER = 'https://updater.anzu.link'
 const UPDATE_ENDPOINT = 'https://akiba-1301838591.cos.ap-shanghai.myqcloud.com/update.json'
 
 const CHECK_INTERVAL = 2 * 60 * 60 * 1000 // 2小时
+const logger = createLogger('Updater')
 const INITIAL_DELAY = 10_000 // 启动后10秒首次检查
 
 // ==================== 模块级状态 ====================
@@ -174,7 +176,7 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
     const portable = await isPortable()
     return portable ? await checkPortableUpdate() : await checkInstallerUpdate()
   } catch (e) {
-    console.debug('[updater] 检查更新失败:', e)
+    logger.debug('检查更新失败:', e)
     return null
   }
 }

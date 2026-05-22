@@ -8,6 +8,9 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import type { VideoRequestItem } from '@/types'
+import { createLogger } from '@/services/logger'
+
+const logger = createLogger('VideoRequestStore')
 
 export const useVideoRequestStore = defineStore('videoRequest', () => {
     /** 点播列表（由后端推送更新） */
@@ -41,7 +44,7 @@ export const useVideoRequestStore = defineStore('videoRequest', () => {
             }
             loaded.value = true
         } catch (e) {
-            console.error('[VideoRequest] Failed to load persisted requests:', e)
+            logger.error('Failed to load persisted requests:', e)
         }
     }
 

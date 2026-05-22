@@ -8,9 +8,11 @@ import EntryPanel from '@/components/common/EntryPanel.vue'
 import ContextMenu from '@/components/common/ContextMenu.vue'
 import type { MenuItem } from '@/components/common/ContextMenu.vue'
 import { invoke } from '@tauri-apps/api/core'
+import { createLogger } from '@/services/logger'
 
 const danmakuStore = useDanmakuStore()
 const settingsStore = useSettingsStore()
+const logger = createLogger('AudienceTab')
 
 // 刷新状态
 const isRefreshing = ref(false)
@@ -130,22 +132,22 @@ const refreshRank = async (silent = false) => {
   const source = silent ? 'auto' : 'manual'
   const cookie = settingsStore.settings.cookie
   if (!cookie) {
-    console.warn(`[AudienceTab] ${source} refresh skipped: missing cookie`)
+    logger.warn(`${source} refresh skipped: missing cookie`)
     return
   }
 
   if (isRefreshing.value) {
-    console.log(`[AudienceTab] ${source} refresh skipped: request already in progress`)
+    logger.debug(`${source} refresh skipped: request already in progress`)
     return
   }
 
   isRefreshing.value = true
   try {
-    console.log(`[AudienceTab] ${source} refresh command sent`, autoRefreshDebugState())
+    logger.debug(`${source} refresh command sent`, autoRefreshDebugState())
     await refreshContributionRank(cookie)
-    console.log(`[AudienceTab] ${source} refresh command accepted`)
+    logger.debug(`${source} refresh command accepted`)
   } catch (error) {
-    console.error(`[AudienceTab] ${source} refresh command failed:`, error)
+    logger.error(`${source} refresh command failed:`, error)
   } finally {
     isRefreshing.value = false
   }
@@ -159,21 +161,21 @@ const clearAutoRefreshTimer = () => {
   if (autoRefreshTimer !== null) {
     window.clearInterval(autoRefreshTimer)
     autoRefreshTimer = null
-    console.log('[AudienceTab] auto refresh timer cleared')
+    logger.debug('auto refresh timer cleared')
   }
 }
 
 const resetAutoRefreshTimer = () => {
   clearAutoRefreshTimer()
   if (!shouldAutoRefresh.value) {
-    console.log('[AudienceTab] auto refresh timer not started', autoRefreshDebugState())
+    logger.debug('auto refresh timer not started', autoRefreshDebugState())
     return
   }
 
   autoRefreshTimer = window.setInterval(() => {
     void refreshRank(true)
   }, autoRefreshIntervalSeconds.value * 1000)
-  console.log('[AudienceTab] auto refresh timer started', autoRefreshDebugState())
+  logger.debug('auto refresh timer started', autoRefreshDebugState())
 }
 
 watch([shouldAutoRefresh, autoRefreshIntervalSeconds], resetAutoRefreshTimer, { immediate: true })

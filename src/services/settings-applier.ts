@@ -6,8 +6,10 @@
 import { watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useSettingsStore } from '@/stores/settings'
+import { createLogger } from '@/services/logger'
 
 let initialized = false
+const logger = createLogger('SettingsApplier')
 
 /**
  * 应用透明度设置
@@ -16,7 +18,7 @@ export const applyOpacity = (opacity: number) => {
   // 确保 opacity 在有效范围内
   const validOpacity = Math.max(0, Math.min(1, opacity))
   document.documentElement.style.setProperty('--window-opacity', validOpacity.toString())
-  console.log('[Settings] Applied opacity:', validOpacity)
+  logger.debug('Applied opacity:', validOpacity)
 }
 
 /**
@@ -24,7 +26,7 @@ export const applyOpacity = (opacity: number) => {
  */
 export const applyHideBorder = (hide: boolean) => {
   document.documentElement.style.setProperty('--window-border', hide ? 'none' : '1px solid rgba(80, 80, 80, 0.5)')
-  console.log('[Settings] Applied hideBorder:', hide)
+  logger.debug('Applied hideBorder:', hide)
 }
 
 /**
@@ -36,7 +38,7 @@ export const applyUiFontSize = (fontSize: number) => {
   document.documentElement.style.setProperty('--font-size-sm', `${validSize - 2}px`)
   document.documentElement.style.setProperty('--font-size-xs', `${validSize - 3}px`)
   document.documentElement.style.setProperty('--font-size-lg', `${validSize + 2}px`)
-  console.log('[Settings] Applied UI font size:', validSize)
+  logger.debug('Applied UI font size:', validSize)
 }
 
 /**
@@ -50,7 +52,7 @@ export const applyFontSize = (fontSize: number) => {
   document.documentElement.style.setProperty('--content-font-size-sm', `${validSize - 2}px`)
   document.documentElement.style.setProperty('--content-font-size-xs', `${validSize - 3}px`)
   document.documentElement.style.setProperty('--content-font-size-lg', `${validSize + 2}px`)
-  console.log('[Settings] Applied content font size:', validSize)
+  logger.debug('Applied content font size:', validSize)
 }
 
 /**

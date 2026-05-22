@@ -9,6 +9,9 @@ import type {
   UserLoginInfo
 } from '@/types'
 import { DEFAULT_DISPLAY_SETTINGS, DEFAULT_WINDOW_SETTINGS } from '@/types'
+import { createLogger } from '@/services/logger'
+
+const logger = createLogger('SettingsStore')
 
 const DEFAULT_SETTINGS: AppSettings = {
   roomId: '',
@@ -98,10 +101,10 @@ export const useSettingsStore = defineStore('settings', () => {
         }
       }
       isLoaded.value = true
-      console.log('[Settings] Loaded', force ? '(forced)' : '')
+      logger.debug('Loaded', force ? '(forced)' : '')
       return true
     } catch (e) {
-      console.error('[Settings] Load failed:', e)
+      logger.error('Load failed:', e)
       isLoaded.value = true
       return false
     }
@@ -116,7 +119,7 @@ export const useSettingsStore = defineStore('settings', () => {
     
     try {
       await invoke('save_config', { config: JSON.stringify(settings.value, null, 2) })
-      console.log('[Settings] Saved')
+      logger.debug('Saved')
       
       // 动态导入避免循环依赖
       const { broadcastSettingsUpdate } = await import('@/services/settings-sync')
@@ -125,7 +128,7 @@ export const useSettingsStore = defineStore('settings', () => {
       isSaving.value = false
       return true
     } catch (e) {
-      console.error('[Settings] Save failed:', e)
+      logger.error('Save failed:', e)
       isSaving.value = false
       return false
     }

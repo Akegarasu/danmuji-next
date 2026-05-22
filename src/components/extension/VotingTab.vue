@@ -4,8 +4,10 @@ import { useVotingStore } from '@/stores/voting'
 import ExtSelect from '@/components/common/ExtSelect.vue'
 import type { SelectOption } from '@/components/common/ExtSelect.vue'
 import type { Poll, PollOption, Voter, VoteKeyType } from '@/types'
+import { createLogger } from '@/services/logger'
 
 const votingStore = useVotingStore()
+const logger = createLogger('VotingTab')
 
 // ==================== 创建表单 ====================
 
@@ -126,7 +128,7 @@ const showVoters = async (pollId: string, optionKey: string) => {
     const voters = await votingStore.getVoters(pollId, optionKey)
     viewingVoters.value = { pollId, optionKey, voters }
   } catch (e) {
-    console.error('[Voting] Failed to load voters:', e)
+    logger.error('Failed to load voters:', e)
   } finally {
     loadingVoters.value = false
   }
