@@ -118,6 +118,7 @@ onUnmounted(() => {
       <UpdateToast
         v-if="showUpdateToast && updateInfo"
         :update-info="updateInfo"
+        :pause-auto-close="showChangelogDialog"
         @close="showUpdateToast = false"
         @show-changelog="onShowChangelog"
       />

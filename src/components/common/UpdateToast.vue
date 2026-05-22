@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { downloadAndInstall, type UpdateInfo, type DownloadProgress } from '@/services/updater'
 import { createLogger } from '@/services/logger'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   updateInfo: UpdateInfo
-}>()
+  pauseAutoClose?: boolean
+}>(), {
+  pauseAutoClose: false
+})
 
 const emit = defineEmits<{
   (e: 'close'): void
@@ -23,8 +26,11 @@ let autoCloseTimer: ReturnType<typeof setTimeout> | null = null
 const AUTO_CLOSE_DELAY = 10_000
 
 const startAutoClose = () => {
+  cancelAutoClose()
+  if (props.pauseAutoClose || isDownloading.value) return
+
   autoCloseTimer = setTimeout(() => {
-    if (!isDownloading.value) {
+    if (!isDownloading.value && !props.pauseAutoClose) {
       emit('close')
     }
   }, AUTO_CLOSE_DELAY)
@@ -43,6 +49,14 @@ onMounted(() => {
 
 onUnmounted(() => {
   cancelAutoClose()
+})
+
+watch(() => props.pauseAutoClose, (paused) => {
+  if (paused) {
+    cancelAutoClose()
+  } else {
+    startAutoClose()
+  }
 })
 
 // 进度文本
@@ -79,6 +93,11 @@ async function doUpdate() {
     startAutoClose()
   }
 }
+
+const showChangelog = () => {
+  cancelAutoClose()
+  emit('show-changelog')
+}
 </script>
 
 <template>
@@ -108,7 +127,7 @@ async function doUpdate() {
         <div class="toast-content">
           <span class="toast-text">检测到弹幕姬更新 v{{ props.updateInfo.version }}</span>
           <div class="toast-actions">
-            <button class="toast-btn toast-changelog-btn" @click="emit('show-changelog')">日志</button>
+            <button class="toast-btn toast-changelog-btn" @click="showChangelog">日志</button>
             <button class="toast-btn toast-update-btn" @click="doUpdate">更新</button>
             <button class="toast-btn toast-close-btn" @click="emit('close')" title="关闭">&times;</button>
           </div>
