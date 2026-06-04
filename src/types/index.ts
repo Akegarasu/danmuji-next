@@ -135,6 +135,8 @@ export interface AppSettings {
   tabOrder: TabType[]
   /** 特别关注的 UID 列表 */
   specialFollowUids: number[]
+  /** 本地弹幕过滤的 UID 列表 */
+  danmakuFilterUids: number[]
 }
 
 /** 默认显示设置 */

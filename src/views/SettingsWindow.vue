@@ -223,6 +223,7 @@ const sections = [
   { id: 'gift', label: '礼物' },
   { id: 'audience', label: '观众' },
   { id: 'special-follow', label: '特别关注' },
+  { id: 'danmaku-filter', label: '弹幕过滤' },
   { id: 'shield-keyword', label: '屏蔽词' },
   { id: 'about', label: '关于' }
 ]
@@ -485,6 +486,69 @@ watch(
   () => {
     if (activeSection.value === 'special-follow') {
       void loadSpecialFollowNames()
+    }
+  },
+  { immediate: true }
+)
+
+// ==================== 弹幕过滤 ====================
+
+const newDanmakuFilterUid = ref('')
+const danmakuFilterNames = ref<Record<number, string>>({})
+const danmakuFilterNamesLoading = ref(false)
+let danmakuFilterNamesLoadId = 0
+
+const addDanmakuFilterUid = () => {
+  const uid = parseInt(newDanmakuFilterUid.value.trim(), 10)
+  if (!uid || uid <= 0) return
+  settingsStore.addDanmakuFilter(uid)
+  newDanmakuFilterUid.value = ''
+}
+
+const removeDanmakuFilterUid = (uid: number) => {
+  settingsStore.removeDanmakuFilter(uid)
+}
+
+const getDanmakuFilterLabel = (uid: number) => {
+  const name = danmakuFilterNames.value[uid]
+  return name ? `${name}（${uid}）` : `UID: ${uid}`
+}
+
+const loadDanmakuFilterNames = async () => {
+  const uids = [...settingsStore.danmakuFilterUids]
+  const loadId = ++danmakuFilterNamesLoadId
+
+  if (uids.length === 0) {
+    danmakuFilterNames.value = {}
+    danmakuFilterNamesLoading.value = false
+    return
+  }
+
+  danmakuFilterNamesLoading.value = true
+
+  try {
+    const users = await lookupArchiveUserNames(uids)
+    if (loadId !== danmakuFilterNamesLoadId) return
+
+    const nextNames: Record<number, string> = {}
+    for (const user of users) {
+      nextNames[user.uid] = user.name
+    }
+    danmakuFilterNames.value = nextNames
+  } catch (e) {
+    logger.warn('查询弹幕过滤用户名失败:', e)
+  } finally {
+    if (loadId === danmakuFilterNamesLoadId) {
+      danmakuFilterNamesLoading.value = false
+    }
+  }
+}
+
+watch(
+  () => [activeSection.value, settingsStore.danmakuFilterUids.join(',')],
+  () => {
+    if (activeSection.value === 'danmaku-filter') {
+      void loadDanmakuFilterNames()
     }
   },
   { immediate: true }
@@ -1000,6 +1064,53 @@ const openProjectUrl = async () => {
               >
                 <span class="special-follow-uid">{{ getSpecialFollowLabel(uid) }}</span>
                 <button class="special-follow-remove-btn" @click="removeSpecialUid(uid)">×</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 弹幕过滤 -->
+        <div v-show="activeSection === 'danmaku-filter'" class="section">
+          <h3 class="section-title">弹幕过滤</h3>
+
+          <div class="info-box">
+            <span class="info-icon">🚫</span>
+            <span class="info-text">
+              本地功能，只在本机隐藏指定 UID 的弹幕，不会提交到直播间屏蔽词，也不需要房管权限。<br>
+              添加 UID 后，该用户的弹幕不会出现在弹幕列表和互动列表中。
+            </span>
+          </div>
+
+          <div class="setting-group">
+            <label class="setting-label">添加 UID</label>
+            <div class="special-follow-input-row">
+              <input
+                v-model="newDanmakuFilterUid"
+                type="text"
+                class="setting-input"
+                placeholder="输入用户 UID"
+                @keydown.enter="addDanmakuFilterUid"
+              />
+              <button class="special-follow-add-btn" @click="addDanmakuFilterUid">添加</button>
+            </div>
+          </div>
+
+          <div class="setting-group">
+            <label class="setting-label">
+              已过滤列表
+              <span v-if="danmakuFilterNamesLoading" class="value">查询中...</span>
+            </label>
+            <div v-if="settingsStore.danmakuFilterUids.length === 0" class="special-follow-empty">
+              暂无弹幕过滤
+            </div>
+            <div v-else class="special-follow-list">
+              <div
+                v-for="uid in settingsStore.danmakuFilterUids"
+                :key="uid"
+                class="special-follow-item danmaku-filter-item"
+              >
+                <span class="special-follow-uid">{{ getDanmakuFilterLabel(uid) }}</span>
+                <button class="special-follow-remove-btn" @click="removeDanmakuFilterUid(uid)">×</button>
               </div>
             </div>
           </div>
@@ -1739,6 +1850,10 @@ const openProjectUrl = async () => {
   border: 1px solid var(--border-color);
   border-left: 3px solid #f5c842;
   border-radius: var(--border-radius-sm);
+
+  &.danmaku-filter-item {
+    border-left-color: #ef4444;
+  }
 
   .special-follow-uid {
     font-size: var(--font-size-sm);

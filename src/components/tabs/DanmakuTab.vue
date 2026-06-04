@@ -28,6 +28,14 @@ type VirtualListExpose = {
 const virtualListRef = ref<VirtualListExpose | null>(null)
 const autoScroll = ref(true)
 
+const filteredDanmakuList = computed(() => {
+  if (settingsStore.danmakuFilterUids.length === 0) {
+    return danmakuStore.danmakuList
+  }
+
+  return danmakuStore.danmakuList.filter(msg => !settingsStore.isDanmakuFiltered(msg.user.uid))
+})
+
 const danmakuItemKey = (msg: ProcessedDanmaku) => msg.id
 const danmakuLayoutVersion = computed(() => [
   settingsStore.mainWindowSettings.fontSize,
@@ -36,7 +44,8 @@ const danmakuLayoutVersion = computed(() => [
   settingsStore.danmakuShowAdmin,
   settingsStore.danmakuShowTime,
   settingsStore.danmakuShowGuardBorder,
-  settingsStore.danmakuEmoticonSize
+  settingsStore.danmakuEmoticonSize,
+  settingsStore.danmakuFilterUids.join(',')
 ].join('|'))
 
 const scrollToBottom = () => {
@@ -134,7 +143,7 @@ const getRandomTip = () => {
       ref="virtualListRef"
       v-model:auto-scroll="autoScroll"
       class="danmaku-list"
-      :items="danmakuStore.danmakuList"
+      :items="filteredDanmakuList"
       :item-key="danmakuItemKey"
       :estimate-size="34"
       :overscan="16"

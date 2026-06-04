@@ -44,6 +44,14 @@ const filteredGiftList = computed(() => {
   })
 })
 
+const filteredDanmakuList = computed(() => {
+  if (settingsStore.danmakuFilterUids.length === 0) {
+    return danmakuStore.danmakuList
+  }
+
+  return danmakuStore.danmakuList.filter(msg => !settingsStore.isDanmakuFiltered(msg.user.uid))
+})
+
 // ==================== 合并时间线（三路归并）====================
 
 // 统一时间戳为秒（弹幕是毫秒，礼物和 SC 是秒）
@@ -51,7 +59,7 @@ const toSeconds = (ts: number): number =>
   ts > 1_000_000_000_000 ? Math.floor(ts / 1000) : ts
 
 const mergedTimeline = computed<InteractionItem[]>(() => {
-  const danmaku = danmakuStore.danmakuList
+  const danmaku = filteredDanmakuList.value
   const gifts = filteredGiftList.value
   // SC 列表是 unshift 追加的（新在前），需要反转为升序
   const scs = danmakuStore.superChatList
@@ -96,7 +104,8 @@ const interactionLayoutVersion = computed(() => [
   settingsStore.danmakuShowGuardBorder,
   settingsStore.danmakuEmoticonSize,
   settingsStore.giftShowTime,
-  settingsStore.giftShowMedal
+  settingsStore.giftShowMedal,
+  settingsStore.danmakuFilterUids.join(',')
 ].join('|'))
 
 const scrollToBottom = () => {

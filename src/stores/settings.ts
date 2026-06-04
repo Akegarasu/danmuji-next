@@ -22,7 +22,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   display: { ...DEFAULT_DISPLAY_SETTINGS },
   tabOrder: ['interaction', 'danmaku', 'gift', 'superchat', 'audience'],
-  specialFollowUids: []
+  specialFollowUids: [],
+  danmakuFilterUids: []
 }
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -97,7 +98,8 @@ export const useSettingsStore = defineStore('settings', () => {
             main: { ...DEFAULT_WINDOW_SETTINGS, ...(saved.windows?.main || {}) },
             ...saved.windows
           },
-          specialFollowUids: saved.specialFollowUids ?? []
+          specialFollowUids: saved.specialFollowUids ?? [],
+          danmakuFilterUids: saved.danmakuFilterUids ?? []
         }
       }
       isLoaded.value = true
@@ -198,6 +200,29 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
+  // ==================== 弹幕过滤 ====================
+
+  const danmakuFilterUids = computed(() => settings.value.danmakuFilterUids)
+  const danmakuFilterSet = computed(() => new Set(settings.value.danmakuFilterUids))
+
+  const isDanmakuFiltered = (uid: number) => danmakuFilterSet.value.has(uid)
+
+  const addDanmakuFilter = (uid: number) => {
+    if (!Number.isSafeInteger(uid) || uid <= 0) return
+    if (!settings.value.danmakuFilterUids.includes(uid)) {
+      settings.value.danmakuFilterUids.push(uid)
+      autoSave()
+    }
+  }
+
+  const removeDanmakuFilter = (uid: number) => {
+    const idx = settings.value.danmakuFilterUids.indexOf(uid)
+    if (idx !== -1) {
+      settings.value.danmakuFilterUids.splice(idx, 1)
+      autoSave()
+    }
+  }
+
   // ==================== 用户登录相关 ====================
 
   const isLoggedIn = computed(() => !!settings.value.user?.isLogin)
@@ -265,6 +290,12 @@ export const useSettingsStore = defineStore('settings', () => {
     isSpecialFollow,
     addSpecialFollow,
     removeSpecialFollow,
+    // 弹幕过滤
+    danmakuFilterUids,
+    danmakuFilterSet,
+    isDanmakuFiltered,
+    addDanmakuFilter,
+    removeDanmakuFilter,
     // 用户登录
     isLoggedIn,
     userInfo,
