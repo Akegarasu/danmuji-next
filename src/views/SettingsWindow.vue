@@ -48,6 +48,8 @@ const handleLoginSuccess = (cookie: string, info: UserInfo) => {
 }
 
 const showLogoutConfirm = ref(false)
+const showAlertDialog = ref(false)
+const alertMessage = ref('')
 
 const handleLogout = () => {
   showLogoutConfirm.value = true
@@ -55,6 +57,11 @@ const handleLogout = () => {
 
 const doLogout = () => {
   settingsStore.logout()
+}
+
+const showAlert = (message: string) => {
+  alertMessage.value = message
+  showAlertDialog.value = true
 }
 
 // ==================== 连接状态 ====================
@@ -145,13 +152,13 @@ const toggleConnection = async () => {
     const roomIdStr = settings.value.roomId
     const roomIdNum = parseInt(roomIdStr, 10)
     if (!roomIdNum || roomIdNum <= 0) {
-      alert('请输入有效的房间号')
+      showAlert('请输入有效的房间号')
       return
     }
 
     const cookieVal = settings.value.cookie
     if (!cookieVal) {
-      alert('请先登录账号')
+      showAlert('请先登录账号')
       return
     }
 
@@ -1419,6 +1426,13 @@ const openProjectUrl = async () => {
     <LoginDialog v-model:visible="showLoginDialog" @login-success="handleLoginSuccess" />
 
     <!-- 确认对话框 -->
+    <ConfirmDialog
+      v-model:visible="showAlertDialog"
+      title="提示"
+      :message="alertMessage"
+      confirm-text="知道了"
+      :show-cancel="false"
+    />
     <ConfirmDialog
       v-model:visible="showLogoutConfirm"
       title="退出登录"

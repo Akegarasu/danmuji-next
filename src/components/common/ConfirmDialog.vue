@@ -5,11 +5,13 @@ const props = withDefaults(defineProps<{
   message: string
   confirmText?: string
   cancelText?: string
+  showCancel?: boolean
   danger?: boolean
 }>(), {
   title: '确认',
   confirmText: '确定',
   cancelText: '取消',
+  showCancel: true,
   danger: false
 })
 
@@ -42,7 +44,7 @@ const confirm = () => {
             {{ message }}
           </div>
           <div class="confirm-footer">
-            <button class="confirm-btn cancel" @click="close">{{ cancelText }}</button>
+            <button v-if="showCancel" class="confirm-btn cancel" @click="close">{{ cancelText }}</button>
             <button class="confirm-btn" :class="danger ? 'danger' : 'primary'" @click="confirm">
               {{ confirmText }}
             </button>
