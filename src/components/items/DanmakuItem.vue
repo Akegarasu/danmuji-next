@@ -13,6 +13,10 @@ const props = withDefaults(defineProps<{
   showGuardBorder?: boolean
   emoticonSize?: number
   isSpecialFollow?: boolean
+  fontFamily?: string
+  fontWeight?: number
+  fontColor?: string
+  usernameColor?: string
 }>(), {
   showMedal: true,
   showGuard: true,
@@ -20,7 +24,11 @@ const props = withDefaults(defineProps<{
   showTime: true,
   showGuardBorder: true,
   emoticonSize: 32,
-  isSpecialFollow: false
+  isSpecialFollow: false,
+  fontFamily: 'var(--font-family)',
+  fontWeight: 400,
+  fontColor: 'var(--text-primary)',
+  usernameColor: '#adbcd9'
 })
 
 // 大航海等级样式类
@@ -30,6 +38,12 @@ const guardClass = computed(() => {
 })
 
 const timeText = computed(() => formatEventTime(props.message.timestamp))
+
+const danmakuStyle = computed(() => ({
+  '--danmaku-font-family': props.fontFamily,
+  '--danmaku-font-weight': String(props.fontWeight),
+  '--danmaku-font-color': props.fontColor
+}))
 
 const getUserColor = () => {
   if (props.showGuard) {
@@ -43,7 +57,7 @@ const getUserColor = () => {
   if (props.showAdmin && props.message.user.is_admin) {
     return 'var(--accent-gold)'
   }
-  return '#adbcd9'
+  return props.usernameColor
 }
 </script>
 
@@ -51,6 +65,7 @@ const getUserColor = () => {
   <div 
     class="danmaku-item animate-fade-in"
     :class="[guardClass, { 'no-guard-border': !showGuardBorder, 'danmaku-special-follow': isSpecialFollow }]"
+    :style="danmakuStyle"
   >
     <span v-if="showTime && timeText" class="time">
       {{ timeText }}
@@ -105,6 +120,8 @@ const getUserColor = () => {
   padding: 0.4em 0.6em;
   margin: 0.1em 0;
   font-size: var(--content-font-size-sm);
+  font-family: var(--danmaku-font-family, var(--font-family));
+  font-weight: var(--danmaku-font-weight, 400);
   line-height: 1.6;
   word-break: break-all;
   cursor: default;
@@ -184,7 +201,7 @@ const getUserColor = () => {
 }
 
 .username {
-  font-weight: 500;
+  font-weight: inherit;
   flex-shrink: 0;
 }
 
@@ -194,7 +211,8 @@ const getUserColor = () => {
 }
 
 .content {
-  color: var(--text-primary);
+  color: var(--danmaku-font-color, var(--text-primary));
+  font-weight: inherit;
 }
 
 .emoticon {

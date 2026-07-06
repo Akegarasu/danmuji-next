@@ -51,6 +51,8 @@
   --font-size-lg: 16px;
 
   // 字体 - 内容区域尺寸（弹幕、礼物、SC 等，由用户字体大小设置控制）
+  --content-font-family: var(--font-family);
+  --content-font-weight: 400;
   --content-font-size-xs: 11px;
   --content-font-size-sm: 12px;
   --content-font-size-base: 14px;

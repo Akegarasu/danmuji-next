@@ -43,6 +43,10 @@ export const useSettingsStore = defineStore('settings', () => {
   const danmakuShowTime = computed(() => settings.value.display.danmakuShowTime)
   const danmakuShowGuardBorder = computed(() => settings.value.display.danmakuShowGuardBorder)
   const danmakuEmoticonSize = computed(() => settings.value.display.danmakuEmoticonSize)
+  const contentFontFamily = computed(() => settings.value.display.contentFontFamily)
+  const contentFontWeight = computed(() => settings.value.display.contentFontWeight)
+  const danmakuFontColor = computed(() => settings.value.display.danmakuFontColor)
+  const danmakuUsernameColor = computed(() => settings.value.display.danmakuUsernameColor)
   
   // 礼物设置
   const giftMergeDisplay = computed(() => settings.value.display.giftMergeDisplay)
@@ -52,7 +56,11 @@ export const useSettingsStore = defineStore('settings', () => {
   const giftShowMedal = computed(() => settings.value.display.giftShowMedal)
   const giftExpireEnabled = computed(() => settings.value.display.giftExpireEnabled)
   const giftExpireMinutes = computed(() => settings.value.display.giftExpireMinutes)
+  const giftFontColor = computed(() => settings.value.display.giftFontColor)
+  const giftUsernameColor = computed(() => settings.value.display.giftUsernameColor)
+  const giftPriceColor = computed(() => settings.value.display.giftPriceColor)
   const scMergeWithGift = computed(() => settings.value.display.scMergeWithGift)
+  const superChatFontColor = computed(() => settings.value.display.superChatFontColor)
   
   // 观众设置
   const audienceSortType = computed(() => settings.value.display.audienceSortType)
@@ -60,6 +68,8 @@ export const useSettingsStore = defineStore('settings', () => {
   const audienceShowMedal = computed(() => settings.value.display.audienceShowMedal)
   const audienceAutoRefreshEnabled = computed(() => settings.value.display.audienceAutoRefreshEnabled)
   const audienceAutoRefreshIntervalSeconds = computed(() => settings.value.display.audienceAutoRefreshIntervalSeconds)
+  const audienceFontColor = computed(() => settings.value.display.audienceFontColor)
+  const audienceScoreColor = computed(() => settings.value.display.audienceScoreColor)
 
   // 入场通知设置
   const entryShowEnabled = computed(() => settings.value.display.entryShowEnabled)
@@ -71,6 +81,8 @@ export const useSettingsStore = defineStore('settings', () => {
   const entryShowMedal = computed(() => settings.value.display.entryShowMedal)
   const entryShowGuard = computed(() => settings.value.display.entryShowGuard)
   const entryPanelHeight = computed(() => settings.value.display.entryPanelHeight)
+  const entryFontColor = computed(() => settings.value.display.entryFontColor)
+  const entryTimeColor = computed(() => settings.value.display.entryTimeColor)
 
   // ==================== 加载/保存 ====================
 
@@ -85,15 +97,26 @@ export const useSettingsStore = defineStore('settings', () => {
       const configStr = await invoke<string>('load_config')
       if (configStr && configStr !== '{}') {
         const saved = JSON.parse(configStr)
+        const savedDisplay = saved.display ?? {}
         // 迁移：旧配置可能没有 interaction tab
         if (saved.tabOrder && !saved.tabOrder.includes('interaction')) {
           saved.tabOrder.unshift('interaction')
+        }
+        const display = {
+          ...DEFAULT_DISPLAY_SETTINGS,
+          ...savedDisplay,
+          contentFontFamily: savedDisplay.contentFontFamily
+            ?? savedDisplay.danmakuFontFamily
+            ?? DEFAULT_DISPLAY_SETTINGS.contentFontFamily,
+          contentFontWeight: savedDisplay.contentFontWeight
+            ?? savedDisplay.danmakuFontWeight
+            ?? DEFAULT_DISPLAY_SETTINGS.contentFontWeight
         }
         settings.value = {
           ...JSON.parse(JSON.stringify(DEFAULT_SETTINGS)),
           ...saved,
           user: saved.user || null,
-          display: { ...DEFAULT_DISPLAY_SETTINGS, ...saved.display },
+          display,
           windows: {
             main: { ...DEFAULT_WINDOW_SETTINGS, ...(saved.windows?.main || {}) },
             ...saved.windows
@@ -253,6 +276,10 @@ export const useSettingsStore = defineStore('settings', () => {
     danmakuShowTime,
     danmakuShowGuardBorder,
     danmakuEmoticonSize,
+    contentFontFamily,
+    contentFontWeight,
+    danmakuFontColor,
+    danmakuUsernameColor,
     giftMergeDisplay,
     giftShowFree,
     giftMinPrice,
@@ -260,12 +287,18 @@ export const useSettingsStore = defineStore('settings', () => {
     giftShowMedal,
     giftExpireEnabled,
     giftExpireMinutes,
+    giftFontColor,
+    giftUsernameColor,
+    giftPriceColor,
     scMergeWithGift,
+    superChatFontColor,
     audienceSortType,
     audienceShowEnterMsg,
     audienceShowMedal,
     audienceAutoRefreshEnabled,
     audienceAutoRefreshIntervalSeconds,
+    audienceFontColor,
+    audienceScoreColor,
     entryShowEnabled,
     entryFilterAll,
     entryFilterCaptain,
@@ -275,6 +308,8 @@ export const useSettingsStore = defineStore('settings', () => {
     entryShowMedal,
     entryShowGuard,
     entryPanelHeight,
+    entryFontColor,
+    entryTimeColor,
     // 方法
     loadSettings,
     saveSettings,

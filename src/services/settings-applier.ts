@@ -56,11 +56,23 @@ export const applyFontSize = (fontSize: number) => {
 }
 
 /**
+ * 应用内容字体族与字重设置
+ */
+export const applyContentFont = (fontFamily: string, fontWeight: number) => {
+  const family = fontFamily || 'var(--font-family)'
+  const validWeight = [300, 400, 500, 600, 700, 800].includes(fontWeight) ? fontWeight : 400
+  document.documentElement.style.setProperty('--content-font-family', family)
+  document.documentElement.style.setProperty('--content-font-weight', validWeight.toString())
+  logger.debug('Applied content font:', family, validWeight)
+}
+
+/**
  * 从 store 获取并应用当前设置
  */
 export const applyCurrentSettings = () => {
   const settingsStore = useSettingsStore()
   const mainSettings = settingsStore.getWindowSettings('main')
+  const displaySettings = settingsStore.displaySettings
   
   if (mainSettings) {
     applyOpacity(mainSettings.opacity)
@@ -68,6 +80,8 @@ export const applyCurrentSettings = () => {
     applyUiFontSize(mainSettings.uiFontSize ?? 14)
     applyHideBorder(mainSettings.hideBorder)
   }
+
+  applyContentFont(displaySettings.contentFontFamily, displaySettings.contentFontWeight)
 }
 
 /**
@@ -80,7 +94,7 @@ export const initSettingsApplier = () => {
   const settingsStore = useSettingsStore()
   
   // 使用 storeToRefs 获取响应式引用
-  const { mainWindowSettings } = storeToRefs(settingsStore)
+  const { mainWindowSettings, displaySettings } = storeToRefs(settingsStore)
   
   // 监听主窗口设置变化（透明度、字体大小）
   watch(
@@ -92,6 +106,15 @@ export const initSettingsApplier = () => {
         applyUiFontSize(newSettings.uiFontSize ?? 14)
         applyHideBorder(newSettings.hideBorder)
       }
+    },
+    { deep: true, immediate: true }
+  )
+
+  // 监听内容字体设置变化
+  watch(
+    displaySettings,
+    (newSettings) => {
+      applyContentFont(newSettings.contentFontFamily, newSettings.contentFontWeight)
     },
     { deep: true, immediate: true }
   )

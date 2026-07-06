@@ -73,6 +73,12 @@ const autoScroll = ref(true)
 const giftItemKey = (item: GiftTimelineItem) => `${isSuperChat(item) ? 'sc' : 'gift'}-${item.id}`
 const giftLayoutVersion = computed(() => [
   settingsStore.mainWindowSettings.fontSize,
+  settingsStore.contentFontFamily,
+  settingsStore.contentFontWeight,
+  settingsStore.giftFontColor,
+  settingsStore.giftUsernameColor,
+  settingsStore.giftPriceColor,
+  settingsStore.superChatFontColor,
   settingsStore.giftShowTime,
   settingsStore.giftShowMedal,
   settingsStore.scMergeWithGift
@@ -155,6 +161,9 @@ onUnmounted(() => {
         <SuperChatItem
           v-if="isSuperChat(item)"
           :superchat="item"
+          :font-family="settingsStore.contentFontFamily"
+          :font-weight="settingsStore.contentFontWeight"
+          :font-color="settingsStore.superChatFontColor"
           @contextmenu="handleContextMenu($event, item)"
         />
         <GiftItem
@@ -164,6 +173,11 @@ onUnmounted(() => {
           :show-medal="settingsStore.giftShowMedal"
           :is-special-follow="settingsStore.isSpecialFollow(item.user.uid)"
           :expired="isGiftExpired(item)"
+          :font-family="settingsStore.contentFontFamily"
+          :font-weight="settingsStore.contentFontWeight"
+          :font-color="settingsStore.giftFontColor"
+          :username-color="settingsStore.giftUsernameColor"
+          :price-color="settingsStore.giftPriceColor"
           @contextmenu="handleContextMenu($event, item)"
         />
       </template>

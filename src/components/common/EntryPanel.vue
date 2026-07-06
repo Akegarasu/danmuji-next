@@ -69,6 +69,13 @@ const filteredEntries = computed(() => {
   })
 })
 
+const entryStyle = computed(() => ({
+  '--entry-font-family': settingsStore.contentFontFamily,
+  '--entry-font-weight': String(settingsStore.contentFontWeight),
+  '--entry-font-color': settingsStore.entryFontColor,
+  '--entry-time-color': settingsStore.entryTimeColor
+}))
+
 // ==================== 自动滚动 ====================
 
 const { listRef, autoScroll, onScroll, scrollToBottom } = useAutoScroll(
@@ -166,7 +173,7 @@ onUnmounted(() => {
   <div
     v-if="settingsStore.entryShowEnabled"
     class="entry-panel"
-    :style="{ height: panelHeight + 'px' }"
+    :style="[{ height: panelHeight + 'px' }, entryStyle]"
     :class="{ dragging: isDragging }"
   >
     <div class="resize-handle" @mousedown="startResize">
@@ -258,6 +265,8 @@ onUnmounted(() => {
   background: var(--bg-primary);
   min-height: 60px;
   max-height: 400px;
+  font-family: var(--entry-font-family, var(--font-family));
+  font-weight: var(--entry-font-weight, 400);
 
   &.dragging {
     user-select: none;
@@ -386,7 +395,7 @@ onUnmounted(() => {
 }
 
 .entry-name {
-  color: var(--text-secondary);
+  color: var(--entry-font-color, var(--text-secondary));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -400,7 +409,7 @@ onUnmounted(() => {
 }
 
 .entry-time {
-  color: var(--text-muted);
+  color: var(--entry-time-color, var(--text-muted));
   font-size: 0.85em;
   flex-shrink: 0;
   margin-left: auto;

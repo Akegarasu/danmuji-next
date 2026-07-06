@@ -11,11 +11,21 @@ const props = withDefaults(defineProps<{
   showMedal?: boolean
   isSpecialFollow?: boolean
   expired?: boolean
+  fontFamily?: string
+  fontWeight?: number
+  fontColor?: string
+  usernameColor?: string
+  priceColor?: string
 }>(), {
   showTime: true,
   showMedal: true,
   isSpecialFollow: false,
-  expired: false
+  expired: false,
+  fontFamily: 'var(--font-family)',
+  fontWeight: 400,
+  fontColor: 'var(--text-primary)',
+  usernameColor: 'var(--text-secondary)',
+  priceColor: 'var(--accent-gold)'
 })
 const logger = createLogger('GiftItem')
 
@@ -58,6 +68,14 @@ const giftIconUrl = computed(() => {
 })
 
 const timeText = computed(() => formatEventTime(props.gift.timestamp))
+
+const giftStyle = computed(() => ({
+  '--gift-font-family': props.fontFamily,
+  '--gift-font-weight': String(props.fontWeight),
+  '--gift-font-color': props.fontColor,
+  '--gift-username-color': props.usernameColor,
+  '--gift-price-color': props.priceColor
+}))
 </script>
 
 <template>
@@ -70,6 +88,7 @@ const timeText = computed(() => formatEventTime(props.gift.timestamp))
       { expired },
       expired ? '' : guardClass
     ]"
+    :style="giftStyle"
   >
     <div class="gift-icon" :class="guardClass">
       <img 
@@ -122,6 +141,8 @@ const timeText = computed(() => formatEventTime(props.gift.timestamp))
   margin-bottom: 6px;
   transition: background 0.15s;
   cursor: default;
+  font-family: var(--gift-font-family, var(--font-family));
+  font-weight: var(--gift-font-weight, 400);
   
   &:hover {
     background: var(--bg-hover);
@@ -258,7 +279,7 @@ const timeText = computed(() => formatEventTime(props.gift.timestamp))
 }
 
 .username {
-  color: var(--text-secondary);
+  color: var(--gift-username-color, var(--text-secondary));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -271,9 +292,9 @@ const timeText = computed(() => formatEventTime(props.gift.timestamp))
 }
 
 .gift-name {
-  color: var(--text-primary);
+  color: var(--gift-font-color, var(--text-primary));
   font-size: var(--content-font-size-sm);
-  font-weight: 500;
+  font-weight: inherit;
 }
 
 .gift-num {
@@ -283,7 +304,7 @@ const timeText = computed(() => formatEventTime(props.gift.timestamp))
 }
 
 .gift-price {
-  color: var(--accent-gold);
+  color: var(--gift-price-color, var(--accent-gold));
   font-size: var(--content-font-size-sm);
   font-weight: 600;
   flex-shrink: 0;

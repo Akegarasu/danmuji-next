@@ -3,9 +3,16 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import type { ProcessedSuperChat } from '@/types'
 import { formatPrice } from '@/types'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   superchat: ProcessedSuperChat
-}>()
+  fontFamily?: string
+  fontWeight?: number
+  fontColor?: string
+}>(), {
+  fontFamily: 'var(--font-family)',
+  fontWeight: 400,
+  fontColor: '#ffffff'
+})
 
 const now = ref(Date.now())
 let timer: number
@@ -56,15 +63,20 @@ const progress = computed(() => {
 
 // 是否过期
 const isExpired = computed(() => progress.value <= 0)
+
+const scStyle = computed(() => ({
+  '--sc-bg': scColor.value,
+  '--sc-font-family': props.fontFamily,
+  '--sc-font-weight': String(props.fontWeight),
+  '--sc-font-color': props.fontColor
+}))
 </script>
 
 <template>
   <div 
     class="sc-item animate-fade-in" 
     :class="{ expired: isExpired }"
-    :style="{
-      '--sc-bg': scColor
-    }"
+    :style="scStyle"
   >
     <div class="sc-header">
       <div class="user-info">
@@ -95,6 +107,8 @@ const isExpired = computed(() => progress.value <= 0)
   transition: filter 0.3s, opacity 0.3s;
   cursor: default;
   flex-shrink: 0;
+  font-family: var(--sc-font-family, var(--font-family));
+  font-weight: var(--sc-font-weight, 400);
   
   &.expired {
     filter: grayscale(0.7) brightness(0.8);
@@ -130,14 +144,14 @@ const isExpired = computed(() => progress.value <= 0)
 }
 
 .username {
-  color: white;
+  color: var(--sc-font-color, white);
   font-weight: 500;
   font-size: var(--content-font-size-sm);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
 .price {
-  color: white;
+  color: var(--sc-font-color, white);
   font-size: var(--content-font-size-xs);
   font-weight: 600;
   background: rgba(0, 0, 0, 0.2);
@@ -171,7 +185,7 @@ const isExpired = computed(() => progress.value <= 0)
 .sc-content {
   padding: 10px 12px;
   background: var(--sc-bg);
-  color: white;
+  color: var(--sc-font-color, white);
   font-size: var(--content-font-size-sm);
   line-height: 1.5;
   min-height: 40px;

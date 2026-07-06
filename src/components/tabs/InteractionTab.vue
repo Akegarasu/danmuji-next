@@ -103,6 +103,14 @@ const interactionLayoutVersion = computed(() => [
   settingsStore.danmakuShowTime,
   settingsStore.danmakuShowGuardBorder,
   settingsStore.danmakuEmoticonSize,
+  settingsStore.contentFontFamily,
+  settingsStore.contentFontWeight,
+  settingsStore.danmakuFontColor,
+  settingsStore.danmakuUsernameColor,
+  settingsStore.giftFontColor,
+  settingsStore.giftUsernameColor,
+  settingsStore.giftPriceColor,
+  settingsStore.superChatFontColor,
   settingsStore.giftShowTime,
   settingsStore.giftShowMedal,
   settingsStore.danmakuFilterUids.join(',')
@@ -264,6 +272,10 @@ onUnmounted(() => {
             :show-guard-border="settingsStore.danmakuShowGuardBorder"
             :emoticon-size="settingsStore.danmakuEmoticonSize"
             :is-special-follow="settingsStore.isSpecialFollow(item.data.user.uid)"
+            :font-family="settingsStore.contentFontFamily"
+            :font-weight="settingsStore.contentFontWeight"
+            :font-color="settingsStore.danmakuFontColor"
+            :username-color="settingsStore.danmakuUsernameColor"
             @contextmenu="handleContextMenu($event, { kind: 'danmaku', data: item.data })"
           />
           <GiftItem
@@ -273,11 +285,19 @@ onUnmounted(() => {
             :show-medal="settingsStore.giftShowMedal"
             :is-special-follow="settingsStore.isSpecialFollow(item.data.user.uid)"
             :expired="isGiftExpired(item.data)"
+            :font-family="settingsStore.contentFontFamily"
+            :font-weight="settingsStore.contentFontWeight"
+            :font-color="settingsStore.giftFontColor"
+            :username-color="settingsStore.giftUsernameColor"
+            :price-color="settingsStore.giftPriceColor"
             @contextmenu="handleContextMenu($event, { kind: 'gift', data: item.data })"
           />
           <SuperChatItem
             v-else
             :superchat="item.data"
+            :font-family="settingsStore.contentFontFamily"
+            :font-weight="settingsStore.contentFontWeight"
+            :font-color="settingsStore.superChatFontColor"
             @contextmenu="handleContextMenu($event, { kind: 'superchat', data: item.data })"
           />
         </template>

@@ -49,6 +49,10 @@ pub fn is_dev_mode() -> bool {
     DEV_MODE.load(Ordering::Relaxed)
 }
 
+fn should_reapply_always_on_top(label: &str) -> bool {
+    matches!(label, "main" | "settings") || label.starts_with("tab-")
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // 检查 dev mode
@@ -94,9 +98,10 @@ pub fn run() {
             });
 
             // 创建托盘菜单
+            let reapply_topmost = MenuItem::with_id(app, "reapply_topmost", "重新顶置", true, None::<&str>)?;
             let unlock_all = MenuItem::with_id(app, "unlock_all", "解锁所有窗口", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&unlock_all, &quit])?;
+            let menu = Menu::with_items(app, &[&reapply_topmost, &unlock_all, &quit])?;
 
             // 创建系统托盘
             TrayIconBuilder::new()
@@ -104,6 +109,18 @@ pub fn run() {
                 .menu(&menu)
                 .tooltip("弹幕姬")
                 .on_menu_event(|app, event| match event.id.as_ref() {
+                    "reapply_topmost" => {
+                        for (label, window) in app.webview_windows() {
+                            if should_reapply_always_on_top(&label) {
+                                if let Err(e) = window.set_always_on_top(false) {
+                                    log::warn!("Failed to unset always-on-top for {}: {}", label, e);
+                                }
+                                if let Err(e) = window.set_always_on_top(true) {
+                                    log::warn!("Failed to reapply always-on-top for {}: {}", label, e);
+                                }
+                            }
+                        }
+                    }
                     "unlock_all" => {
                         // 获取锁定管理器和 KV 存储，解锁所有窗口
                         let kv_store = app.state::<KVStore>();

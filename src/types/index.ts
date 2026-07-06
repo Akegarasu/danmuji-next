@@ -58,6 +58,9 @@ export type InteractionItem =
 /** 观众排序方式 */
 export type AudienceSortType = 'enterTime' | 'giftValue' | 'medalLevel'
 
+/** 内容字重 */
+export type ContentFontWeight = 300 | 400 | 500 | 600 | 700 | 800
+
 /** 窗口显示设置 */
 export interface WindowSettings {
   opacity: number
@@ -81,6 +84,10 @@ export interface DisplaySettings {
   danmakuShowTime: boolean
   danmakuShowGuardBorder: boolean
   danmakuEmoticonSize: number
+  contentFontFamily: string
+  contentFontWeight: ContentFontWeight
+  danmakuFontColor: string
+  danmakuUsernameColor: string
   
   // 礼物设置
   giftMergeDisplay: boolean
@@ -92,9 +99,13 @@ export interface DisplaySettings {
   giftExpireEnabled: boolean
   /** 礼物过期时间（分钟） */
   giftExpireMinutes: number
+  giftFontColor: string
+  giftUsernameColor: string
+  giftPriceColor: string
   
   // SC 设置
   scMergeWithGift: boolean
+  superChatFontColor: string
   
   // 观众设置
   audienceSortType: AudienceSortType
@@ -104,6 +115,8 @@ export interface DisplaySettings {
   audienceAutoRefreshEnabled: boolean
   /** 自动刷新间隔（秒） */
   audienceAutoRefreshIntervalSeconds: number
+  audienceFontColor: string
+  audienceScoreColor: string
 
   // 入场通知设置
   entryShowEnabled: boolean
@@ -115,6 +128,8 @@ export interface DisplaySettings {
   entryShowMedal: boolean
   entryShowGuard: boolean
   entryPanelHeight: number
+  entryFontColor: string
+  entryTimeColor: string
 }
 
 /** 用户登录信息 */
@@ -147,6 +162,10 @@ export const DEFAULT_DISPLAY_SETTINGS: DisplaySettings = {
   danmakuShowTime: false,
   danmakuShowGuardBorder: false,
   danmakuEmoticonSize: 32,
+  contentFontFamily: 'var(--font-family)',
+  contentFontWeight: 400,
+  danmakuFontColor: '#ebebeb',
+  danmakuUsernameColor: '#adbcd9',
   giftMergeDisplay: true,
   giftShowFree: true,
   giftMinPrice: 0,
@@ -154,12 +173,18 @@ export const DEFAULT_DISPLAY_SETTINGS: DisplaySettings = {
   giftShowMedal: false,
   giftExpireEnabled: true,
   giftExpireMinutes: 3,
+  giftFontColor: '#ebebeb',
+  giftUsernameColor: '#9b9b9b',
+  giftPriceColor: '#f5c842',
   scMergeWithGift: false,
+  superChatFontColor: '#ffffff',
   audienceSortType: 'enterTime',
   audienceShowEnterMsg: true,
   audienceShowMedal: true,
   audienceAutoRefreshEnabled: false,
   audienceAutoRefreshIntervalSeconds: 120,
+  audienceFontColor: '#ebebeb',
+  audienceScoreColor: '#f5c842',
   entryShowEnabled: true,
   entryFilterAll: true,
   entryFilterCaptain: false,
@@ -168,7 +193,9 @@ export const DEFAULT_DISPLAY_SETTINGS: DisplaySettings = {
   entryFilterSpecialFollow: false,
   entryShowMedal: true,
   entryShowGuard: true,
-  entryPanelHeight: 150
+  entryPanelHeight: 150,
+  entryFontColor: '#9b9b9b',
+  entryTimeColor: '#6b6b6b'
 }
 
 /** 默认窗口设置 */

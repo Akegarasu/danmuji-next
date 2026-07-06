@@ -20,7 +20,7 @@ import { lookupArchiveUserNames } from '@/services/archive'
 import { checkForUpdate, getAppVersion, isPortable, type UpdateInfo } from '@/services/updater'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import type { AudienceSortType } from '@/types'
+import type { AudienceSortType, ContentFontWeight, DisplaySettings } from '@/types'
 import type { UserInfo } from '@/services/auth'
 import { createLogger } from '@/services/logger'
 
@@ -219,6 +219,7 @@ const activeSection = ref('connection')
 const sections = [
   { id: 'connection', label: '连接' },
   { id: 'general', label: '通用' },
+  { id: 'font', label: '字体' },
   { id: 'danmaku', label: '弹幕' },
   { id: 'gift', label: '礼物' },
   { id: 'audience', label: '观众' },
@@ -227,6 +228,115 @@ const sections = [
   { id: 'shield-keyword', label: '屏蔽词' },
   { id: 'about', label: '关于' }
 ]
+
+const fontFamilyOptions = [
+  { label: '跟随界面字体', value: 'var(--font-family)' },
+  { label: '微软雅黑', value: "'Microsoft YaHei', sans-serif" },
+  { label: '苹方', value: "'PingFang SC', sans-serif" },
+  { label: '思源黑体', value: "'Source Han Sans SC', 'Noto Sans CJK SC', sans-serif" },
+  { label: '黑体', value: 'SimHei, sans-serif' },
+  { label: '宋体', value: 'SimSun, serif' },
+  { label: '等宽字体', value: "'Cascadia Mono', Consolas, monospace" }
+]
+
+const fontWeightOptions: Array<{ label: string; value: ContentFontWeight }> = [
+  { label: '细体 300', value: 300 },
+  { label: '常规 400', value: 400 },
+  { label: '中等 500', value: 500 },
+  { label: '半粗 600', value: 600 },
+  { label: '粗体 700', value: 700 },
+  { label: '特粗 800', value: 800 }
+]
+
+const neutralColorPresets = ['#ffffff', '#ebebeb', '#d6d6d6', '#b8b8b8', '#9b9b9b', '#6b6b6b']
+const accentColorPresets = ['#5c9eff', '#7dd3fc', '#ff7eb3', '#f5c842', '#34d399', '#f97316']
+const lightOnColorPresets = ['#ffffff', '#fff7cc', '#dff6ff', '#ffe4f0', '#e8fdf3', '#111827']
+
+type DisplayColorKey =
+  | 'danmakuFontColor'
+  | 'danmakuUsernameColor'
+  | 'giftFontColor'
+  | 'giftUsernameColor'
+  | 'giftPriceColor'
+  | 'superChatFontColor'
+  | 'audienceFontColor'
+  | 'audienceScoreColor'
+  | 'entryFontColor'
+  | 'entryTimeColor'
+
+const updateDisplayColor = (key: DisplayColorKey, value: string) => {
+  settingsStore.updateDisplaySettings({ [key]: value } as Partial<DisplaySettings>)
+}
+
+const getInputValue = (event: Event) => (event.target as HTMLInputElement).value
+
+const fontColorSettings = computed<Array<{
+  key: DisplayColorKey
+  label: string
+  value: string
+  presets: string[]
+}>>(() => [
+  {
+    key: 'danmakuFontColor',
+    label: '弹幕正文',
+    value: settings.value.display.danmakuFontColor,
+    presets: [...neutralColorPresets, ...accentColorPresets]
+  },
+  {
+    key: 'danmakuUsernameColor',
+    label: '弹幕用户名',
+    value: settings.value.display.danmakuUsernameColor,
+    presets: [...neutralColorPresets, ...accentColorPresets]
+  },
+  {
+    key: 'giftFontColor',
+    label: '礼物名称',
+    value: settings.value.display.giftFontColor,
+    presets: [...neutralColorPresets, ...accentColorPresets]
+  },
+  {
+    key: 'giftUsernameColor',
+    label: '礼物用户名',
+    value: settings.value.display.giftUsernameColor,
+    presets: [...neutralColorPresets, ...accentColorPresets]
+  },
+  {
+    key: 'giftPriceColor',
+    label: '礼物价格',
+    value: settings.value.display.giftPriceColor,
+    presets: [...accentColorPresets, ...neutralColorPresets]
+  },
+  {
+    key: 'superChatFontColor',
+    label: 'SC 正文',
+    value: settings.value.display.superChatFontColor,
+    presets: lightOnColorPresets
+  },
+  {
+    key: 'audienceFontColor',
+    label: '观众名称',
+    value: settings.value.display.audienceFontColor,
+    presets: [...neutralColorPresets, ...accentColorPresets]
+  },
+  {
+    key: 'audienceScoreColor',
+    label: '观众数值',
+    value: settings.value.display.audienceScoreColor,
+    presets: [...accentColorPresets, ...neutralColorPresets]
+  },
+  {
+    key: 'entryFontColor',
+    label: '入场名称',
+    value: settings.value.display.entryFontColor,
+    presets: [...neutralColorPresets, ...accentColorPresets]
+  },
+  {
+    key: 'entryTimeColor',
+    label: '入场时间',
+    value: settings.value.display.entryTimeColor,
+    presets: [...neutralColorPresets, ...accentColorPresets]
+  }
+])
 
 // const sortOptions = [
 //   { value: 'enterTime', label: '进入时间' },
@@ -307,6 +417,16 @@ const danmakuShowGuardBorder = computed({
 const danmakuEmoticonSize = computed({
   get: () => settings.value.display.danmakuEmoticonSize,
   set: (v) => settingsStore.updateDisplaySettings({ danmakuEmoticonSize: v })
+})
+
+const contentFontFamily = computed({
+  get: () => settings.value.display.contentFontFamily,
+  set: (v) => settingsStore.updateDisplaySettings({ contentFontFamily: v })
+})
+
+const contentFontWeight = computed({
+  get: () => settings.value.display.contentFontWeight,
+  set: (v: ContentFontWeight) => settingsStore.updateDisplaySettings({ contentFontWeight: v })
 })
 
 // 显示设置 - 礼物
@@ -817,22 +937,6 @@ const openProjectUrl = async () => {
             <input v-model.number="opacity" type="range" min="0" max="100" class="setting-slider" />
           </div>
 
-          <div class="setting-group">
-            <label class="setting-label">
-              内容字体大小 <span class="value">{{ fontSize }}px</span>
-            </label>
-            <input v-model.number="fontSize" type="range" min="10" max="48" class="setting-slider" />
-            <span class="setting-hint">仅影响弹幕、礼物、SC、点播等内容区域</span>
-          </div>
-
-          <div class="setting-group">
-            <label class="setting-label">
-              UI 字体大小 <span class="value">{{ uiFontSize }}px</span>
-            </label>
-            <input v-model.number="uiFontSize" type="range" min="10" max="48" class="setting-slider" />
-            <span class="setting-hint">影响标题栏、标签栏等 UI 元素</span>
-          </div>
-
           <div class="setting-group toggle">
             <label class="setting-label">窗口置顶</label>
             <input v-model="alwaysOnTop" type="checkbox" class="toggle-checkbox" />
@@ -846,6 +950,99 @@ const openProjectUrl = async () => {
           <div class="setting-group toggle">
             <label class="setting-label">失焦时隐藏标题栏</label>
             <input v-model="autoHideUi" type="checkbox" class="toggle-checkbox" />
+          </div>
+        </div>
+
+        <!-- 字体设置 -->
+        <div v-show="activeSection === 'font'" class="section">
+          <h3 class="section-title">字体设置</h3>
+
+          <div class="setting-group">
+            <label class="setting-label">
+              内容字体大小 <span class="value">{{ fontSize }}px</span>
+            </label>
+            <input v-model.number="fontSize" type="range" min="10" max="48" class="setting-slider" />
+            <span class="setting-hint">弹幕、礼物、SC、观众和点播等内容区域</span>
+          </div>
+
+          <div class="setting-group">
+            <label class="setting-label">
+              UI 字体大小 <span class="value">{{ uiFontSize }}px</span>
+            </label>
+            <input v-model.number="uiFontSize" type="range" min="10" max="48" class="setting-slider" />
+          </div>
+
+          <div class="setting-group">
+            <label class="setting-label">内容字体</label>
+            <div class="font-family-grid">
+              <button
+                v-for="option in fontFamilyOptions"
+                :key="option.value"
+                type="button"
+                class="font-family-option"
+                :class="{ active: contentFontFamily === option.value }"
+                :style="{ fontFamily: option.value }"
+                @click="contentFontFamily = option.value"
+              >
+                <span class="font-option-name">{{ option.label }}</span>
+                <span class="font-option-preview">弹幕 Aa 123</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="setting-group">
+            <label class="setting-label">内容字重</label>
+            <div class="font-weight-options">
+              <button
+                v-for="option in fontWeightOptions"
+                :key="option.value"
+                type="button"
+                class="font-weight-option"
+                :class="{ active: contentFontWeight === option.value }"
+                :style="{ fontWeight: option.value }"
+                @click="contentFontWeight = option.value"
+              >
+                {{ option.label }}
+              </button>
+            </div>
+          </div>
+
+          <h3 class="section-title section-subtitle">颜色</h3>
+
+          <div class="font-color-grid">
+            <div
+              v-for="item in fontColorSettings"
+              :key="item.key"
+              class="font-color-card"
+            >
+              <label class="setting-label">
+                {{ item.label }}
+                <span class="value">{{ item.value }}</span>
+              </label>
+              <div class="color-control">
+                <div class="color-swatches">
+                  <button
+                    v-for="color in item.presets"
+                    :key="`${item.key}-${color}`"
+                    type="button"
+                    class="color-swatch"
+                    :class="{ active: item.value.toLowerCase() === color.toLowerCase() }"
+                    :style="{ backgroundColor: color }"
+                    :title="color"
+                    @click="updateDisplayColor(item.key, color)"
+                  />
+                </div>
+                <label class="custom-color-btn" :style="{ '--picked-color': item.value }">
+                  <input
+                    type="color"
+                    :value="item.value"
+                    @input="updateDisplayColor(item.key, getInputValue($event))"
+                  />
+                  <span class="custom-color-swatch" />
+                  <span>自定义</span>
+                </label>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1407,6 +1604,10 @@ const openProjectUrl = async () => {
   color: var(--text-muted);
 }
 
+.section-subtitle {
+  margin-top: 24px;
+}
+
 .connection-card {
   padding: 12px 16px;
   background: var(--bg-card);
@@ -1641,6 +1842,167 @@ const openProjectUrl = async () => {
     background: var(--bg-secondary);
     color: var(--text-primary);
   }
+}
+
+.font-family-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.font-family-option {
+  min-height: 58px;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  &.active {
+    border-color: var(--accent-primary);
+    color: var(--text-primary);
+    background: rgba(92, 158, 255, 0.12);
+  }
+}
+
+.font-option-name,
+.font-option-preview {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.font-option-name {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.font-option-preview {
+  margin-top: 4px;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.font-weight-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 8px;
+}
+
+.font-weight-option {
+  height: 34px;
+  padding: 0 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  &.active {
+    border-color: var(--accent-primary);
+    color: var(--text-primary);
+    background: rgba(92, 158, 255, 0.12);
+  }
+}
+
+.font-color-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 12px;
+}
+
+.font-color-card {
+  padding: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+}
+
+.color-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.color-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.color-swatch {
+  width: 22px;
+  height: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
+  transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+
+  &:hover,
+  &.active {
+    transform: translateY(-1px);
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px rgba(92, 158, 255, 0.25), inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+  }
+}
+
+.custom-color-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  background: var(--bg-active);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  overflow: hidden;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    border-color: var(--accent-primary);
+  }
+
+  input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+}
+
+.custom-color-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--picked-color);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
 }
 
 .setting-slider {

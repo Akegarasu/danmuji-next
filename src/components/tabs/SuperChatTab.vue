@@ -23,7 +23,12 @@ const virtualListRef = ref<VirtualListExpose | null>(null)
 const autoScroll = ref(true)
 const orderedSuperChatList = computed(() => [...danmakuStore.superChatList].reverse())
 const superChatItemKey = (sc: ProcessedSuperChat) => sc.id
-const superChatLayoutVersion = computed(() => settingsStore.mainWindowSettings.fontSize)
+const superChatLayoutVersion = computed(() => [
+  settingsStore.mainWindowSettings.fontSize,
+  settingsStore.contentFontFamily,
+  settingsStore.contentFontWeight,
+  settingsStore.superChatFontColor
+].join('|'))
 
 const scrollToBottom = () => {
   virtualListRef.value?.scrollToBottom()
@@ -100,6 +105,9 @@ const copyContent = () => {
       <template #default="{ item: sc }">
         <SuperChatItem
           :superchat="sc"
+          :font-family="settingsStore.contentFontFamily"
+          :font-weight="settingsStore.contentFontWeight"
+          :font-color="settingsStore.superChatFontColor"
           @contextmenu="handleContextMenu($event, sc)"
         />
       </template>

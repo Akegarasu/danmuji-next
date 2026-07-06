@@ -124,6 +124,13 @@ const sortLabel = computed(() => {
   }
 })
 
+const audienceStyle = computed(() => ({
+  '--audience-font-family': settingsStore.contentFontFamily,
+  '--audience-font-weight': String(settingsStore.contentFontWeight),
+  '--audience-font-color': settingsStore.audienceFontColor,
+  '--audience-score-color': settingsStore.audienceScoreColor
+}))
+
 // 贡献榜总人数
 const totalCount = computed(() => danmakuStore.contributionRankFull.length)
 
@@ -251,7 +258,7 @@ const copyUsername = () => {
 </script>
 
 <template>
-  <div class="audience-tab">
+  <div class="audience-tab" :style="audienceStyle">
     <div class="stats-bar">
       <span class="stat">
         在线: <strong>{{ danmakuStore.stats.online_count }}</strong>
@@ -331,6 +338,8 @@ const copyUsername = () => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  font-family: var(--audience-font-family, var(--font-family));
+  font-weight: var(--audience-font-weight, 400);
 }
 
 .stats-bar {
@@ -478,7 +487,7 @@ const copyUsername = () => {
 }
 
 .name {
-  color: var(--text-primary);
+  color: var(--audience-font-color, var(--text-primary));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -486,7 +495,7 @@ const copyUsername = () => {
 
 .user-score {
   font-size: var(--content-font-size-xs);
-  color: var(--accent-gold);
+  color: var(--audience-score-color, var(--accent-gold));
   font-weight: 500;
   flex-shrink: 0;
 }

@@ -45,6 +45,10 @@ const danmakuLayoutVersion = computed(() => [
   settingsStore.danmakuShowTime,
   settingsStore.danmakuShowGuardBorder,
   settingsStore.danmakuEmoticonSize,
+  settingsStore.contentFontFamily,
+  settingsStore.contentFontWeight,
+  settingsStore.danmakuFontColor,
+  settingsStore.danmakuUsernameColor,
   settingsStore.danmakuFilterUids.join(',')
 ].join('|'))
 
@@ -159,6 +163,10 @@ const getRandomTip = () => {
           :show-guard-border="settingsStore.danmakuShowGuardBorder"
           :emoticon-size="settingsStore.danmakuEmoticonSize"
           :is-special-follow="settingsStore.isSpecialFollow(msg.user.uid)"
+          :font-family="settingsStore.contentFontFamily"
+          :font-weight="settingsStore.contentFontWeight"
+          :font-color="settingsStore.danmakuFontColor"
+          :username-color="settingsStore.danmakuUsernameColor"
           @contextmenu="handleContextMenu($event, msg)"
         />
       </template>
