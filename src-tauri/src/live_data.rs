@@ -475,6 +475,7 @@ impl LiveData {
             id: format!("iw_{}_{}", iw.timestamp, iw.user.uid),
             user: convert_user(&iw.user),
             timestamp: iw.timestamp,
+            msg_type: iw.msg_type,
         };
 
         self.interact_word_list.push_back(processed.clone());

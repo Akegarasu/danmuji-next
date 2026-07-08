@@ -178,6 +178,7 @@ pub struct ProcessedInteractWord {
     pub id: String,
     pub user: ProcessedUser,
     pub timestamp: i64,
+    pub msg_type: u32,
 }
 
 /// 用户贡献统计

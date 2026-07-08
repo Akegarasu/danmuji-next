@@ -124,6 +124,10 @@ fn parse_notification(json_str: &str) -> Option<Event> {
             let iw = InteractWord::parse(&value)?;
             Some(Event::InteractWord(iw))
         }
+        "INTERACT_WORD_V2" => {
+            let iw = InteractWord::parse_v2(&value)?;
+            Some(Event::InteractWord(iw))
+        }
         // 其他已知但不处理的 CMD
         "ENTRY_EFFECT"
         | "COMBO_SEND"

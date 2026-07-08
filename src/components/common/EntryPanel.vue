@@ -163,6 +163,16 @@ const getGuardName = (level: number) => {
   }
 }
 
+const getInteractAction = (msgType: number) => {
+  switch (msgType) {
+    case 2: return '关注'
+    case 3: return '分享'
+    case 4: return '特别关注'
+    case 5: return '互相关注'
+    default: return '进入'
+  }
+}
+
 onUnmounted(() => {
   document.removeEventListener('mousemove', onMouseMove)
   document.removeEventListener('mouseup', onMouseUp)
@@ -224,7 +234,7 @@ onUnmounted(() => {
           {{ entry.user.name }}
         </span>
 
-        <span class="entry-time">{{ formatEventTime(entry.timestamp) }} 进入</span>
+        <span class="entry-time">{{ formatEventTime(entry.timestamp) }} {{ getInteractAction(entry.msg_type) }}</span>
 
       </div>
 

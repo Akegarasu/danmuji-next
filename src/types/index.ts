@@ -282,6 +282,7 @@ export interface ProcessedInteractWord {
   id: string
   user: ProcessedUser
   timestamp: number
+  msg_type: number
 }
 
 /** 用户贡献统计（来自后端） */

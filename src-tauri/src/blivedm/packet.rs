@@ -118,7 +118,7 @@ impl Packet {
             "buvid": buvid,
             "roomid": room_id,
             "protover": 3,
-            "platform": "danmuji",
+            "platform": "web",
             "type": 2,
             "key": token,
         });
