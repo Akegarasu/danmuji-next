@@ -4,6 +4,7 @@ import { storeToRefs } from 'pinia'
 import TitleBar from '@/components/common/TitleBar.vue'
 import LoginDialog from '@/components/common/LoginDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import UpdateToast from '@/components/common/UpdateToast.vue'
 import { useSettingsStore } from '@/stores/settings'
 import { useDanmakuStore } from '@/stores/danmaku'
 import { applyCurrentSettings, initSettingsApplier } from '@/services/settings-applier'
@@ -838,6 +839,7 @@ const appVersion = ref('')
 const portableMode = ref(false)
 const updateCheckStatus = ref<'idle' | 'checking' | 'found' | 'latest' | 'error'>('idle')
 const aboutUpdateInfo = ref<UpdateInfo | null>(null)
+const showUpdateToast = ref(false)
 
 const initAboutInfo = async () => {
   appVersion.value = await getAppVersion()
@@ -845,20 +847,33 @@ const initAboutInfo = async () => {
 }
 
 const manualCheckUpdate = async () => {
+  if (updateCheckStatus.value === 'checking') return
+
   updateCheckStatus.value = 'checking'
+  showUpdateToast.value = false
   try {
-    const info = await checkForUpdate()
+    const info = await checkForUpdate({ silent: false })
     if (info) {
       aboutUpdateInfo.value = info
       updateCheckStatus.value = 'found'
+      showUpdateToast.value = true
     } else {
+      aboutUpdateInfo.value = null
       updateCheckStatus.value = 'latest'
       setTimeout(() => { updateCheckStatus.value = 'idle' }, 3000)
     }
-  } catch {
+  } catch (error) {
+    logger.error('手动检查更新失败:', error)
     updateCheckStatus.value = 'error'
+    showAlert(`检查更新失败：${error instanceof Error ? error.message : String(error)}`)
     setTimeout(() => { updateCheckStatus.value = 'idle' }, 3000)
   }
+}
+
+const showUpdateChangelog = () => {
+  if (!aboutUpdateInfo.value) return
+  const notes = aboutUpdateInfo.value.notes || '暂无更新说明'
+  showAlert(`v${aboutUpdateInfo.value.version} 更新日志\n\n${notes}`)
 }
 
 const openProjectUrl = async () => {
@@ -1442,6 +1457,14 @@ const openProjectUrl = async () => {
       </button>
     </div>
 
+    <UpdateToast
+      v-if="showUpdateToast && aboutUpdateInfo"
+      :update-info="aboutUpdateInfo"
+      :pause-auto-close="showAlertDialog"
+      @close="showUpdateToast = false"
+      @show-changelog="showUpdateChangelog"
+    />
+
     <!-- 登录对话框 -->
     <LoginDialog v-model:visible="showLoginDialog" @login-success="handleLoginSuccess" />
 
@@ -1475,6 +1498,7 @@ const openProjectUrl = async () => {
 
 <style scoped lang="scss">
 .settings-window {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: 100%;

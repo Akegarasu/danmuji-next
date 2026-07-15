@@ -30,6 +30,11 @@ export interface DownloadProgress {
   total: number | null
 }
 
+export interface CheckForUpdateOptions {
+  /** 自动检查时静默处理错误；手动检查应设为 false。 */
+  silent?: boolean
+}
+
 // ==================== 常量 ====================
 
 /** COS 防盗链 Referer */
@@ -40,7 +45,7 @@ const UPDATE_ENDPOINT = 'https://akiba-1301838591.cos.ap-shanghai.myqcloud.com/u
 
 const CHECK_INTERVAL = 2 * 60 * 60 * 1000 // 2小时
 const logger = createLogger('Updater')
-const INITIAL_DELAY = 10_000 // 启动后10秒首次检查
+const INITIAL_DELAY = 5_000 // 启动后5秒首次检查
 
 // ==================== 模块级状态 ====================
 
@@ -171,12 +176,16 @@ async function installPortableUpdate(
 /**
  * 检查更新（自动判断安装版/便携版）
  */
-export async function checkForUpdate(): Promise<UpdateInfo | null> {
+export async function checkForUpdate(
+  options: CheckForUpdateOptions = {}
+): Promise<UpdateInfo | null> {
+  const { silent = true } = options
   try {
     const portable = await isPortable()
     return portable ? await checkPortableUpdate() : await checkInstallerUpdate()
   } catch (e) {
-    logger.debug('检查更新失败:', e)
+    if (!silent) throw e
+    logger.debug('后台检查更新失败:', e)
     return null
   }
 }

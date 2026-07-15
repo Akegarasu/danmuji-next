@@ -719,7 +719,7 @@ dependencies = [
 
 [[package]]
 name = "danmuji-next"
-version = "2.2.1"
+version = "2.3.0"
 dependencies = [
  "base64 0.22.1",
  "blivedm-rs",

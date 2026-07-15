@@ -104,6 +104,7 @@ const confirm = () => {
   font-size: var(--font-size-sm, 13px);
   color: var(--text-secondary);
   line-height: 1.6;
+  white-space: pre-wrap;
   word-break: break-word;
 }
 
