@@ -1,19 +1,40 @@
-# danmuji-blivedm
+# blivedm-rs
 
-`danmuji-blivedm` 是从 danmuji-next 中拆分出的 Bilibili 直播 Rust 库，包含：
+`blivedm-rs` 是从 danmuji-next 中拆分出的 Bilibili 直播 Rust 库，包含：
 
 - WebSocket 弹幕连接、心跳与自动重连
 - Zlib/Brotli 协议包解码
 - 弹幕、礼物、醒目留言、大航海、开播/下播、在线排行和进房事件解析
 - 房间信息、弹幕服务器、贡献排行和房管相关 HTTP API
 
-Cargo 包名是 `danmuji-blivedm`，Rust 库名是 `blivedm`。
+贡献榜支持在线、日、周、月四种类型；大航海榜同时提供单页接口和自动遍历全部分页的接口：
+
+```rust,no_run
+use blivedm::api::{
+    get_all_guard_top_list, get_contribution_rank_by_type, ContributionRankType,
+};
+# async fn example(client: &reqwest::Client) -> blivedm::Result<()> {
+let daily = get_contribution_rank_by_type(
+    client,
+    12962,
+    777964,
+    None,
+    ContributionRankType::Daily,
+    1,
+    100,
+).await?;
+let guards = get_all_guard_top_list(client, 12962, 777964, None).await?;
+# Ok(())
+# }
+```
+
+Cargo 包名是 `blivedm-rs`，Rust 库名是 `blivedm`。
 
 ## 在当前仓库中使用
 
 ```toml
 [dependencies]
-blivedm = { package = "danmuji-blivedm", path = "../crates/blivedm" }
+blivedm = { package = "blivedm-rs", path = "../crates/blivedm" }
 ```
 
 ```rust,no_run

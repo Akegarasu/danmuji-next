@@ -520,6 +520,16 @@ const entryShowEnabled = computed({
   set: (v) => settingsStore.updateDisplaySettings({ entryShowEnabled: v })
 })
 
+const entryPanelShowInInteraction = computed({
+  get: () => settings.value.display.entryPanelShowInInteraction,
+  set: (v) => settingsStore.updateDisplaySettings({ entryPanelShowInInteraction: v })
+})
+
+const entryPanelShowInAudience = computed({
+  get: () => settings.value.display.entryPanelShowInAudience,
+  set: (v) => settingsStore.updateDisplaySettings({ entryPanelShowInAudience: v })
+})
+
 const entryShowMedal = computed({
   get: () => settings.value.display.entryShowMedal,
   set: (v) => settingsStore.updateDisplaySettings({ entryShowMedal: v })
@@ -1186,11 +1196,21 @@ const openProjectUrl = async () => {
           <h3 class="section-title" style="margin-top: 24px;">入场通知</h3>
 
           <div class="setting-group toggle">
-            <label class="setting-label">显示进房事件</label>
+            <label class="setting-label">启用进房面板</label>
             <input v-model="entryShowEnabled" type="checkbox" class="toggle-checkbox" />
           </div>
 
           <template v-if="entryShowEnabled">
+            <div class="setting-group toggle">
+              <label class="setting-label">在互动栏显示</label>
+              <input v-model="entryPanelShowInInteraction" type="checkbox" class="toggle-checkbox" />
+            </div>
+
+            <div class="setting-group toggle">
+              <label class="setting-label">在观众栏显示</label>
+              <input v-model="entryPanelShowInAudience" type="checkbox" class="toggle-checkbox" />
+            </div>
+
             <div class="setting-group toggle">
               <label class="setting-label">显示粉丝勋章</label>
               <input v-model="entryShowMedal" type="checkbox" class="toggle-checkbox" />

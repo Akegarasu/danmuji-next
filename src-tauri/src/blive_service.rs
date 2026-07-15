@@ -17,7 +17,8 @@ use tokio::time::interval;
 
 use crate::archive::{ArchiveEvent, ArchiveManager};
 use blivedm::api::{
-    get_contribution_rank, get_danmu_info, get_room_init, ContributionRankUser, RoomInfo,
+    get_all_guard_top_list, get_contribution_rank, get_contribution_rank_by_type, get_danmu_info,
+    get_room_init, ContributionRankResponse, ContributionRankType, GuardTopListResponse, RoomInfo,
 };
 use blivedm::{BliveDmClient, Error as BliveError, Event};
 use crate::kv_store::{VideoRequestStore, VotingStore};
@@ -78,7 +79,8 @@ impl BliveService {
     pub async fn refresh_contribution_rank(
         &self,
         cookie: &str,
-    ) -> Result<Vec<ContributionRankUser>, String> {
+        rank_type: ContributionRankType,
+    ) -> Result<ContributionRankResponse, String> {
         let room_info = {
             let state = self.state.read().await;
             state.room_info.clone()
@@ -93,18 +95,20 @@ impl BliveService {
         };
 
         log::info!(
-            "[ContributionRank] refresh requested: room_id={}, ruid={}, has_cookie={}",
+            "[ContributionRank] refresh requested: room_id={}, ruid={}, type={:?}, has_cookie={}",
             room_info.room_id,
             room_info.uid,
+            rank_type,
             !cookie.is_empty()
         );
 
         let http_client = reqwest::Client::new();
-        match get_contribution_rank(
+        match get_contribution_rank_by_type(
             &http_client,
             room_info.room_id,
             room_info.uid,
             Some(cookie),
+            rank_type,
             1,
             100,
         )
@@ -117,17 +121,46 @@ impl BliveService {
                     list.len(),
                     list.first().map(|user| user.uid)
                 );
-                self.live_data
-                    .lock()
-                    .await
-                    .set_contribution_rank_full(list.clone());
-                Ok(list)
+                if rank_type == ContributionRankType::Online {
+                    self.live_data
+                        .lock()
+                        .await
+                        .set_contribution_rank_full(list);
+                }
+                Ok(rank)
             }
             Err(e) => {
                 log::warn!("[ContributionRank] refresh failed: {}", e);
                 Err(format!("获取贡献排行榜失败: {}", e))
             }
         }
+    }
+
+    /// 刷新大航海榜。
+    pub async fn refresh_guard_top_list(
+        &self,
+        cookie: &str,
+    ) -> Result<GuardTopListResponse, String> {
+        let room_info = self
+            .state
+            .read()
+            .await
+            .room_info
+            .clone()
+            .ok_or_else(|| "未连接房间".to_string())?;
+        let http_client = reqwest::Client::new();
+
+        get_all_guard_top_list(
+            &http_client,
+            room_info.room_id,
+            room_info.uid,
+            Some(cookie),
+        )
+        .await
+        .map_err(|error| {
+            log::warn!("[GuardTopList] refresh failed: {}", error);
+            format!("获取大航海榜失败: {error}")
+        })
     }
 
     /// 订阅事件

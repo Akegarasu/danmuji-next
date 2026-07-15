@@ -1,5 +1,5 @@
 [package]
-name = "danmuji-blivedm"
+name = "blivedm-rs"
 version = "0.1.0"
 edition = "2021"
 description = "Bilibili live room WebSocket client, protocol codec, event parser, and HTTP APIs"

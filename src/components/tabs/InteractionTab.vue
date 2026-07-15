@@ -320,7 +320,7 @@ onUnmounted(() => {
     </div>
 
     <!-- 入场通知面板 -->
-    <EntryPanel />
+    <EntryPanel v-if="settingsStore.entryPanelShowInInteraction" />
 
     <ContextMenu ref="contextMenuRef" :items="dynamicMenuItems" />
 

@@ -10,7 +10,14 @@ import { useDanmakuStore } from '@/stores/danmaku'
 import { useSettingsStore } from '@/stores/settings'
 import { useVideoRequestStore } from '@/stores/video-request'
 import { useVotingStore } from '@/stores/voting'
-import type { DataUpdate, DataSnapshot, EventType } from '@/types'
+import type {
+  ContributionRankResponse,
+  ContributionRankType,
+  DataUpdate,
+  DataSnapshot,
+  EventType,
+  GuardTopListResponse
+} from '@/types'
 import { createLogger } from '@/services/logger'
 
 // ==================== 后端类型定义 ====================
@@ -98,9 +105,17 @@ export async function getDataSnapshot(eventTypes: EventType[]): Promise<DataSnap
   return await invoke<DataSnapshot>('get_data_snapshot', { eventTypes })
 }
 
-/** 刷新贡献排行榜 */
-export async function refreshContributionRank(cookie: string): Promise<void> {
-  await invoke('refresh_contribution_rank', { cookie })
+/** 刷新指定类型的贡献排行榜 */
+export async function refreshContributionRank(
+  cookie: string,
+  rankType: ContributionRankType = 'online'
+): Promise<ContributionRankResponse> {
+  return await invoke<ContributionRankResponse>('refresh_contribution_rank', { cookie, rankType })
+}
+
+/** 刷新大航海榜 */
+export async function refreshGuardTopList(cookie: string): Promise<GuardTopListResponse> {
+  return await invoke<GuardTopListResponse>('refresh_guard_top_list', { cookie })
 }
 
 // ==================== 直播间管理 API ====================

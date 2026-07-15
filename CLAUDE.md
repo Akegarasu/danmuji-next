@@ -43,7 +43,7 @@ Bilibili WebSocket → crates/blivedm/src/client.rs (packet decode, event parse)
 ```
 
 ### Key Backend Modules
-- **`crates/blivedm/`** — Independent `danmuji-blivedm` Rust crate (WebSocket client, packet codec, message parsers, HTTP APIs)
+- **`crates/blivedm/`** — Independent `blivedm-rs` Rust crate (WebSocket client, packet codec, message parsers, HTTP APIs)
 - **`blive_service.rs`** — Orchestrates connection lifecycle, event processing, gift merging (5s window), stats, window subscriptions
 - **`archive.rs`** — SQLite persistence for historical sessions; async writer via mpsc channel
 - **`crypto.rs`** — Cookie encryption using Windows DPAPI (transparent to frontend)

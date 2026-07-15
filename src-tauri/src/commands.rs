@@ -21,6 +21,9 @@ use crate::live_types::{
     ConnectResult, ConnectionStatus, DataSnapshot, EventType, RoomInfoResponse, VideoRequestItem,
 };
 use crate::voting::{Poll, VoteKeyType, Voter};
+use blivedm::api::{
+    ContributionRankResponse, ContributionRankType, GuardTopListResponse,
+};
 use crate::config::get_config_path;
 use crate::crypto;
 use crate::kv_store::KVStore;
@@ -453,9 +456,20 @@ pub async fn get_current_room_info(
 pub async fn refresh_contribution_rank(
     blive_service: State<'_, Arc<BliveService>>,
     cookie: String,
-) -> Result<(), String> {
-    blive_service.refresh_contribution_rank(&cookie).await?;
-    Ok(())
+    rank_type: ContributionRankType,
+) -> Result<ContributionRankResponse, String> {
+    blive_service
+        .refresh_contribution_rank(&cookie, rank_type)
+        .await
+}
+
+/// 刷新大航海榜
+#[tauri::command]
+pub async fn refresh_guard_top_list(
+    blive_service: State<'_, Arc<BliveService>>,
+    cookie: String,
+) -> Result<GuardTopListResponse, String> {
+    blive_service.refresh_guard_top_list(&cookie).await
 }
 
 // ==================== 事件订阅操作 ====================

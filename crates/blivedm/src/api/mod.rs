@@ -2,6 +2,7 @@
 
 mod cookie;
 mod danmu;
+mod guard;
 mod moderation;
 mod rank;
 mod room;
@@ -9,11 +10,17 @@ mod wbi;
 
 pub use cookie::{extract_buvid_from_cookie, extract_uid_from_cookie};
 pub use danmu::{get_danmu_info, DanmuHost, DanmuServerInfo};
+pub use guard::{
+    get_all_guard_top_list, get_guard_top_list, GuardTopListResponse, GuardTopListUser,
+};
 pub use moderation::{
     add_shield_keyword, add_silent_user, del_shield_keyword, get_shield_keyword_list,
     ShieldKeyword, ShieldKeywordListResponse, SilentUserResponse,
 };
-pub use rank::{get_contribution_rank, ContributionRankResponse, ContributionRankUser};
+pub use rank::{
+    get_contribution_rank, get_contribution_rank_by_type, ContributionRankResponse,
+    ContributionRankType, ContributionRankUser,
+};
 pub use room::{get_room_init, RoomInfo};
 
 /// 默认 User-Agent (与 blivedm-go 保持一致)

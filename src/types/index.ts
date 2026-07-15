@@ -120,6 +120,10 @@ export interface DisplaySettings {
 
   // 入场通知设置
   entryShowEnabled: boolean
+  /** 在互动栏显示进房面板 */
+  entryPanelShowInInteraction: boolean
+  /** 在观众栏显示进房面板 */
+  entryPanelShowInAudience: boolean
   entryFilterAll: boolean
   entryFilterCaptain: boolean
   entryFilterAdmiral: boolean
@@ -186,6 +190,8 @@ export const DEFAULT_DISPLAY_SETTINGS: DisplaySettings = {
   audienceFontColor: '#ebebeb',
   audienceScoreColor: '#f5c842',
   entryShowEnabled: true,
+  entryPanelShowInInteraction: true,
+  entryPanelShowInAudience: true,
   entryFilterAll: true,
   entryFilterCaptain: false,
   entryFilterAdmiral: false,
@@ -314,6 +320,38 @@ export interface ContributionRankUser {
   medal_name?: string
   medal_level?: number
   medal_color?: string
+}
+
+/** 贡献排行榜类型 */
+export type ContributionRankType = 'online' | 'daily' | 'weekly' | 'monthly'
+
+/** 贡献排行榜响应 */
+export interface ContributionRankResponse {
+  rank_type: ContributionRankType
+  count: number
+  list: ContributionRankUser[]
+}
+
+/** 大航海榜用户 */
+export interface GuardTopListUser {
+  uid: number
+  name: string
+  face: string
+  rank: number
+  accompany: number
+  score: number
+  guard_level: number
+  medal_name?: string
+  medal_level?: number
+  medal_color?: string
+}
+
+/** 大航海榜响应 */
+export interface GuardTopListResponse {
+  count: number
+  total_pages: number
+  current_page: number
+  list: GuardTopListUser[]
 }
 
 /** 礼物更新操作 */

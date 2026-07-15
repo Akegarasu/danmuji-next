@@ -182,6 +182,7 @@ pub fn run() {
             commands::get_data_snapshot,
             // 贡献排行榜
             commands::refresh_contribution_rank,
+            commands::refresh_guard_top_list,
             // 登录
             commands::generate_login_qrcode,
             commands::poll_login_status,

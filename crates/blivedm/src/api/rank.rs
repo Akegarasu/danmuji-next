@@ -6,6 +6,31 @@ use super::wbi::get_wbi_keys;
 use super::{ApiResponse, USER_AGENT};
 use crate::error::{Error, Result};
 
+/// 贡献排行榜类型。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContributionRankType {
+    /// 当前在线贡献榜。
+    Online,
+    /// 当日贡献榜。
+    Daily,
+    /// 本周贡献榜。
+    Weekly,
+    /// 本月贡献榜。
+    Monthly,
+}
+
+impl ContributionRankType {
+    fn api_params(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Online => ("online_rank", "contribution_rank"),
+            Self::Daily => ("daily_rank", "today_rank"),
+            Self::Weekly => ("weekly_rank", "current_week_rank"),
+            Self::Monthly => ("monthly_rank", "current_month_rank"),
+        }
+    }
+}
+
 /// 贡献排行榜用户
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContributionRankUser {
@@ -26,6 +51,8 @@ pub struct ContributionRankUser {
 /// 贡献排行榜响应
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContributionRankResponse {
+    /// 当前排行榜类型。
+    pub rank_type: ContributionRankType,
     /// 总人数
     pub count: u32,
     /// 排行榜用户列表
@@ -73,15 +100,47 @@ pub async fn get_contribution_rank(
     page: u32,
     page_size: u32,
 ) -> Result<ContributionRankResponse> {
+    get_contribution_rank_by_type(
+        client,
+        room_id,
+        ruid,
+        cookie,
+        ContributionRankType::Online,
+        page,
+        page_size,
+    )
+    .await
+}
+
+/// 获取指定类型的贡献排行榜（需要 WBI 签名）。
+pub async fn get_contribution_rank_by_type(
+    client: &Client,
+    room_id: u64,
+    ruid: u64,
+    cookie: Option<&str>,
+    rank_type: ContributionRankType,
+    page: u32,
+    page_size: u32,
+) -> Result<ContributionRankResponse> {
     // 获取 WBI 密钥
     let wbi_keys = get_wbi_keys(client).await?;
 
+    let (type_param, switch_param) = rank_type.api_params();
+
     // 构建 URL
-    let mut url = Url::parse(&format!(
-        "https://api.live.bilibili.com/xlive/general-interface/v1/rank/queryContributionRank?ruid={}&room_id={}&page={}&page_size={}&type=online_rank&switch=contribution_rank&platform=web&web_location=0.0",
-        ruid, room_id, page, page_size
-    ))
+    let mut url = Url::parse(
+        "https://api.live.bilibili.com/xlive/general-interface/v1/rank/queryContributionRank",
+    )
     .map_err(|e| Error::Config(e.to_string()))?;
+    url.query_pairs_mut()
+        .append_pair("ruid", &ruid.to_string())
+        .append_pair("room_id", &room_id.to_string())
+        .append_pair("page", &page.max(1).to_string())
+        .append_pair("page_size", &page_size.clamp(1, 100).to_string())
+        .append_pair("type", type_param)
+        .append_pair("switch", switch_param)
+        .append_pair("platform", "web")
+        .append_pair("web_location", "0.0");
 
     // 签名
     wbi_keys.sign_url(&mut url)?;
@@ -134,7 +193,33 @@ pub async fn get_contribution_rank(
         .collect();
 
     Ok(ContributionRankResponse {
+        rank_type,
         count: resp.data.count,
         list,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_rank_types_to_api_parameters() {
+        assert_eq!(
+            ContributionRankType::Online.api_params(),
+            ("online_rank", "contribution_rank")
+        );
+        assert_eq!(
+            ContributionRankType::Daily.api_params(),
+            ("daily_rank", "today_rank")
+        );
+        assert_eq!(
+            ContributionRankType::Weekly.api_params(),
+            ("weekly_rank", "current_week_rank")
+        );
+        assert_eq!(
+            ContributionRankType::Monthly.api_params(),
+            ("monthly_rank", "current_month_rank")
+        );
+    }
 }
