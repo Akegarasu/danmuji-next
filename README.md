@@ -130,6 +130,16 @@ pnpm dev
 pnpm run td
 ```
 
+### blivedm 独立库
+
+Bilibili 直播协议代码位于 `crates/blivedm`，是一个不依赖 Tauri 应用代码的独立 Rust crate。当前应用通过 path dependency 使用它：
+
+```bash
+cargo test --manifest-path crates/blivedm/Cargo.toml
+```
+
+使用示例和发布前检查项分别见 [`crates/blivedm/README.md`](crates/blivedm/README.md) 与 [`crates/blivedm/PUBLISHING.md`](crates/blivedm/PUBLISHING.md)。
+
 ## 构建
 
 前端构建：
@@ -200,7 +210,8 @@ pnpm run release:local
 ```text
 .
 ├─ src/                 前端界面、状态管理、窗口与服务逻辑
-├─ src-tauri/           Tauri/Rust 后端、Bilibili 连接与本地存储
+├─ src-tauri/           Tauri/Rust 应用后端与本地存储
+├─ crates/blivedm/      可独立使用和发布的 Bilibili 直播 Rust 库
 ├─ scripts/             本地辅助脚本
 └─ .github/workflows/   GitHub Actions 工作流
 ```

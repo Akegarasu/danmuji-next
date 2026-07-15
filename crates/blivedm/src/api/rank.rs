@@ -2,9 +2,9 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use crate::blivedm::error::{Error, Result};
 use super::wbi::get_wbi_keys;
 use super::{ApiResponse, USER_AGENT};
+use crate::error::{Error, Result};
 
 /// 贡献排行榜用户
 #[derive(Debug, Clone, Serialize, Deserialize)]

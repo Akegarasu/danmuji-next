@@ -2,18 +2,18 @@
 //!
 //! 运行方式：
 //! ```bash
-//! cd src-tauri
-//! cargo run --example blivedm_test -- <room_id>
+//! cd crates/blivedm
+//! cargo run --example receive -- <room_id>
 //! ```
 //!
 //! 示例：
 //! ```bash
-//! cargo run --example blivedm_test -- 21452505
+//! cargo run --example receive -- 21452505
 //! ```
 
 use std::env;
 
-use danmuji_next_lib::blivedm::{BliveDmClient, Event};
+use blivedm::{BliveDmClient, Event, GuardLevel};
 use futures_util::StreamExt;
 
 #[tokio::main]
@@ -99,10 +99,10 @@ fn print_event(event: &Event) {
                 .unwrap_or_default();
 
             let guard_str = match dm.sender.guard_level {
-                danmuji_next_lib::blivedm::GuardLevel::Governor => "👑 ",
-                danmuji_next_lib::blivedm::GuardLevel::Admiral => "⚓ ",
-                danmuji_next_lib::blivedm::GuardLevel::Captain => "🚢 ",
-                danmuji_next_lib::blivedm::GuardLevel::None => "",
+                GuardLevel::Governor => "👑 ",
+                GuardLevel::Admiral => "⚓ ",
+                GuardLevel::Captain => "🚢 ",
+                GuardLevel::None => "",
             };
 
             println!(
@@ -137,12 +137,12 @@ fn print_event(event: &Event) {
                 guard.num
             );
         }
-        Event::LiveStart(ls) => {
+        Event::LiveStart(_) => {
             println!();
             println!("🔴 ======== 开播了！ ========");
             println!();
         }
-        Event::LiveStop(ls) => {
+        Event::LiveStop(_) => {
             println!();
             println!("⚫ ======== 下播了 ========");
             println!();
@@ -157,5 +157,9 @@ fn print_event(event: &Event) {
         Event::OnlineRankV2(online_rank_v2) => {
             println!("👥 在线人数: {}", online_rank_v2.online_list.len());
         }
+        Event::InteractWord(interact) => {
+            log::debug!("👋 {} 进入直播间", interact.user.name);
+        }
+        _ => {}
     }
 }

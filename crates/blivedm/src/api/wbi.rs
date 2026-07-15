@@ -9,7 +9,7 @@ use reqwest::Client;
 use serde::Deserialize;
 use url::Url;
 
-use crate::blivedm::error::{Error, Result};
+use crate::error::{Error, Result};
 
 /// WBI 密钥混淆表
 const MIXIN_KEY_ENC_TAB: [usize; 64] = [

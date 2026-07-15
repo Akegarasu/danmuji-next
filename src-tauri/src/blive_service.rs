@@ -16,10 +16,10 @@ use tokio::task::JoinHandle;
 use tokio::time::interval;
 
 use crate::archive::{ArchiveEvent, ArchiveManager};
-use crate::blivedm::api::{
+use blivedm::api::{
     get_contribution_rank, get_danmu_info, get_room_init, ContributionRankUser, RoomInfo,
 };
-use crate::blivedm::{BliveDmClient, Error as BliveError, Event};
+use blivedm::{BliveDmClient, Error as BliveError, Event};
 use crate::kv_store::{VideoRequestStore, VotingStore};
 use crate::live_data::{LiveData, WindowSubscription};
 use crate::live_types::*;
@@ -324,13 +324,16 @@ impl BliveService {
         let room_info_for_rank = room_info.clone();
 
         let task = tokio::spawn(async move {
-            let client = match BliveDmClient::builder()
+            let mut client_builder = BliveDmClient::builder()
                 .room_id(room_id)
                 .cookie(cookie_clone.clone())
-                .auto_reconnect(true)
-                .build()
-                .await
-            {
+                .auto_reconnect(true);
+
+            if crate::is_dev_mode() {
+                client_builder = client_builder.raw_event_handler(crate::raw_event_dump::dump);
+            }
+
+            let client = match client_builder.build().await {
                 Ok(c) => c,
                 Err(e) => {
                     let msg = format!("创建客户端失败: {}", e);
@@ -507,7 +510,7 @@ impl BliveService {
                 drop(data);
                 self.spawn_video_fetches(to_fetch).await;
             }
-            Event::Gift(gift) => data.process_gift(gift),
+            Event::Gift(gift) => data.process_gift(*gift),
             Event::SuperChat(sc) => {
                 let to_fetch = data.process_superchat(sc);
                 drop(data);
@@ -551,6 +554,7 @@ impl BliveService {
                 self.live_data.lock().await.pending_updates.push(DataUpdate::LiveStop);
             }
             Event::Raw { .. } => {} // 忽略未处理的命令
+            _ => {}                 // blivedm 的 Event 可向后扩展
         }
     }
 

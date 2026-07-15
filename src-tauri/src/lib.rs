@@ -5,7 +5,7 @@
 //! - `kv_store`: 线程安全的键值存储
 //! - `window_state`: 窗口状态定义和配置
 //! - `commands`: Tauri 命令实现
-//! - `blivedm`: Bilibili 直播弹幕协议库
+//! - `blivedm`（外部 crate）: Bilibili 直播弹幕协议库
 //! - `live_types`: 直播数据公共类型
 //! - `live_data`: 直播数据状态管理
 //! - `blive_service`: 弹幕服务管理器
@@ -14,7 +14,6 @@
 mod auth;
 mod archive;
 mod blive_service;
-pub mod blivedm;
 mod commands;
 mod config;
 mod crypto;
@@ -22,6 +21,7 @@ mod kv_store;
 mod live_data;
 mod live_types;
 mod lock_state;
+mod raw_event_dump;
 mod video_info;
 mod video_request;
 mod voting;

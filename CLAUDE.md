@@ -36,14 +36,14 @@ cargo test            # Run tests (currently minimal)
 
 ### Data Flow (Live)
 ```
-Bilibili WebSocket → blivedm/client.rs (packet decode, event parse)
+Bilibili WebSocket → crates/blivedm/src/client.rs (packet decode, event parse)
   → blive_service.rs (process, merge gifts, update stats, buffer)
   → 100ms push interval → emit filtered DataUpdate events to subscribed windows
   → also clone to archive mpsc channel → archive writer batches to SQLite
 ```
 
 ### Key Backend Modules
-- **`blivedm/`** — Self-contained Bilibili live protocol library (WebSocket client, packet codec, message parsers)
+- **`crates/blivedm/`** — Independent `danmuji-blivedm` Rust crate (WebSocket client, packet codec, message parsers, HTTP APIs)
 - **`blive_service.rs`** — Orchestrates connection lifecycle, event processing, gift merging (5s window), stats, window subscriptions
 - **`archive.rs`** — SQLite persistence for historical sessions; async writer via mpsc channel
 - **`crypto.rs`** — Cookie encryption using Windows DPAPI (transparent to frontend)

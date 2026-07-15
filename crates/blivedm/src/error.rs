@@ -7,7 +7,7 @@ use thiserror::Error;
 pub enum Error {
     /// WebSocket 连接错误
     #[error("WebSocket error: {0}")]
-    WebSocket(#[from] tokio_tungstenite::tungstenite::Error),
+    WebSocket(#[source] Box<tokio_tungstenite::tungstenite::Error>),
 
     /// HTTP 请求错误
     #[error("HTTP error: {0}")]
@@ -44,6 +44,12 @@ pub enum Error {
     /// 配置错误
     #[error("Configuration error: {0}")]
     Config(String),
+}
+
+impl From<tokio_tungstenite::tungstenite::Error> for Error {
+    fn from(error: tokio_tungstenite::tungstenite::Error) -> Self {
+        Self::WebSocket(Box::new(error))
+    }
 }
 
 /// Result 类型别名

@@ -98,7 +98,11 @@ impl Gift {
 
         let gift_id = data.get("giftId")?.as_u64()?;
         let gift_name = data.get("giftName")?.as_str()?.to_string();
-        let gift_icon = data.get("gift_info")?.get("img_basic")?.as_str()?.to_string();
+        let gift_icon = data
+            .get("gift_info")?
+            .get("img_basic")?
+            .as_str()?
+            .to_string();
         let num = data.get("num")?.as_u64()? as u32;
         let price = data.get("price")?.as_u64().unwrap_or(0) as u32;
         let total_coin = data.get("total_coin")?.as_u64()?;

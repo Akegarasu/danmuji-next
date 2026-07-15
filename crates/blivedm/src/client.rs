@@ -8,25 +8,31 @@ use std::time::Duration;
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, Stream, StreamExt};
 use reqwest::Client as HttpClient;
+use serde_json::Value;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::time::{interval, timeout};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 
-use crate::blivedm::api::{
+use crate::api::{
     extract_buvid_from_cookie, extract_uid_from_cookie, get_danmu_info, get_room_init,
     DanmuServerInfo, RoomInfo,
 };
-use crate::blivedm::error::{Error, Result};
-use crate::blivedm::message::{parse_event, Event};
-use crate::blivedm::packet::Packet;
+use crate::error::{Error, Result};
+use crate::message::{parse_event, Event};
+use crate::packet::Packet;
 
 /// 心跳间隔
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 
 /// 连接超时
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// 原始 JSON 事件回调。
+///
+/// 回调在事件解析前同步执行，适合由调用方实现调试落盘或指标采集。
+pub type RawEventHandler = dyn Fn(&Value) + Send + Sync + 'static;
 
 /// 弹幕客户端
 pub struct BliveDmClient {
@@ -36,6 +42,7 @@ pub struct BliveDmClient {
     buvid: String,
     auto_reconnect: bool,
     reconnect_interval: Duration,
+    raw_event_handler: Option<Arc<RawEventHandler>>,
 }
 
 /// 客户端配置 Builder
@@ -45,6 +52,7 @@ pub struct BliveDmClientBuilder {
     cookie: Option<String>,
     auto_reconnect: bool,
     reconnect_interval: Duration,
+    raw_event_handler: Option<Arc<RawEventHandler>>,
 }
 
 impl BliveDmClientBuilder {
@@ -69,6 +77,15 @@ impl BliveDmClientBuilder {
     /// 重连间隔（默认 3 秒）
     pub fn reconnect_interval(mut self, duration: Duration) -> Self {
         self.reconnect_interval = duration;
+        self
+    }
+
+    /// 设置原始 JSON 事件回调。
+    pub fn raw_event_handler<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&Value) + Send + Sync + 'static,
+    {
+        self.raw_event_handler = Some(Arc::new(handler));
         self
     }
 
@@ -110,29 +127,8 @@ impl BliveDmClientBuilder {
             } else {
                 self.reconnect_interval
             },
+            raw_event_handler: self.raw_event_handler,
         })
-    }
-}
-
-impl Default for BliveDmClient {
-    fn default() -> Self {
-        Self {
-            room_info: RoomInfo {
-                room_id: 0,
-                short_id: 0,
-                uid: 0,
-                live_status: 0,
-                title: String::new(),
-            },
-            danmu_info: DanmuServerInfo {
-                token: String::new(),
-                host_list: vec![],
-            },
-            uid: 0,
-            buvid: String::new(),
-            auto_reconnect: false,
-            reconnect_interval: Duration::from_secs(3),
-        }
     }
 }
 
@@ -174,6 +170,10 @@ async fn connection_loop(client: Arc<BliveDmClient>, event_tx: mpsc::Sender<Resu
     let mut retry_count = 0;
 
     loop {
+        if event_tx.is_closed() {
+            break;
+        }
+
         let host_index = retry_count % client.danmu_info.host_list.len();
         let host = &client.danmu_info.host_list[host_index];
         let ws_url = format!("wss://{}:{}/sub", host.host, host.wss_port);
@@ -189,13 +189,16 @@ async fn connection_loop(client: Arc<BliveDmClient>, event_tx: mpsc::Sender<Resu
             Err(e) => {
                 log::error!("Connection error: {}", e);
 
-                if !client.auto_reconnect {
+                if !client.auto_reconnect || event_tx.is_closed() {
                     let _ = event_tx.send(Err(e)).await;
                     break;
                 }
 
                 // 等待后重试
-                tokio::time::sleep(client.reconnect_interval).await;
+                tokio::select! {
+                    _ = event_tx.closed() => break,
+                    _ = tokio::time::sleep(client.reconnect_interval) => {}
+                }
                 retry_count += 1;
             }
         }
@@ -212,7 +215,7 @@ async fn connect_and_run(
     let ws_stream = timeout(CONNECT_TIMEOUT, connect_async(ws_url))
         .await
         .map_err(|_| Error::ConnectionClosed)?
-        .map_err(Error::WebSocket)?
+        .map_err(Error::from)?
         .0;
 
     let (mut write, read) = ws_stream.split();
@@ -227,7 +230,7 @@ async fn connect_and_run(
     write
         .send(Message::Binary(enter_packet.to_bytes()))
         .await
-        .map_err(Error::WebSocket)?;
+        .map_err(Error::from)?;
 
     log::debug!("Sent enter room packet");
 
@@ -236,7 +239,7 @@ async fn connect_and_run(
     let heartbeat_handle = tokio::spawn(heartbeat_loop(write, heartbeat_rx));
 
     // 消息处理循环
-    let result = message_loop(read, event_tx).await;
+    let result = message_loop(read, event_tx, client.raw_event_handler.as_deref()).await;
 
     // 停止心跳
     drop(heartbeat_tx);
@@ -272,13 +275,14 @@ async fn heartbeat_loop(
 async fn message_loop(
     mut read: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
     event_tx: &mpsc::Sender<Result<Event>>,
+    raw_event_handler: Option<&RawEventHandler>,
 ) -> Result<()> {
     while let Some(msg_result) = read.next().await {
-        let msg = msg_result.map_err(Error::WebSocket)?;
+        let msg = msg_result.map_err(Error::from)?;
 
         match msg {
             Message::Binary(data) => {
-                if let Err(e) = process_message(&data, event_tx).await {
+                if let Err(e) = process_message(&data, event_tx, raw_event_handler).await {
                     log::error!("Failed to process message: {}", e);
                 }
             }
@@ -299,14 +303,18 @@ async fn message_loop(
 }
 
 /// 处理消息
-async fn process_message(data: &[u8], event_tx: &mpsc::Sender<Result<Event>>) -> Result<()> {
+async fn process_message(
+    data: &[u8],
+    event_tx: &mpsc::Sender<Result<Event>>,
+    raw_event_handler: Option<&RawEventHandler>,
+) -> Result<()> {
     let packet = Packet::from_bytes(data)?;
 
     // 解压并切分数据包
     let packets = packet.parse()?;
 
     for pkt in packets {
-        if let Some(event) = parse_event(&pkt) {
+        if let Some(event) = parse_event(&pkt, raw_event_handler) {
             log::debug!("Event: {:?}", event);
 
             if event_tx.send(Ok(event)).await.is_err() {

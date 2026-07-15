@@ -20,22 +20,21 @@ pub use online_rank_v2::*;
 pub use superchat::*;
 pub use user::*;
 
-use std::io::Write;
-use std::sync::OnceLock;
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::blivedm::packet::{Operation, Packet};
+use crate::client::RawEventHandler;
+use crate::packet::{Operation, Packet};
 
 /// 所有事件类型
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
+#[non_exhaustive]
 pub enum Event {
     /// 弹幕消息
     Danmaku(Danmaku),
     /// 礼物
-    Gift(Gift),
+    Gift(Box<Gift>),
     /// 醒目留言
     SuperChat(SuperChat),
     /// 大航海（舰长/提督/总督）
@@ -55,7 +54,10 @@ pub enum Event {
 }
 
 /// 从数据包解析事件
-pub fn parse_event(packet: &Packet) -> Option<Event> {
+pub(crate) fn parse_event(
+    packet: &Packet,
+    raw_event_handler: Option<&RawEventHandler>,
+) -> Option<Event> {
     match packet.operation {
         Operation::HeartbeatReply => {
             // 心跳响应，忽略（人气值已废弃）
@@ -64,7 +66,7 @@ pub fn parse_event(packet: &Packet) -> Option<Event> {
         Operation::Notification => {
             // 通知消息，body 是 JSON
             let json_str = std::str::from_utf8(&packet.body).ok()?;
-            parse_notification(json_str)
+            parse_notification(json_str, raw_event_handler)
         }
         Operation::EnterRoomReply => {
             // 进入房间响应，通常忽略
@@ -75,11 +77,14 @@ pub fn parse_event(packet: &Packet) -> Option<Event> {
 }
 
 /// 解析通知消息
-fn parse_notification(json_str: &str) -> Option<Event> {
+fn parse_notification(
+    json_str: &str,
+    raw_event_handler: Option<&RawEventHandler>,
+) -> Option<Event> {
     let value: Value = serde_json::from_str(json_str).ok()?;
 
-    if crate::is_dev_mode() {
-        dump_raw_value(&value);
+    if let Some(handler) = raw_event_handler {
+        handler(&value);
     }
 
     let cmd = value.get("cmd")?.as_str()?;
@@ -94,7 +99,7 @@ fn parse_notification(json_str: &str) -> Option<Event> {
         }
         "SEND_GIFT" => {
             let gift = Gift::parse(&value)?;
-            Some(Event::Gift(gift))
+            Some(Event::Gift(Box::new(gift)))
         }
         "SUPER_CHAT_MESSAGE" => {
             let superchat = SuperChat::parse(&value)?;
@@ -150,36 +155,32 @@ fn parse_notification(json_str: &str) -> Option<Event> {
     }
 }
 
-// ==================== Dev Mode: Raw Value Dump ====================
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
-fn get_dump_file() -> &'static std::sync::Mutex<Option<std::fs::File>> {
-    static DUMP_FILE: OnceLock<std::sync::Mutex<Option<std::fs::File>>> = OnceLock::new();
-    DUMP_FILE.get_or_init(|| {
-        let path = crate::config::get_config_dir().join("raw_dump.txt");
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path);
-        match file {
-            Ok(f) => {
-                eprintln!("[DEV] Raw dump file: {}", path.display());
-                std::sync::Mutex::new(Some(f))
-            }
-            Err(e) => {
-                eprintln!("[DEV] Failed to open raw dump file: {}", e);
-                std::sync::Mutex::new(None)
-            }
-        }
-    })
-}
+    use super::*;
+    use crate::packet::ProtocolVersion;
 
-fn dump_raw_value(value: &Value) {
-    let guard = get_dump_file().lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(ref file) = *guard {
-        let mut writer = std::io::BufWriter::new(file);
-        let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
-        let json = serde_json::to_string(value).unwrap_or_default();
-        let _ = writeln!(writer, "[{}] {}", timestamp, json);
-        let _ = writer.flush();
+    #[test]
+    fn invokes_raw_event_handler_before_parsing() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let handler_calls = Arc::clone(&calls);
+        let handler = move |value: &Value| {
+            assert_eq!(value["cmd"], "UNKNOWN_EVENT");
+            handler_calls.fetch_add(1, Ordering::Relaxed);
+        };
+        let packet = Packet::new(
+            ProtocolVersion::Plain,
+            Operation::Notification,
+            br#"{"cmd":"UNKNOWN_EVENT"}"#.to_vec(),
+        );
+
+        assert!(matches!(
+            parse_event(&packet, Some(&handler)),
+            Some(Event::Raw { .. })
+        ));
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
     }
 }

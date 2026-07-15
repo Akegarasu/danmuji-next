@@ -5,8 +5,8 @@
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-use crate::blivedm::api::ContributionRankUser;
-use crate::blivedm::{GuardLevel, Medal, User};
+use blivedm::api::ContributionRankUser;
+use blivedm::{GuardLevel, Medal, User};
 use crate::video_info::VideoInfo;
 use crate::voting::Poll;
 
@@ -75,8 +75,8 @@ pub struct RoomInfoResponse {
     pub live_status: i32,
 }
 
-impl From<crate::blivedm::api::RoomInfo> for RoomInfoResponse {
-    fn from(info: crate::blivedm::api::RoomInfo) -> Self {
+impl From<blivedm::api::RoomInfo> for RoomInfoResponse {
+    fn from(info: blivedm::api::RoomInfo) -> Self {
         Self {
             room_id: info.room_id,
             short_id: info.short_id,

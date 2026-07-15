@@ -2,9 +2,9 @@ use reqwest::Client;
 use serde::Deserialize;
 use url::Url;
 
-use crate::blivedm::error::{Error, Result};
 use super::wbi::get_wbi_keys;
 use super::{ApiResponse, BaseResponse, USER_AGENT};
+use crate::error::{Error, Result};
 
 /// 弹幕服务器信息
 #[derive(Debug, Clone)]
@@ -71,7 +71,10 @@ pub async fn get_danmu_info(
 
     // -352 错误码表示风控，降级使用默认服务器
     if base.code == -352 || base.code == 352 {
-        println!("⚠️  收到 {} 错误，使用默认弹幕服务器", base.code);
+        log::warn!(
+            "Danmaku server API returned {}; using fallback host",
+            base.code
+        );
         return Ok(DanmuServerInfo {
             token: String::new(),
             host_list: vec![DanmuHost {

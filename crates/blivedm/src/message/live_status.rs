@@ -27,14 +27,8 @@ impl LiveStartData {
                 .get("live_model")
                 .and_then(|v| v.as_i64())
                 .unwrap_or(0) as i32,
-            live_time: value
-                .get("live_time")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(0),
-            room_id: value
-                .get("roomid")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0),
+            live_time: value.get("live_time").and_then(|v| v.as_i64()).unwrap_or(0),
+            room_id: value.get("roomid").and_then(|v| v.as_u64()).unwrap_or(0),
             sub_session_key: value
                 .get("sub_session_key")
                 .and_then(|v| v.as_str())
@@ -64,10 +58,7 @@ impl PreparingData {
 
         Some(Self {
             room_id,
-            round: value
-                .get("round")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(0) as i32,
+            round: value.get("round").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
         })
     }
 }

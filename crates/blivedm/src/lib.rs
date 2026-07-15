@@ -2,10 +2,12 @@
 //!
 //! # 使用示例
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use blivedm::{BliveDmClient, Event};
 //! use futures_util::StreamExt;
 //!
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let client = BliveDmClient::builder()
 //!     .room_id(12345)
 //!     .build()
@@ -20,15 +22,17 @@
 //!         _ => {}
 //!     }
 //! }
+//! # Ok(())
+//! # }
 //! ```
 
 pub mod api;
 mod client;
 mod error;
 mod message;
-mod packet;
+pub mod packet;
 
 pub use api::RoomInfo;
-pub use client::{BliveDmClient, BliveDmClientBuilder, EventStream};
+pub use client::{BliveDmClient, BliveDmClientBuilder, EventStream, RawEventHandler};
 pub use error::{Error, Result};
 pub use message::*;

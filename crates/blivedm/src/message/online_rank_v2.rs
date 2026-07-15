@@ -47,7 +47,7 @@ impl OnlineRankV2 {
             .get("online_list")?
             .as_array()?
             .iter()
-            .filter_map(|item| OnlineRankUser::parse(item))
+            .filter_map(OnlineRankUser::parse)
             .collect();
 
         Some(OnlineRankV2 {

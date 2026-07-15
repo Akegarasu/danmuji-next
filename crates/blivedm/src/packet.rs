@@ -13,7 +13,7 @@ use std::io::{Cursor, Read};
 use brotli::Decompressor;
 use flate2::read::ZlibDecoder;
 
-use crate::blivedm::error::{Error, Result};
+use crate::error::{Error, Result};
 
 /// 头部长度固定为 16 字节
 pub const HEADER_LENGTH: usize = 16;
