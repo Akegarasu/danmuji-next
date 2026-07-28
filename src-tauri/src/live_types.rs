@@ -21,8 +21,8 @@ pub const MAX_GIFT_LIST: usize = 5000;
 pub const MAX_SUPERCHAT_LIST: usize = 2000;
 pub const MAX_INTERACT_WORD_LIST: usize = 1000;
 
-/// 礼物合并时间窗口（秒）
-pub const GIFT_MERGE_WINDOW_SECS: i64 = 15;
+/// 礼物交易去重缓存上限
+pub const MAX_SEEN_GIFT_TRANSACTIONS: usize = 20_000;
 
 // ==================== 事件类型（用于订阅）====================
 
@@ -118,13 +118,47 @@ pub struct ProcessedGift {
     pub gift_name: String,
     pub gift_icon: String,
     pub num: u32,
+    /// 展示价值（电池）；盲盒使用爆出礼物价值
     pub total_value: u64,
+    /// 实际营收（电池）；盲盒使用盲盒消费金额
+    #[serde(default)]
+    pub revenue_value: u64,
     pub is_paid: bool,
+    /// Bilibili 批量连击信息；普通礼物为空
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub combo: Option<ProcessedGiftCombo>,
+    /// 盲盒来源及实际消费金额
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blind_gift: Option<ProcessedBlindGift>,
     pub user: ProcessedUser,
     pub timestamp: i64,
     /// 大航海等级（仅大航海购买时有值：1=总督, 2=提督, 3=舰长）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub guard_level: Option<u8>,
+}
+
+/// 处理后的批量连击元数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessedGiftCombo {
+    pub batch_combo_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub combo_total_coin: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub super_batch_gift_num: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub combo_resources_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub combo_stay_time: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show_batch_combo_send: Option<bool>,
+}
+
+/// 处理后的盲盒来源信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessedBlindGift {
+    pub gift_id: u64,
+    pub gift_name: String,
+    pub total_value: u64,
 }
 
 /// 处理后的 SC

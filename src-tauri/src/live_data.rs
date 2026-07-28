@@ -12,14 +12,13 @@ use crate::archive::ArchiveEvent;
 use blivedm::api::ContributionRankUser;
 use blivedm::{
     CoinType, Danmaku, DanmakuType, Gift, GuardBuy, GuardLevel, InteractWord, OnlineRankCount,
-    OnlineRankV2, SuperChat,
+    OnlineRankUser, OnlineRankV2, OnlineRankV3, SuperChat,
 };
-use crate::kv_store::VideoRequestStore;
+use crate::kv_store::{VideoRequestStore, VotingStore};
 use crate::live_types::*;
 use crate::video_info::VideoInfo;
 use crate::video_request::VideoRequestManager;
 use crate::voting::VotingManager;
-use crate::kv_store::VotingStore;
 
 // ==================== 窗口订阅 ====================
 
@@ -39,6 +38,12 @@ pub struct LiveData {
     pub(crate) gift_list: VecDeque<ProcessedGift>,
     /// 礼物合并索引: merge_key -> list index
     gift_merge_index: HashMap<String, usize>,
+    /// 已处理的上游礼物交易 ID，用于断线重发和双协议重复包去重
+    seen_gift_transactions: HashSet<String>,
+    /// 交易 ID 插入顺序，用于限制去重缓存大小
+    seen_gift_transaction_order: VecDeque<String>,
+    /// 普通礼物本地序号；没有上游交易 ID 时仍保证每条礼物独立
+    next_gift_sequence: u64,
     /// SC 列表
     pub(crate) superchat_list: Vec<ProcessedSuperChat>,
     /// 高能用户排行
@@ -80,6 +85,9 @@ impl Default for LiveData {
             danmaku_list: VecDeque::with_capacity(MAX_DANMAKU_LIST),
             gift_list: VecDeque::with_capacity(MAX_GIFT_LIST),
             gift_merge_index: HashMap::new(),
+            seen_gift_transactions: HashSet::new(),
+            seen_gift_transaction_order: VecDeque::new(),
+            next_gift_sequence: 0,
             superchat_list: Vec::with_capacity(MAX_SUPERCHAT_LIST),
             interact_word_list: VecDeque::with_capacity(MAX_INTERACT_WORD_LIST),
             online_rank: Vec::new(),
@@ -237,43 +245,136 @@ impl LiveData {
 
     /// 处理礼物
     pub fn process_gift(&mut self, gift: Gift) {
-        let time_bucket = gift.timestamp / GIFT_MERGE_WINDOW_SECS;
-        let merge_key = format!("{}_{}_{}", gift.sender_uid, gift.gift_id, time_bucket);
+        let has_transaction_id = gift.transaction_id.is_some();
+        if let Some(transaction_id) = gift.transaction_id.as_deref() {
+            if !self.remember_gift_transaction(transaction_id) {
+                return;
+            }
+        }
 
-        let value = if gift.coin_type == CoinType::Gold {
-            gift.total_coin as u64 / 100
+        let is_combo = gift.is_combo();
+        let (id, merge_key) = if let Some(batch_combo_id) = gift.batch_combo_id.as_deref() {
+            let key = format!(
+                "combo:{}:{}:{}",
+                gift.sender_uid, gift.gift_id, batch_combo_id
+            );
+            (format!("gift:{key}"), key)
+        } else if let Some(transaction_id) = gift.transaction_id.as_deref() {
+            let key = format!("gift:tid:{transaction_id}");
+            (key.clone(), key)
+        } else {
+            let sequence = self.take_next_gift_sequence();
+            let key = format!("gift:local:{sequence}");
+            (key.clone(), key)
+        };
+
+        let is_paid = gift.coin_type == CoinType::Gold;
+        let display_value = if is_paid {
+            gift.revealed_total_coin() / 100
         } else {
             0
         };
-        let is_paid = gift.coin_type == CoinType::Gold;
+        let revenue_value = if is_paid { gift.total_coin / 100 } else { 0 };
+        let combo_display_value = if is_paid {
+            gift.combo_display_total_coin().map(|value| value / 100)
+        } else {
+            None
+        };
+        let combo_total_num = gift.combo_total_num();
+        let processed_combo = convert_gift_combo(&gift);
+        let processed_blind_gift = gift
+            .blind_gift
+            .as_ref()
+            .map(|blind_gift| ProcessedBlindGift {
+                gift_id: blind_gift.original_gift_id,
+                gift_name: blind_gift.original_gift_name.clone(),
+                total_value: revenue_value,
+            });
 
         let sender_uid = gift.sender_uid;
         let sender_name = gift.sender_name.clone();
         let sender_face = gift.sender_face.clone();
         let guard_level = gift.guard_level.clone();
 
-        if let Some(&index) = self.gift_merge_index.get(&merge_key) {
-            if let Some(existing) = self.gift_list.get_mut(index) {
-                existing.num += gift.num;
-                existing.total_value += value;
-                existing.timestamp = gift.timestamp;
+        let existing_index = is_combo
+            .then(|| self.gift_merge_index.get(&merge_key).copied())
+            .flatten()
+            .filter(|index| self.gift_list.get(*index).is_some());
 
-                self.pending_gift_upserts.push(GiftUpsert {
-                    merge_key: merge_key.clone(),
-                    gift: existing.clone(),
-                    action: UpsertAction::Update,
-                });
+        let (processed, action) = if let Some(index) = existing_index {
+            let existing = self
+                .gift_list
+                .get(index)
+                .expect("validated gift merge index");
+
+            // 没有 tid 时，用服务端累计进度挡住重复/过期快照。没有累计字段
+            // 则宁可保留事件，也不猜测两个同秒同金额的礼物是重复包。
+            if !has_transaction_id
+                && combo_has_progress_marker(&gift)
+                && !combo_snapshot_progresses(existing, &gift)
+            {
+                return;
             }
+
+            let existing = self
+                .gift_list
+                .get_mut(index)
+                .expect("validated gift merge index");
+            existing.num = match combo_total_num {
+                Some(total) => existing.num.max(saturating_u32(total)),
+                None => existing.num.saturating_add(gift.num),
+            };
+            existing.total_value = match combo_display_value {
+                Some(total) => existing.total_value.max(total),
+                None => existing.total_value.saturating_add(display_value),
+            };
+            existing.revenue_value = existing.revenue_value.saturating_add(revenue_value);
+            existing.timestamp = existing.timestamp.max(gift.timestamp);
+
+            if existing.gift_name.is_empty() && !gift.gift_name.is_empty() {
+                existing.gift_name = gift.gift_name.clone();
+            }
+            if existing.gift_icon.is_empty() && !gift.gift_icon.is_empty() {
+                existing.gift_icon = gift.gift_icon.clone();
+            }
+            if existing.user.name.is_empty() && !gift.sender_name.is_empty() {
+                existing.user.name = gift.sender_name.clone();
+            }
+            if existing.user.face.is_none() {
+                existing.user.face = gift.sender_face.clone();
+            }
+            if existing.user.medal.is_none() {
+                existing.user.medal = gift.medal.as_ref().map(convert_medal);
+            }
+            if existing.user.guard_level == 0 {
+                existing.user.guard_level = guard_level_to_u8(&gift.guard_level);
+            }
+            merge_gift_combo(&mut existing.combo, processed_combo);
+
+            if existing.blind_gift.is_none() {
+                existing.blind_gift = processed_blind_gift;
+            }
+            if let Some(blind_gift) = existing.blind_gift.as_mut() {
+                blind_gift.total_value = existing.revenue_value;
+            }
+
+            (existing.clone(), UpsertAction::Update)
         } else {
+            let initial_num = combo_total_num
+                .map(saturating_u32)
+                .unwrap_or(gift.num);
             let processed = ProcessedGift {
-                id: format!("gift_{}_{}", gift.timestamp, gift.sender_uid),
+                id,
                 merge_key: merge_key.clone(),
                 gift_id: gift.gift_id,
                 gift_name: gift.gift_name,
                 gift_icon: gift.gift_icon,
-                num: gift.num,
-                total_value: value,
+                num: initial_num,
+                total_value: combo_display_value.unwrap_or(display_value),
+                revenue_value,
                 is_paid,
+                combo: processed_combo,
+                blind_gift: processed_blind_gift,
                 user: ProcessedUser {
                     uid: gift.sender_uid,
                     name: gift.sender_name,
@@ -286,10 +387,6 @@ impl LiveData {
                 guard_level: None,
             };
 
-            if let Some(tx) = &self.archive_tx {
-                let _ = tx.send(ArchiveEvent::Gift(processed.clone()));
-            }
-
             let index = self.gift_list.len();
             self.gift_list.push_back(processed.clone());
             self.gift_merge_index.insert(merge_key.clone(), index);
@@ -299,23 +396,38 @@ impl LiveData {
                 self.rebuild_gift_index();
             }
 
-            self.pending_gift_upserts.push(GiftUpsert {
-                merge_key,
-                gift: processed,
-                action: UpsertAction::Insert,
-            });
+            (processed, UpsertAction::Insert)
+        };
+
+        // 活跃 combo 应随最新一包移动到列表末尾，否则长 combo 会一直停在
+        // 首次出现的位置，并破坏互动页三路时间线的升序前提。
+        if let Some(index) = existing_index {
+            self.gift_list.remove(index);
+            self.gift_list.push_back(processed.clone());
+            self.rebuild_gift_index();
         }
 
-        if is_paid && value > 0 {
-            self.stats.gift_revenue += value;
-            self.stats.total_revenue += value;
+        // combo 的每个累计快照都交给归档；归档层按 original_id 原位更新。
+        if let Some(tx) = &self.archive_tx {
+            let _ = tx.send(ArchiveEvent::Gift(processed.clone()));
+        }
+
+        self.pending_gift_upserts.push(GiftUpsert {
+            merge_key,
+            gift: processed,
+            action,
+        });
+
+        if is_paid && revenue_value > 0 {
+            self.stats.gift_revenue += revenue_value;
+            self.stats.total_revenue += revenue_value;
             self.stats_dirty = true;
 
             self.update_user_contribution(
                 sender_uid,
                 &sender_name,
                 sender_face.as_deref(),
-                value,
+                revenue_value,
                 &guard_level,
             );
         }
@@ -394,7 +506,8 @@ impl LiveData {
             value *= guard.num as u64;
         }
 
-        let id = format!("guard_{}_{}", timestamp, guard.uid);
+        let sequence = self.take_next_gift_sequence();
+        let id = format!("guard:{}:{}:{}", timestamp, guard.uid, sequence);
         let merge_key = id.clone();
 
         let processed = ProcessedGift {
@@ -405,7 +518,10 @@ impl LiveData {
             gift_icon: "".to_string(),
             num: guard.num,
             total_value: value,
+            revenue_value: value,
             is_paid: true,
+            combo: None,
+            blind_gift: None,
             user: ProcessedUser {
                 uid: guard.uid,
                 name: guard.username.clone(),
@@ -446,8 +562,16 @@ impl LiveData {
 
     /// 处理贡献排行实时更新（ONLINE_RANK_V2）
     pub fn process_online_rank(&mut self, rank: OnlineRankV2) {
-        self.online_rank = rank
-            .online_list
+        self.process_online_rank_users(rank.online_list);
+    }
+
+    /// 处理贡献排行实时更新（ONLINE_RANK_V3）
+    pub fn process_online_rank_v3(&mut self, rank: OnlineRankV3) {
+        self.process_online_rank_users(rank.into_online_users());
+    }
+
+    fn process_online_rank_users(&mut self, users: Vec<OnlineRankUser>) {
+        self.online_rank = users
             .into_iter()
             .map(|u| ProcessedOnlineRankUser {
                 uid: u.uid,
@@ -520,6 +644,31 @@ impl LiveData {
             entry.face = Some(f.to_string());
         }
         self.contributions_dirty = true;
+    }
+
+    /// 记录礼物交易 ID。返回 `false` 表示该交易已经处理过。
+    fn remember_gift_transaction(&mut self, transaction_id: &str) -> bool {
+        if !self
+            .seen_gift_transactions
+            .insert(transaction_id.to_owned())
+        {
+            return false;
+        }
+
+        self.seen_gift_transaction_order
+            .push_back(transaction_id.to_owned());
+        while self.seen_gift_transaction_order.len() > MAX_SEEN_GIFT_TRANSACTIONS {
+            if let Some(expired) = self.seen_gift_transaction_order.pop_front() {
+                self.seen_gift_transactions.remove(&expired);
+            }
+        }
+        true
+    }
+
+    fn take_next_gift_sequence(&mut self) -> u64 {
+        let sequence = self.next_gift_sequence;
+        self.next_gift_sequence = self.next_gift_sequence.wrapping_add(1);
+        sequence
     }
 
     /// 重建礼物合并索引
@@ -605,5 +754,246 @@ impl LiveData {
         updates.extend(expired);
 
         updates
+    }
+}
+
+fn convert_gift_combo(gift: &Gift) -> Option<ProcessedGiftCombo> {
+    Some(ProcessedGiftCombo {
+        batch_combo_id: gift.batch_combo_id.clone()?,
+        combo_total_coin: gift.combo_total_coin,
+        super_batch_gift_num: gift.super_batch_gift_num,
+        combo_resources_id: gift.combo_resources_id,
+        combo_stay_time: gift.combo_stay_time,
+        show_batch_combo_send: gift.show_batch_combo_send,
+    })
+}
+
+fn combo_has_progress_marker(gift: &Gift) -> bool {
+    gift.combo_total_coin.is_some_and(|value| value > 0)
+        || gift.combo_total_num().is_some_and(|value| value > 0)
+}
+
+fn combo_snapshot_progresses(existing: &ProcessedGift, gift: &Gift) -> bool {
+    let existing_combo = existing.combo.as_ref();
+    let coin_progressed = gift
+        .combo_total_coin
+        .filter(|value| *value > 0)
+        .is_some_and(|incoming| {
+            existing_combo
+                .and_then(|combo| combo.combo_total_coin)
+                .map_or(true, |current| incoming > current)
+        });
+    let num_progressed = gift
+        .combo_total_num()
+        .filter(|value| *value > 0)
+        .is_some_and(|incoming| incoming > u64::from(existing.num));
+
+    coin_progressed || num_progressed
+}
+
+fn merge_gift_combo(
+    existing: &mut Option<ProcessedGiftCombo>,
+    incoming: Option<ProcessedGiftCombo>,
+) {
+    let Some(incoming) = incoming else {
+        return;
+    };
+    let Some(existing) = existing.as_mut() else {
+        *existing = Some(incoming);
+        return;
+    };
+
+    existing.combo_total_coin = max_optional(existing.combo_total_coin, incoming.combo_total_coin);
+    existing.super_batch_gift_num = max_optional(
+        existing.super_batch_gift_num,
+        incoming.super_batch_gift_num,
+    );
+    if let Some(value) = incoming.combo_resources_id {
+        if value != 0 || existing.combo_resources_id.is_none() {
+            existing.combo_resources_id = Some(value);
+        }
+    }
+    if let Some(value) = incoming.combo_stay_time {
+        if value != 0 || existing.combo_stay_time.is_none() {
+            existing.combo_stay_time = Some(value);
+        }
+    }
+    if incoming.show_batch_combo_send.is_some() {
+        existing.show_batch_combo_send = incoming.show_batch_combo_send;
+    }
+}
+
+fn max_optional(left: Option<u64>, right: Option<u64>) -> Option<u64> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left.max(right)),
+        (Some(value), None) | (None, Some(value)) => Some(value),
+        (None, None) => None,
+    }
+}
+
+fn saturating_u32(value: u64) -> u32 {
+    u32::try_from(value).unwrap_or(u32::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LiveData;
+    use crate::live_types::UpsertAction;
+    use blivedm::Gift;
+    use serde_json::json;
+
+    fn blind_gift_fixture() -> Gift {
+        let raw: serde_json::Value = serde_json::from_str(include_str!(
+            "../../crates/blivedm/blind_gift.fixture.json"
+        ))
+        .expect("valid blind gift fixture");
+        Gift::parse(&raw).expect("blind gift should parse")
+    }
+
+    fn regular_gift(transaction_id: Option<&str>) -> Gift {
+        let mut data = json!({
+            "giftId": 1,
+            "giftName": "辣条",
+            "num": 1,
+            "price": 100,
+            "total_coin": 100,
+            "coin_type": "gold",
+            "uid": 42,
+            "uname": "tester",
+            "timestamp": 1_700_000_000,
+            "blind_gift": null
+        });
+        if let Some(transaction_id) = transaction_id {
+            data["tid"] = json!(transaction_id);
+        }
+        Gift::parse(&json!({ "data": data })).expect("regular gift")
+    }
+
+    #[test]
+    fn keeps_ordinary_gifts_independent_without_transaction_ids() {
+        let gift = regular_gift(None);
+        let mut data = LiveData::default();
+
+        data.process_gift(gift.clone());
+        data.process_gift(gift);
+
+        assert_eq!(data.gift_list.len(), 2);
+        assert_ne!(data.gift_list[0].id, data.gift_list[1].id);
+        assert_eq!(data.stats.gift_revenue, 2);
+    }
+
+    #[test]
+    fn ignores_duplicate_gift_transactions() {
+        let gift = regular_gift(Some("txn-1"));
+        let mut data = LiveData::default();
+
+        data.process_gift(gift.clone());
+        data.process_gift(gift);
+
+        assert_eq!(data.gift_list.len(), 1);
+        assert_eq!(data.stats.gift_revenue, 1);
+    }
+
+    #[test]
+    fn ignores_non_progressing_combo_snapshot_without_transaction_id() {
+        let mut gift = regular_gift(None);
+        gift.batch_combo_id = Some("combo-without-tid".to_owned());
+        gift.combo_total_coin = Some(100);
+        gift.super_batch_gift_num = Some(1);
+        let mut data = LiveData::default();
+
+        data.process_gift(gift.clone());
+        data.process_gift(gift);
+
+        assert_eq!(data.gift_list.len(), 1);
+        assert_eq!(data.stats.gift_revenue, 1);
+    }
+
+    #[test]
+    fn merges_only_matching_batch_combo_and_uses_cumulative_totals() {
+        let mut first = regular_gift(Some("combo-txn-1"));
+        first.batch_combo_id = Some("combo-1".to_owned());
+        first.combo_total_coin = Some(100);
+        first.super_batch_gift_num = Some(1);
+
+        let mut second = first.clone();
+        second.transaction_id = Some("combo-txn-2".to_owned());
+        second.timestamp += 1;
+        second.combo_total_coin = Some(200);
+        second.super_batch_gift_num = Some(2);
+
+        let mut other_combo = second.clone();
+        other_combo.transaction_id = Some("combo-txn-3".to_owned());
+        other_combo.batch_combo_id = Some("combo-2".to_owned());
+        other_combo.combo_total_coin = Some(100);
+        other_combo.super_batch_gift_num = Some(1);
+
+        let mut data = LiveData::default();
+        data.process_gift(first);
+        data.process_gift(other_combo);
+        data.process_gift(second);
+
+        assert_eq!(data.gift_list.len(), 2);
+        let processed = data.gift_list.back().expect("updated combo gift");
+        assert!(processed.merge_key.ends_with("combo-1"));
+        assert_eq!(processed.num, 2);
+        assert_eq!(processed.total_value, 2);
+        assert_eq!(processed.revenue_value, 2);
+        assert_eq!(data.stats.gift_revenue, 3);
+        assert!(matches!(
+            &data.pending_gift_upserts[0].action,
+            UpsertAction::Insert
+        ));
+        assert!(matches!(
+            &data.pending_gift_upserts[1].action,
+            UpsertAction::Insert
+        ));
+        assert!(matches!(
+            &data.pending_gift_upserts[2].action,
+            UpsertAction::Update
+        ));
+    }
+
+    #[test]
+    fn processes_and_merges_blind_gift_values() {
+        let first = blind_gift_fixture();
+        let mut second = first.clone();
+        second.transaction_id = Some("blind-txn-2".to_owned());
+        second.timestamp += 1;
+        second.combo_total_coin = Some(32_000);
+        second.super_batch_gift_num = Some(2);
+        second
+            .batch_combo_send
+            .as_mut()
+            .unwrap()
+            .batch_combo_num = 2;
+
+        let mut data = LiveData::default();
+        data.process_gift(first);
+        data.process_gift(second);
+
+        assert_eq!(data.gift_list.len(), 1);
+        let processed = data.gift_list.front().expect("processed gift");
+        assert_eq!(processed.gift_name, "爱心抱枕");
+        assert_eq!(processed.num, 2);
+        assert_eq!(processed.total_value, 320);
+        assert_eq!(processed.revenue_value, 300);
+        assert_eq!(
+            processed.blind_gift.as_ref().map(|gift| gift.gift_id),
+            Some(32251)
+        );
+        assert_eq!(
+            processed
+                .blind_gift
+                .as_ref()
+                .map(|gift| gift.gift_name.as_str()),
+            Some("心动盲盒")
+        );
+        assert_eq!(
+            processed.blind_gift.as_ref().map(|gift| gift.total_value),
+            Some(300)
+        );
+        assert_eq!(data.stats.gift_revenue, 300);
+        assert_eq!(data.stats.total_revenue, 300);
     }
 }

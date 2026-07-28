@@ -7,6 +7,8 @@ mod interact_word;
 mod live_status;
 mod online_rank_count;
 mod online_rank_v2;
+mod online_rank_v3;
+mod send_gift_v2;
 mod superchat;
 mod user;
 
@@ -17,6 +19,7 @@ pub use interact_word::*;
 pub use live_status::*;
 pub use online_rank_count::*;
 pub use online_rank_v2::*;
+pub use online_rank_v3::*;
 pub use superchat::*;
 pub use user::*;
 
@@ -47,6 +50,8 @@ pub enum Event {
     OnlineRankCount(OnlineRankCount),
     /// 高能用户排行榜
     OnlineRankV2(OnlineRankV2),
+    /// 高能用户排行榜 V3
+    OnlineRankV3(OnlineRankV3),
     /// 进入直播间
     InteractWord(InteractWord),
     /// 原始事件（未解析的 CMD）
@@ -84,6 +89,10 @@ pub(crate) fn parse_notification(
             let gift = parse_required(cmd_base, Gift::parse(&value))?;
             Ok(Event::Gift(Box::new(gift)))
         }
+        "SEND_GIFT_V2" => {
+            let gift = parse_required(cmd_base, Gift::parse_v2(&value))?;
+            Ok(Event::Gift(Box::new(gift)))
+        }
         "SUPER_CHAT_MESSAGE" => {
             let superchat = parse_required(cmd_base, SuperChat::parse(&value))?;
             Ok(Event::SuperChat(superchat))
@@ -107,6 +116,10 @@ pub(crate) fn parse_notification(
         "ONLINE_RANK_V2" => {
             let online_rank_v2 = parse_required(cmd_base, OnlineRankV2::parse(&value))?;
             Ok(Event::OnlineRankV2(online_rank_v2))
+        }
+        "ONLINE_RANK_V3" => {
+            let online_rank_v3 = parse_required(cmd_base, OnlineRankV3::parse(&value))?;
+            Ok(Event::OnlineRankV3(online_rank_v3))
         }
         "INTERACT_WORD" => {
             let iw = parse_required(cmd_base, InteractWord::parse(&value))?;

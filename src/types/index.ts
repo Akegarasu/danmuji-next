@@ -228,7 +228,14 @@ export interface ProcessedDanmaku {
   emoticon_url?: string
 }
 
-/** 处理后的礼物（来自后端，已合并） */
+/** 处理后的礼物（来自后端，仅真实 combo 会聚合） */
+export interface ProcessedBlindGift {
+  gift_id: number
+  gift_name: string
+  /** 盲盒实际消费金额（电池） */
+  total_value: number
+}
+
 export interface ProcessedGift {
   id: string
   merge_key: string
@@ -236,12 +243,26 @@ export interface ProcessedGift {
   gift_name: string
   gift_icon?: string
   num: number
+  /** 展示金额（电池）；盲盒为爆出礼物金额 */
   total_value: number
+  /** 实际营收（电池）；盲盒为盲盒消费金额 */
+  revenue_value: number
   is_paid: boolean
+  combo?: ProcessedGiftCombo
+  blind_gift?: ProcessedBlindGift
   user: ProcessedUser
   timestamp: number
   /** 大航海等级（仅大航海购买时有值：1=总督, 2=提督, 3=舰长） */
   guard_level?: number
+}
+
+export interface ProcessedGiftCombo {
+  batch_combo_id: string
+  combo_total_coin?: number
+  super_batch_gift_num?: number
+  combo_resources_id?: number
+  combo_stay_time?: number
+  show_batch_combo_send?: boolean
 }
 
 /** 处理后的 SC（来自后端） */
@@ -554,7 +575,10 @@ export interface ArchivedGift {
   gift_icon?: string
   num: number
   total_value: number
+  revenue_value: number
   is_paid: boolean
+  combo?: ProcessedGiftCombo
+  blind_gift?: ProcessedBlindGift
   user_uid: number
   user_name: string
   timestamp: number

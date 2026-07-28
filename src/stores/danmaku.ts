@@ -122,7 +122,9 @@ export const useDanmakuStore = defineStore('danmaku', () => {
         // update
         const index = giftMergeIndex.value.get(merge_key)
         if (index !== undefined && giftList.value[index]) {
-          giftList.value[index] = gift
+          giftList.value.splice(index, 1)
+          giftList.value.push(gift)
+          rebuildGiftIndex()
         }
       }
     }

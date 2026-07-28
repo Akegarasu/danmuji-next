@@ -43,6 +43,9 @@ const giftIconUrl = computed(() => {
         <span class="gift-name">{{ item.gift_name }}</span>
         <span class="gift-num">× {{ item.num }}</span>
       </div>
+      <div v-if="item.blind_gift" class="blind-gift-line">
+        {{ item.blind_gift.gift_name }}（{{ formatPrice(item.blind_gift.total_value) || '¥0' }}）
+      </div>
     </div>
 
     <div v-if="item.is_paid && item.total_value > 0" class="gift-price">
@@ -171,6 +174,15 @@ const giftIconUrl = computed(() => {
   color: var(--accent-secondary);
   font-size: var(--content-font-size-sm);
   font-weight: 600;
+}
+
+.blind-gift-line {
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--content-font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .gift-price {

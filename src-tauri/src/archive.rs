@@ -12,7 +12,10 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, Mutex};
 
-use crate::live_types::{LiveStats, ProcessedDanmaku, ProcessedGift, ProcessedSuperChat};
+use crate::live_types::{
+    LiveStats, ProcessedBlindGift, ProcessedDanmaku, ProcessedGift, ProcessedGiftCombo,
+    ProcessedSuperChat,
+};
 
 // ==================== 数据库初始化 ====================
 
@@ -58,15 +61,26 @@ CREATE TABLE IF NOT EXISTS gifts (
     gift_icon       TEXT,
     num             INTEGER NOT NULL,
     total_value     INTEGER NOT NULL,
+    revenue_value   INTEGER,
+    blind_gift_id   INTEGER,
+    blind_gift_name TEXT,
+    blind_gift_total_value INTEGER,
     is_paid         INTEGER NOT NULL DEFAULT 0,
     user_uid        INTEGER NOT NULL,
     user_name       TEXT NOT NULL,
     timestamp       INTEGER NOT NULL,
-    guard_level     INTEGER
+    guard_level     INTEGER,
+    batch_combo_id  TEXT,
+    combo_total_coin INTEGER,
+    super_batch_gift_num INTEGER,
+    combo_resources_id INTEGER,
+    combo_stay_time INTEGER,
+    show_batch_combo_send INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_gifts_session ON gifts(session_id);
 CREATE INDEX IF NOT EXISTS idx_gifts_value ON gifts(session_id, total_value);
+CREATE INDEX IF NOT EXISTS idx_gifts_original_id ON gifts(session_id, original_id);
 
 CREATE TABLE IF NOT EXISTS super_chats (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,6 +98,69 @@ CREATE TABLE IF NOT EXISTS super_chats (
 CREATE INDEX IF NOT EXISTS idx_sc_session ON super_chats(session_id);
 CREATE INDEX IF NOT EXISTS idx_sc_price ON super_chats(session_id, price);
 "#;
+
+fn migrate_gifts_table(conn: &Connection) -> Result<(), String> {
+    let columns = {
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(gifts)")
+            .map_err(|e| format!("读取礼物表结构失败: {}", e))?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .map_err(|e| format!("读取礼物表字段失败: {}", e))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("读取礼物表字段失败: {}", e))?
+    };
+
+    for (column, sql) in [
+        (
+            "revenue_value",
+            "ALTER TABLE gifts ADD COLUMN revenue_value INTEGER",
+        ),
+        (
+            "blind_gift_id",
+            "ALTER TABLE gifts ADD COLUMN blind_gift_id INTEGER",
+        ),
+        (
+            "blind_gift_name",
+            "ALTER TABLE gifts ADD COLUMN blind_gift_name TEXT",
+        ),
+        (
+            "blind_gift_total_value",
+            "ALTER TABLE gifts ADD COLUMN blind_gift_total_value INTEGER",
+        ),
+        (
+            "batch_combo_id",
+            "ALTER TABLE gifts ADD COLUMN batch_combo_id TEXT",
+        ),
+        (
+            "combo_total_coin",
+            "ALTER TABLE gifts ADD COLUMN combo_total_coin INTEGER",
+        ),
+        (
+            "super_batch_gift_num",
+            "ALTER TABLE gifts ADD COLUMN super_batch_gift_num INTEGER",
+        ),
+        (
+            "combo_resources_id",
+            "ALTER TABLE gifts ADD COLUMN combo_resources_id INTEGER",
+        ),
+        (
+            "combo_stay_time",
+            "ALTER TABLE gifts ADD COLUMN combo_stay_time INTEGER",
+        ),
+        (
+            "show_batch_combo_send",
+            "ALTER TABLE gifts ADD COLUMN show_batch_combo_send INTEGER",
+        ),
+    ] {
+        if !columns.iter().any(|existing| existing == column) {
+            conn.execute(sql, [])
+                .map_err(|e| format!("迁移礼物表字段 {} 失败: {}", column, e))?;
+        }
+    }
+
+    Ok(())
+}
 
 // ==================== 存档事件（用于 channel 传输）====================
 
@@ -138,7 +215,12 @@ pub struct ArchivedGift {
     pub gift_icon: Option<String>,
     pub num: u32,
     pub total_value: u64,
+    pub revenue_value: u64,
     pub is_paid: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub combo: Option<ProcessedGiftCombo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blind_gift: Option<ProcessedBlindGift>,
     pub user_uid: u64,
     pub user_name: String,
     pub timestamp: i64,
@@ -182,6 +264,7 @@ impl ArchiveManager {
         // 初始化表
         conn.execute_batch(SCHEMA_SQL)
             .map_err(|e| format!("初始化存档表失败: {}", e))?;
+        migrate_gifts_table(&conn)?;
 
         Ok(Self {
             db: Mutex::new(conn),
@@ -328,7 +411,7 @@ impl ArchiveManager {
             // 从 gifts 表计算收入
             let gift_revenue: i64 = db
                 .query_row(
-                    "SELECT COALESCE(SUM(total_value), 0) FROM gifts WHERE session_id = ?1 AND is_paid = 1",
+                    "SELECT COALESCE(SUM(COALESCE(revenue_value, blind_gift_total_value, total_value)), 0) FROM gifts WHERE session_id = ?1 AND is_paid = 1",
                     params![session_id],
                     |row| row.get(0),
                 )
@@ -422,8 +505,54 @@ impl ArchiveManager {
 
     pub async fn save_gift(&self, session_id: i64, gift: &ProcessedGift) -> Result<(), String> {
         let db = self.db.lock().await;
+        let blind_gift = gift.blind_gift.as_ref();
+        let combo = gift.combo.as_ref();
+        let updated = db
+            .execute(
+                "UPDATE gifts SET gift_id = ?1, gift_name = ?2, gift_icon = ?3, num = ?4, total_value = ?5, revenue_value = ?6, blind_gift_id = ?7, blind_gift_name = ?8, blind_gift_total_value = ?9, is_paid = ?10, user_uid = ?11, user_name = ?12, timestamp = ?13, guard_level = ?14, batch_combo_id = ?15, combo_total_coin = ?16, super_batch_gift_num = ?17, combo_resources_id = ?18, combo_stay_time = ?19, show_batch_combo_send = ?20 WHERE id = (SELECT id FROM gifts WHERE session_id = ?21 AND original_id = ?22 ORDER BY id ASC LIMIT 1)",
+                params![
+                    gift.gift_id as i64,
+                    &gift.gift_name,
+                    &gift.gift_icon,
+                    gift.num as i64,
+                    gift.total_value as i64,
+                    gift.revenue_value as i64,
+                    blind_gift.map(|blind_gift| blind_gift.gift_id as i64),
+                    blind_gift.map(|blind_gift| blind_gift.gift_name.as_str()),
+                    blind_gift.map(|blind_gift| blind_gift.total_value as i64),
+                    gift.is_paid as i32,
+                    gift.user.uid as i64,
+                    &gift.user.name,
+                    gift.timestamp,
+                    gift.guard_level.map(i64::from),
+                    combo.map(|combo| combo.batch_combo_id.as_str()),
+                    combo
+                        .and_then(|combo| combo.combo_total_coin)
+                        .map(|value| value as i64),
+                    combo
+                        .and_then(|combo| combo.super_batch_gift_num)
+                        .map(|value| value as i64),
+                    combo
+                        .and_then(|combo| combo.combo_resources_id)
+                        .map(|value| value as i64),
+                    combo
+                        .and_then(|combo| combo.combo_stay_time)
+                        .map(|value| value as i64),
+                    combo
+                        .and_then(|combo| combo.show_batch_combo_send)
+                        .map(|value| if value { 1_i32 } else { 0_i32 }),
+                    session_id,
+                    &gift.id,
+                ],
+            )
+            .map_err(|e| format!("更新礼物失败: {}", e))?;
+
+        if updated > 0 {
+            return Ok(());
+        }
+
         db.execute(
-            "INSERT INTO gifts (session_id, original_id, gift_id, gift_name, gift_icon, num, total_value, is_paid, user_uid, user_name, timestamp, guard_level) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            "INSERT INTO gifts (session_id, original_id, gift_id, gift_name, gift_icon, num, total_value, revenue_value, blind_gift_id, blind_gift_name, blind_gift_total_value, is_paid, user_uid, user_name, timestamp, guard_level, batch_combo_id, combo_total_coin, super_batch_gift_num, combo_resources_id, combo_stay_time, show_batch_combo_send) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
             params![
                 session_id,
                 &gift.id,
@@ -432,11 +561,31 @@ impl ArchiveManager {
                 &gift.gift_icon,
                 gift.num as i64,
                 gift.total_value as i64,
+                gift.revenue_value as i64,
+                blind_gift.map(|blind_gift| blind_gift.gift_id as i64),
+                blind_gift.map(|blind_gift| blind_gift.gift_name.as_str()),
+                blind_gift.map(|blind_gift| blind_gift.total_value as i64),
                 gift.is_paid as i32,
                 gift.user.uid as i64,
                 &gift.user.name,
                 gift.timestamp,
-                gift.guard_level.map(|g| g as i64),
+                gift.guard_level.map(i64::from),
+                combo.map(|combo| combo.batch_combo_id.as_str()),
+                combo
+                    .and_then(|combo| combo.combo_total_coin)
+                    .map(|value| value as i64),
+                combo
+                    .and_then(|combo| combo.super_batch_gift_num)
+                    .map(|value| value as i64),
+                combo
+                    .and_then(|combo| combo.combo_resources_id)
+                    .map(|value| value as i64),
+                combo
+                    .and_then(|combo| combo.combo_stay_time)
+                    .map(|value| value as i64),
+                combo
+                    .and_then(|combo| combo.show_batch_combo_send)
+                    .map(|value| if value { 1_i32 } else { 0_i32 }),
             ],
         )
         .map_err(|e| format!("写入礼物失败: {}", e))?;
@@ -672,7 +821,7 @@ CREATE INDEX IF NOT EXISTS idx_sc_user_latest ON super_chats(user_uid, start_tim
 
         if !query.is_empty() {
             conditions.push(format!(
-                "(gift_name LIKE ?{0} OR user_name LIKE ?{0})",
+                "(gift_name LIKE ?{0} OR blind_gift_name LIKE ?{0} OR user_name LIKE ?{0})",
                 param_idx
             ));
             param_idx += 1;
@@ -693,7 +842,7 @@ CREATE INDEX IF NOT EXISTS idx_sc_user_latest ON super_chats(user_uid, start_tim
         // Build dynamic params
         let count_sql = format!("SELECT COUNT(*) FROM gifts WHERE {}", where_clause);
         let data_sql = format!(
-            "SELECT id, gift_name, gift_icon, num, total_value, is_paid, user_uid, user_name, timestamp, guard_level FROM gifts WHERE {} ORDER BY timestamp ASC LIMIT ?{} OFFSET ?{}",
+            "SELECT id, gift_name, gift_icon, num, total_value, is_paid, user_uid, user_name, timestamp, guard_level, blind_gift_id, blind_gift_name, blind_gift_total_value, revenue_value, batch_combo_id, combo_total_coin, super_batch_gift_num, combo_resources_id, combo_stay_time, show_batch_combo_send FROM gifts WHERE {} ORDER BY timestamp ASC LIMIT ?{} OFFSET ?{}",
             where_clause, limit_param, offset_param
         );
 
@@ -728,13 +877,59 @@ CREATE INDEX IF NOT EXISTS idx_sc_user_latest ON super_chats(user_uid, start_tim
         let mut stmt = db.prepare(&data_sql).map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map(data_bind_refs.as_slice(), |row| {
+                let blind_gift_id = row.get::<_, Option<i64>>(10)?;
+                let blind_gift_name = row.get::<_, Option<String>>(11)?;
+                let blind_gift_total_value = row.get::<_, Option<i64>>(12)?;
+                let revenue_value = row
+                    .get::<_, Option<i64>>(13)?
+                    .or(blind_gift_total_value)
+                    .unwrap_or(row.get::<_, i64>(4)?);
+                let blind_gift = match (blind_gift_id, blind_gift_name, blind_gift_total_value) {
+                    (Some(gift_id), Some(gift_name), Some(total_value)) => {
+                        Some(ProcessedBlindGift {
+                            gift_id: gift_id as u64,
+                            gift_name,
+                            total_value: total_value as u64,
+                        })
+                    }
+                    _ => None,
+                };
+                let combo = if let Some(batch_combo_id) = row
+                    .get::<_, Option<String>>(14)?
+                    .filter(|batch_combo_id| !batch_combo_id.is_empty())
+                {
+                    Some(ProcessedGiftCombo {
+                            batch_combo_id,
+                            combo_total_coin: row
+                                .get::<_, Option<i64>>(15)?
+                                .map(|value| value as u64),
+                            super_batch_gift_num: row
+                                .get::<_, Option<i64>>(16)?
+                                .map(|value| value as u64),
+                            combo_resources_id: row
+                                .get::<_, Option<i64>>(17)?
+                                .map(|value| value as u64),
+                            combo_stay_time: row
+                                .get::<_, Option<i64>>(18)?
+                                .map(|value| value as u64),
+                            show_batch_combo_send: row
+                                .get::<_, Option<i32>>(19)?
+                                .map(|value| value != 0),
+                    })
+                } else {
+                    None
+                };
+
                 Ok(ArchivedGift {
                     id: row.get(0)?,
                     gift_name: row.get(1)?,
                     gift_icon: row.get(2)?,
                     num: row.get::<_, i64>(3)? as u32,
                     total_value: row.get::<_, i64>(4)? as u64,
+                    revenue_value: revenue_value as u64,
                     is_paid: row.get::<_, i32>(5)? != 0,
+                    combo,
+                    blind_gift,
                     user_uid: row.get::<_, i64>(6)? as u64,
                     user_name: row.get(7)?,
                     timestamp: row.get(8)?,
@@ -969,4 +1164,115 @@ fn map_danmaku_row(row: &rusqlite::Row) -> rusqlite::Result<ArchivedDanmaku> {
         is_emoticon: row.get::<_, i32>(5)? != 0,
         emoticon_url: row.get(6)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{migrate_gifts_table, ArchiveManager, SCHEMA_SQL};
+    use crate::live_types::{
+        ProcessedGift, ProcessedGiftCombo, ProcessedUser,
+    };
+    use rusqlite::{params, Connection};
+    use tokio::sync::Mutex;
+
+    #[test]
+    fn migrates_existing_gifts_table_for_gift_metadata() {
+        let conn = Connection::open_in_memory().expect("in-memory database");
+        conn.execute_batch(
+            "CREATE TABLE gifts (
+                id INTEGER PRIMARY KEY,
+                gift_name TEXT NOT NULL,
+                total_value INTEGER NOT NULL
+            );",
+        )
+        .expect("legacy gifts table");
+
+        migrate_gifts_table(&conn).expect("first migration");
+        migrate_gifts_table(&conn).expect("migration should be idempotent");
+
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(gifts)")
+            .expect("gift table info");
+        let columns = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("gift columns")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("column names");
+
+        assert!(columns.iter().any(|column| column == "blind_gift_id"));
+        assert!(columns.iter().any(|column| column == "blind_gift_name"));
+        assert!(columns
+            .iter()
+            .any(|column| column == "blind_gift_total_value"));
+        assert!(columns.iter().any(|column| column == "revenue_value"));
+        assert!(columns.iter().any(|column| column == "batch_combo_id"));
+        assert!(columns
+            .iter()
+            .any(|column| column == "show_batch_combo_send"));
+    }
+
+    #[tokio::test]
+    async fn updates_combo_snapshot_instead_of_inserting_duplicate_rows() {
+        let conn = Connection::open_in_memory().expect("in-memory database");
+        conn.execute_batch(SCHEMA_SQL).expect("archive schema");
+        migrate_gifts_table(&conn).expect("gift migration");
+        conn.execute(
+            "INSERT INTO sessions (id, room_id, start_time) VALUES (1, 1, 1700000000)",
+            [],
+        )
+        .expect("archive session");
+        let archive = ArchiveManager {
+            db: Mutex::new(conn),
+            active_session_id: Mutex::new(None),
+        };
+
+        let mut gift = ProcessedGift {
+            id: "gift:combo:42:1:combo-1".to_owned(),
+            merge_key: "combo:42:1:combo-1".to_owned(),
+            gift_id: 1,
+            gift_name: "辣条".to_owned(),
+            gift_icon: String::new(),
+            num: 1,
+            total_value: 1,
+            revenue_value: 1,
+            is_paid: true,
+            combo: Some(ProcessedGiftCombo {
+                batch_combo_id: "combo-1".to_owned(),
+                combo_total_coin: Some(100),
+                super_batch_gift_num: Some(1),
+                combo_resources_id: None,
+                combo_stay_time: Some(5),
+                show_batch_combo_send: Some(true),
+            }),
+            blind_gift: None,
+            user: ProcessedUser {
+                uid: 42,
+                name: "tester".to_owned(),
+                face: None,
+                medal: None,
+                guard_level: 0,
+                is_admin: false,
+            },
+            timestamp: 1_700_000_000,
+            guard_level: None,
+        };
+
+        archive.save_gift(1, &gift).await.expect("insert gift");
+        gift.num = 2;
+        gift.total_value = 2;
+        gift.revenue_value = 2;
+        gift.combo.as_mut().unwrap().combo_total_coin = Some(200);
+        gift.combo.as_mut().unwrap().super_batch_gift_num = Some(2);
+        archive.save_gift(1, &gift).await.expect("update gift");
+
+        let db = archive.db.lock().await;
+        let (count, num, revenue): (i64, i64, i64) = db
+            .query_row(
+                "SELECT COUNT(*), MAX(num), MAX(revenue_value) FROM gifts WHERE original_id = ?1",
+                params![&gift.id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("saved combo snapshot");
+        assert_eq!((count, num, revenue), (1, 2, 2));
+    }
 }

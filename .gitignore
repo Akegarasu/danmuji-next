@@ -27,12 +27,13 @@ pkg/mod/*
 test/
 
 .claude/*
+.codex-target
 
 __pycache__/
 
 .git_old
 
-docs/WINDOW_SYSTEM.md
+docs/
 
 scripts/cos_upload.py
 

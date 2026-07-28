@@ -551,6 +551,7 @@ impl BliveService {
             }
             Event::GuardBuy(guard) => data.process_guard_buy(guard),
             Event::OnlineRankV2(rank) => data.process_online_rank(rank),
+            Event::OnlineRankV3(rank) => data.process_online_rank_v3(rank),
             Event::OnlineRankCount(count) => data.process_online_count(count),
             Event::InteractWord(iw) => data.process_interact_word(iw),
             Event::LiveStart(live_data) => {

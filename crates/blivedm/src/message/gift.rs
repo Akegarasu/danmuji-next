@@ -17,7 +17,7 @@ pub struct Gift {
     /// 数量
     pub num: u32,
     /// 单价（金瓜子/银瓜子）
-    pub price: u32,
+    pub price: u64,
     /// 总价值
     pub total_coin: u64,
     /// 货币类型
@@ -49,10 +49,22 @@ pub struct Gift {
     pub combo_send: Option<ComboSend>,
     /// 连击停留时间（秒）
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub combo_stay_time: Option<u32>,
+    pub combo_stay_time: Option<u64>,
     /// 连击总价值
     #[serde(skip_serializing_if = "Option::is_none")]
     pub combo_total_coin: Option<u64>,
+    /// 批量连击累计数量
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub super_batch_gift_num: Option<u64>,
+    /// 连击动效资源 ID
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub combo_resources_id: Option<u64>,
+    /// 是否显示批量连击发送
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show_batch_combo_send: Option<bool>,
+    /// 盲盒信息；普通礼物的上游字段为 `null`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blind_gift: Option<BlindGift>,
     /// 发送者勋章
     #[serde(skip_serializing_if = "Option::is_none")]
     pub medal: Option<Medal>,
@@ -71,6 +83,8 @@ pub struct BatchComboSend {
     pub gift_num: u32,
     pub uid: u64,
     pub uname: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blind_gift: Option<BlindGift>,
 }
 
 /// 连击信息
@@ -84,6 +98,41 @@ pub struct ComboSend {
     pub gift_num: u32,
     pub uid: u64,
     pub uname: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blind_gift: Option<BlindGift>,
+}
+
+/// 盲盒礼物信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlindGift {
+    /// 盲盒配置 ID
+    pub blind_gift_config_id: u64,
+    /// 盲盒来源
+    pub from: u64,
+    /// 礼物动作（例如“爆出”）
+    pub gift_action: String,
+    /// 爆出礼物总价值（金瓜子）
+    pub gift_tip_price: u64,
+    /// 原盲盒礼物 ID
+    pub original_gift_id: u64,
+    /// 原盲盒礼物名称
+    pub original_gift_name: String,
+    /// 原盲盒单价（金瓜子）
+    pub original_gift_price: u64,
+}
+
+impl BlindGift {
+    fn parse(value: &Value) -> Option<Self> {
+        Some(Self {
+            blind_gift_config_id: value.get("blind_gift_config_id")?.as_u64()?,
+            from: value.get("from")?.as_u64()?,
+            gift_action: value.get("gift_action")?.as_str()?.to_string(),
+            gift_tip_price: value.get("gift_tip_price")?.as_u64()?,
+            original_gift_id: value.get("original_gift_id")?.as_u64()?,
+            original_gift_name: value.get("original_gift_name")?.as_str()?.to_string(),
+            original_gift_price: value.get("original_gift_price")?.as_u64()?,
+        })
+    }
 }
 
 /// 货币类型
@@ -109,12 +158,14 @@ impl Gift {
             .to_string();
         let gift_icon = data
             .get("gift_info")
-            .and_then(|info| info.get("img_basic"))
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
+            .and_then(|info| {
+                ["webp", "gif", "img_basic"]
+                    .into_iter()
+                    .find_map(|key| non_empty_json_string(info.get(key)))
+            })
+            .unwrap_or_default();
         let num = u32::try_from(data.get("num")?.as_u64()?).ok()?;
-        let price = u32::try_from(data.get("price")?.as_u64()?).ok()?;
+        let price = data.get("price")?.as_u64()?;
         let total_coin = data.get("total_coin")?.as_u64()?;
         let coin_type_str = data.get("coin_type")?.as_str()?;
         let coin_type = match coin_type_str {
@@ -123,35 +174,39 @@ impl Gift {
             _ => return None,
         };
 
-        let sender_uid = data.get("uid")?.as_u64()?;
-        let sender_name = data
-            .get("uname")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        let sender_face = data.get("face").and_then(|v| v.as_str()).map(String::from);
+        let sender_uinfo = data.get("sender_uinfo").filter(|value| !value.is_null());
+        let sender_base = sender_uinfo.and_then(|uinfo| uinfo.get("base"));
+        let sender_uid = sender_uinfo
+            .and_then(|uinfo| uinfo.get("uid"))
+            .and_then(Value::as_u64)
+            .filter(|uid| *uid != 0)
+            .or_else(|| data.get("uid").and_then(Value::as_u64))?;
+        let sender_name = sender_base
+            .and_then(|base| non_empty_json_string(base.get("name")))
+            .or_else(|| non_empty_json_string(data.get("uname")))
+            .unwrap_or_default();
+        let sender_face = sender_base
+            .and_then(|base| non_empty_json_string(base.get("face")))
+            .or_else(|| non_empty_json_string(data.get("face")));
         let action = data
             .get("action")
             .and_then(|v| v.as_str())
             .unwrap_or("投喂")
             .to_string();
         let timestamp = data.get("timestamp")?.as_i64()?;
-        // 旧协议和部分免费礼物可能完全不提供 `tid`；但如果提供了，
-        // 它就是幂等所需的关键身份，不能把错误类型或空值降级为“未提供”。
+        // 旧协议和部分免费礼物可能不提供或返回空 `tid`。
         let transaction_id = match data.get("tid") {
             None | Some(Value::Null) => None,
             Some(value) => {
                 let value = value.as_str()?;
                 if value.trim().is_empty() {
-                    return None;
+                    None
+                } else {
+                    Some(value.to_string())
                 }
-                Some(value.to_string())
             }
         };
-        let batch_combo_id = data
-            .get("batch_combo_id")
-            .and_then(|v| v.as_str())
-            .map(String::from);
+        let batch_combo_id = parse_optional_combo_id(data.get("batch_combo_id"))?;
         let batch_combo_send = data.get("batch_combo_send").and_then(|v| {
             Some(BatchComboSend {
                 action: v.get("action")?.as_str()?.to_string(),
@@ -162,6 +217,7 @@ impl Gift {
                 gift_num: u32::try_from(v.get("gift_num")?.as_u64()?).ok()?,
                 uid: v.get("uid")?.as_u64()?,
                 uname: v.get("uname")?.as_str()?.to_string(),
+                blind_gift: v.get("blind_gift").and_then(BlindGift::parse),
             })
         });
         let combo_send = data.get("combo_send").and_then(|v| {
@@ -174,13 +230,21 @@ impl Gift {
                 gift_num: u32::try_from(v.get("gift_num")?.as_u64()?).ok()?,
                 uid: v.get("uid")?.as_u64()?,
                 uname: v.get("uname")?.as_str()?.to_string(),
+                blind_gift: v.get("blind_gift").and_then(BlindGift::parse),
             })
         });
-        let combo_stay_time = data
-            .get("combo_stay_time")
-            .and_then(|v| v.as_u64())
-            .and_then(|value| u32::try_from(value).ok());
+        let combo_stay_time = data.get("combo_stay_time").and_then(Value::as_u64);
         let combo_total_coin = data.get("combo_total_coin").and_then(|v| v.as_u64());
+        let super_batch_gift_num = data
+            .get("super_batch_gift_num")
+            .and_then(Value::as_u64);
+        let combo_resources_id = data
+            .get("combo_resources_id")
+            .and_then(Value::as_u64);
+        let show_batch_combo_send = data
+            .get("show_batch_combo_send")
+            .and_then(Value::as_bool);
+        let blind_gift = data.get("blind_gift").and_then(BlindGift::parse);
 
         let guard_level = data
             .get("guard_level")
@@ -223,6 +287,10 @@ impl Gift {
             combo_send,
             combo_stay_time,
             combo_total_coin,
+            super_batch_gift_num,
+            combo_resources_id,
+            show_batch_combo_send,
+            blind_gift,
             medal,
             guard_level,
         })
@@ -236,10 +304,68 @@ impl Gift {
     /// 礼物价值（人民币，分）
     pub fn value_cny_fen(&self) -> u64 {
         if self.is_paid() {
-            self.total_coin / 10
+            self.revealed_total_coin() / 10
         } else {
             0
         }
+    }
+
+    /// 礼物用于展示的总价值（金瓜子）。
+    ///
+    /// 盲盒消息的 `total_coin` 是盲盒消费金额，爆出礼物价值由
+    /// `blind_gift.gift_tip_price` 给出。
+    pub fn revealed_total_coin(&self) -> u64 {
+        self.blind_gift
+            .as_ref()
+            .map_or(self.total_coin, |blind_gift| blind_gift.gift_tip_price)
+    }
+
+    /// 盲盒实际消费金额（人民币，分）
+    pub fn blind_gift_cost_cny_fen(&self) -> Option<u64> {
+        self.blind_gift.as_ref().map(|_| self.total_coin / 10)
+    }
+
+    /// 是否属于 Bilibili 明确标识的一轮批量连击。
+    pub fn is_combo(&self) -> bool {
+        self.batch_combo_id.is_some()
+    }
+
+    /// 服务端提供的连击累计数量。
+    pub fn combo_total_num(&self) -> Option<u64> {
+        self.batch_combo_send
+            .as_ref()
+            .map(|combo| u64::from(combo.batch_combo_num))
+            .filter(|num| *num > 0)
+            .or_else(|| self.super_batch_gift_num.filter(|num| *num > 0))
+            .or_else(|| {
+                self.combo_send
+                    .as_ref()
+                    .map(|combo| u64::from(combo.combo_num))
+                    .filter(|num| *num > 0)
+            })
+    }
+
+    /// 用于 combo 展示的累计价值（金瓜子）。
+    pub fn combo_display_total_coin(&self) -> Option<u64> {
+        self.is_combo()
+            .then(|| self.combo_total_coin.filter(|value| *value > 0))
+            .flatten()
+    }
+}
+
+fn non_empty_json_string(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_owned)
+}
+
+fn parse_optional_combo_id(value: Option<&Value>) -> Option<Option<String>> {
+    match value {
+        None | Some(Value::Null) => Some(None),
+        Some(Value::String(value)) if value.trim().is_empty() => Some(None),
+        Some(Value::String(value)) => Some(Some(value.clone())),
+        Some(_) => None,
     }
 }
 
@@ -285,6 +411,38 @@ mod tests {
     }
 
     #[test]
+    fn prefers_sender_uinfo_and_falls_back_to_top_level_sender() {
+        let mut raw = minimal_gift();
+        raw["data"]["uid"] = json!(7);
+        raw["data"]["uname"] = json!("顶层用户");
+        raw["data"]["face"] = json!("https://example.invalid/top.webp");
+        raw["data"]["sender_uinfo"] = json!({
+            "uid": 42,
+            "base": {
+                "name": "嵌套用户",
+                "face": "https://example.invalid/nested.webp"
+            }
+        });
+
+        let gift = Gift::parse(&raw).expect("gift with sender_uinfo");
+        assert_eq!(gift.sender_uid, 42);
+        assert_eq!(gift.sender_name, "嵌套用户");
+        assert_eq!(
+            gift.sender_face.as_deref(),
+            Some("https://example.invalid/nested.webp")
+        );
+
+        raw["data"]["sender_uinfo"] = json!({ "uid": 0, "base": {} });
+        let gift = Gift::parse(&raw).expect("top-level sender fallback");
+        assert_eq!(gift.sender_uid, 7);
+        assert_eq!(gift.sender_name, "顶层用户");
+        assert_eq!(
+            gift.sender_face.as_deref(),
+            Some("https://example.invalid/top.webp")
+        );
+    }
+
+    #[test]
     fn accepts_missing_presentation_fields() {
         let gift = Gift::parse(&minimal_gift()).expect("presentation fields are optional");
 
@@ -293,21 +451,64 @@ mod tests {
         assert_eq!(gift.sender_name, "");
         assert_eq!(gift.action, "投喂");
         assert_eq!(gift.transaction_id, None);
+        assert!(gift.blind_gift.is_none());
     }
 
     #[test]
-    fn rejects_out_of_range_core_amounts_instead_of_truncating() {
+    fn parses_blind_gift_fixture_and_uses_revealed_value() {
+        let raw: serde_json::Value =
+            serde_json::from_str(include_str!("../../blind_gift.fixture.json"))
+                .expect("valid blind gift fixture");
+
+        let gift = Gift::parse(&raw).expect("blind gift should parse");
+        let blind_gift = gift.blind_gift.as_ref().expect("blind gift metadata");
+
+        assert_eq!(gift.gift_id, 32128);
+        assert_eq!(gift.gift_name, "爱心抱枕");
+        assert_eq!(gift.total_coin, 15_000);
+        assert_eq!(blind_gift.blind_gift_config_id, 139);
+        assert_eq!(blind_gift.gift_action, "爆出");
+        assert_eq!(blind_gift.gift_tip_price, 16_000);
+        assert_eq!(blind_gift.original_gift_id, 32251);
+        assert_eq!(blind_gift.original_gift_name, "心动盲盒");
+        assert_eq!(blind_gift.original_gift_price, 15_000);
+        assert_eq!(gift.revealed_total_coin(), 16_000);
+        assert_eq!(gift.value_cny_fen(), 1_600);
+        assert_eq!(gift.blind_gift_cost_cny_fen(), Some(1_500));
+        assert!(gift
+            .batch_combo_send
+            .as_ref()
+            .and_then(|combo| combo.blind_gift.as_ref())
+            .is_some());
+    }
+
+    #[test]
+    fn treats_null_blind_gift_as_regular_gift() {
+        let mut raw = minimal_gift();
+        raw["data"]["blind_gift"] = serde_json::Value::Null;
+
+        let gift = Gift::parse(&raw).expect("null blind_gift is valid for regular gifts");
+
+        assert!(gift.blind_gift.is_none());
+        assert_eq!(gift.revealed_total_coin(), 100);
+        assert_eq!(gift.value_cny_fen(), 10);
+        assert_eq!(gift.blind_gift_cost_cny_fen(), None);
+    }
+
+    #[test]
+    fn rejects_out_of_range_quantity_and_preserves_u64_price() {
         let mut raw = minimal_gift();
         raw["data"]["num"] = json!(u64::from(u32::MAX) + 1);
         assert!(Gift::parse(&raw).is_none());
 
         let mut raw = minimal_gift();
         raw["data"]["price"] = json!(u64::from(u32::MAX) + 1);
-        assert!(Gift::parse(&raw).is_none());
+        let gift = Gift::parse(&raw).expect("price is uint64 in SEND_GIFT_V2");
+        assert_eq!(gift.price, u64::from(u32::MAX) + 1);
     }
 
     #[test]
-    fn drops_out_of_range_optional_metadata_instead_of_truncating() {
+    fn preserves_u64_combo_stay_time_and_drops_invalid_nested_quantity() {
         let mut raw = minimal_gift();
         raw["data"]["combo_stay_time"] = json!(u64::from(u32::MAX) + 1);
         raw["data"]["batch_combo_send"] = json!({
@@ -322,12 +523,12 @@ mod tests {
         });
 
         let gift = Gift::parse(&raw).expect("optional metadata must not reject the gift");
-        assert_eq!(gift.combo_stay_time, None);
+        assert_eq!(gift.combo_stay_time, Some(u64::from(u32::MAX) + 1));
         assert!(gift.batch_combo_send.is_none());
     }
 
     #[test]
-    fn rejects_malformed_critical_fields() {
+    fn handles_malformed_and_empty_identity_fields() {
         let mut raw = minimal_gift();
         raw["data"]["coin_type"] = json!("points");
         assert!(Gift::parse(&raw).is_none());
@@ -338,10 +539,14 @@ mod tests {
 
         let mut raw = minimal_gift();
         raw["data"]["tid"] = json!("");
-        assert!(Gift::parse(&raw).is_none());
+        assert_eq!(Gift::parse(&raw).unwrap().transaction_id, None);
 
         let mut raw = minimal_gift();
         raw["data"]["tid"] = json!("   ");
-        assert!(Gift::parse(&raw).is_none());
+        assert_eq!(Gift::parse(&raw).unwrap().transaction_id, None);
+
+        let mut raw = minimal_gift();
+        raw["data"]["batch_combo_id"] = json!("");
+        assert!(!Gift::parse(&raw).unwrap().is_combo());
     }
 }
