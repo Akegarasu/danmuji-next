@@ -1,40 +1,41 @@
-//! 弹幕客户端核心
+//! 弹幕客户端核心。
+//!
+//! 公开入口保留在本模块；连接状态机、配置、生命周期和原始捕获分别由子模块负责。
+
+mod capture;
+mod connection;
+mod lifecycle;
+mod options;
 
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use futures_util::stream::{SplitSink, SplitStream};
-use futures_util::{SinkExt, Stream, StreamExt};
+use futures_util::Stream;
 use reqwest::Client as HttpClient;
 use serde_json::Value;
-use tokio::net::TcpStream;
-use tokio::sync::mpsc;
-use tokio::time::{interval, timeout};
-use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+use tokio::sync::{broadcast, mpsc, watch};
+use tokio::task::JoinHandle;
 
 use crate::api::{
     extract_buvid_from_cookie, extract_uid_from_cookie, get_danmu_info, get_room_init,
     DanmuServerInfo, RoomInfo,
 };
 use crate::error::{Error, Result};
-use crate::message::{parse_event, Event};
-use crate::packet::Packet;
+use crate::message::Event;
 
-/// 心跳间隔
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
+use capture::RawCaptureTarget;
+use connection::{ConnectionChannels, ConnectionTask};
 
-/// 连接超时
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+pub use capture::{DecodeStage, RawCapture, RawCaptureMode, RawEventHandler};
+pub use lifecycle::{
+    CancellationToken, ConnectionState, DisconnectReason, LifecycleEvent, OnlineTrigger,
+};
+pub use options::ConnectionOptions;
 
-/// 原始 JSON 事件回调。
-///
-/// 回调在事件解析前同步执行，适合由调用方实现调试落盘或指标采集。
-pub type RawEventHandler = dyn Fn(&Value) + Send + Sync + 'static;
-
-/// 弹幕客户端
+/// 弹幕客户端。
 pub struct BliveDmClient {
     room_info: RoomInfo,
     danmu_info: DanmuServerInfo,
@@ -43,9 +44,10 @@ pub struct BliveDmClient {
     auto_reconnect: bool,
     reconnect_interval: Duration,
     raw_event_handler: Option<Arc<RawEventHandler>>,
+    raw_capture: Option<RawCaptureTarget>,
 }
 
-/// 客户端配置 Builder
+/// 客户端配置 Builder。
 #[derive(Default)]
 pub struct BliveDmClientBuilder {
     room_id: Option<u64>,
@@ -53,34 +55,38 @@ pub struct BliveDmClientBuilder {
     auto_reconnect: bool,
     reconnect_interval: Duration,
     raw_event_handler: Option<Arc<RawEventHandler>>,
+    raw_capture: Option<RawCaptureTarget>,
 }
 
 impl BliveDmClientBuilder {
-    /// 设置房间号（必需）
+    /// 设置房间号（必需）。
     pub fn room_id(mut self, room_id: u64) -> Self {
         self.room_id = Some(room_id);
         self
     }
 
-    /// 设置 Cookie（可选，用于获取更完整的弹幕服务器信息）
+    /// 设置 Cookie（可选，用于获取更完整的弹幕服务器信息）。
     pub fn cookie(mut self, cookie: impl Into<String>) -> Self {
         self.cookie = Some(cookie.into());
         self
     }
 
-    /// 是否自动重连（默认 false）
+    /// 是否自动重连（默认 false）。
     pub fn auto_reconnect(mut self, enabled: bool) -> Self {
         self.auto_reconnect = enabled;
         self
     }
 
-    /// 重连间隔（默认 3 秒）
+    /// 重连间隔（默认 3 秒）。
     pub fn reconnect_interval(mut self, duration: Duration) -> Self {
         self.reconnect_interval = duration;
         self
     }
 
     /// 设置原始 JSON 事件回调。
+    ///
+    /// 此兼容 API 同步执行，回调不得执行阻塞 I/O。生产采集应优先使用
+    /// [`Self::raw_capture`]，在调用方任务中消费有界通道。
     pub fn raw_event_handler<F>(mut self, handler: F) -> Self
     where
         F: Fn(&Value) + Send + Sync + 'static,
@@ -89,31 +95,35 @@ impl BliveDmClientBuilder {
         self
     }
 
-    /// 构建客户端
+    /// 配置原始字节的非阻塞旁路。
+    ///
+    /// 库只调用 `try_send`。调用方应在独立任务中快速消费并写入 durable spool；
+    /// 可通过 [`EventStream::dropped_raw_captures`] 监控通道溢出。
+    pub fn raw_capture(mut self, sender: mpsc::Sender<RawCapture>, mode: RawCaptureMode) -> Self {
+        self.raw_capture = Some(RawCaptureTarget::new(sender, mode));
+        self
+    }
+
+    /// 构建客户端。
     pub async fn build(self) -> Result<BliveDmClient> {
         let room_id = self
             .room_id
             .ok_or(Error::Config("room_id is required".to_string()))?;
 
         let http_client = HttpClient::new();
-
-        // 获取房间信息
         let room_info = get_room_init(&http_client, room_id).await?;
-
-        // 获取弹幕服务器信息
         let danmu_info =
             get_danmu_info(&http_client, room_info.room_id, self.cookie.as_deref()).await?;
 
-        // 从 cookie 提取用户信息
         let uid = self
             .cookie
             .as_ref()
-            .and_then(|c| extract_uid_from_cookie(c))
+            .and_then(|cookie| extract_uid_from_cookie(cookie))
             .unwrap_or(0);
         let buvid = self
             .cookie
             .as_ref()
-            .and_then(|c| extract_buvid_from_cookie(c))
+            .and_then(|cookie| extract_buvid_from_cookie(cookie))
             .unwrap_or_default();
 
         Ok(BliveDmClient {
@@ -128,12 +138,13 @@ impl BliveDmClientBuilder {
                 self.reconnect_interval
             },
             raw_event_handler: self.raw_event_handler,
+            raw_capture: self.raw_capture,
         })
     }
 }
 
 impl BliveDmClient {
-    /// 创建 Builder
+    /// 创建 Builder。
     pub fn builder() -> BliveDmClientBuilder {
         BliveDmClientBuilder {
             reconnect_interval: Duration::from_secs(3),
@@ -141,202 +152,149 @@ impl BliveDmClient {
         }
     }
 
-    /// 获取房间信息
+    /// 获取房间信息。
     pub fn room_info(&self) -> &RoomInfo {
         &self.room_info
     }
 
-    /// 连接并返回事件流
+    /// 获取经过 B 站 `room_init` 解析后的真实房间号。
+    ///
+    /// Builder 接受短房号或真实房号；归档、去重等需要稳定标识的调用方应使用
+    /// 此值，而不是最初传入 Builder 的值。
+    pub fn canonical_room_id(&self) -> u64 {
+        self.room_info.room_id
+    }
+
+    /// 获取房间的短房号。没有短房号时返回 `None`（上游以 `0` 表示不存在）。
+    pub fn short_room_id(&self) -> Option<u64> {
+        (self.room_info.short_id != 0).then_some(self.room_info.short_id)
+    }
+
+    /// 使用默认参数连接，是否重连由 Builder 的 `auto_reconnect` 决定。
+    ///
+    /// 保留原有 API 和返回时机：后台任务启动后立即返回事件流。需要判断真正在线时，
+    /// 请读取 [`EventStream::state`] 或生命周期事件。
     pub async fn connect(self) -> Result<EventStream> {
-        let (event_tx, event_rx) = mpsc::channel(256);
+        let auto_reconnect = self.auto_reconnect;
+        self.start(ConnectionOptions::default(), auto_reconnect)
+    }
 
-        let client = Arc::new(self);
-        let client_clone = Arc::clone(&client);
+    /// 使用指定参数连接，是否重连由 Builder 的 `auto_reconnect` 决定。
+    pub async fn connect_with_options(self, options: ConnectionOptions) -> Result<EventStream> {
+        let auto_reconnect = self.auto_reconnect;
+        self.start(options, auto_reconnect)
+    }
 
-        // 启动连接任务
-        tokio::spawn(async move {
-            connection_loop(client_clone, event_tx).await;
-        });
+    /// 只执行一次 WebSocket 会话，从不在库内自动重连。
+    ///
+    /// 该入口适合由上层 supervisor 重新获取 host/token、选择 Cookie 并实施退避。
+    pub async fn connect_once(self) -> Result<EventStream> {
+        self.start(ConnectionOptions::default(), false)
+    }
+
+    /// 使用指定参数执行一次 WebSocket 会话，从不在库内自动重连。
+    pub async fn connect_once_with_options(
+        self,
+        options: ConnectionOptions,
+    ) -> Result<EventStream> {
+        self.start(options, false)
+    }
+
+    fn start(self, options: ConnectionOptions, auto_reconnect: bool) -> Result<EventStream> {
+        options.validate()?;
+        if self.danmu_info.host_list.is_empty() {
+            return Err(Error::Config(
+                "danmaku server host list is empty".to_string(),
+            ));
+        }
+
+        let (event_tx, event_rx) = mpsc::channel(options.event_buffer_capacity);
+        let (lifecycle_tx, lifecycle_rx) = broadcast::channel(options.lifecycle_buffer_capacity);
+        let (state_tx, state_rx) = watch::channel(ConnectionState::Starting);
+        let cancellation = CancellationToken::new();
+        let dropped_raw_captures = self
+            .raw_capture
+            .as_ref()
+            .map(RawCaptureTarget::dropped_counter)
+            .unwrap_or_else(|| Arc::new(AtomicU64::new(0)));
+
+        let connection = ConnectionTask::new(
+            Arc::new(self),
+            options,
+            auto_reconnect,
+            ConnectionChannels::new(event_tx, lifecycle_tx.clone(), state_tx),
+            cancellation.clone(),
+        );
+        let task = tokio::spawn(connection.run());
 
         Ok(EventStream {
             rx: event_rx,
-            _client: client,
+            lifecycle_tx,
+            initial_lifecycle_rx: Some(lifecycle_rx),
+            state_rx,
+            cancellation,
+            task: Some(task),
+            dropped_raw_captures,
         })
     }
 }
 
-/// 连接循环
-async fn connection_loop(client: Arc<BliveDmClient>, event_tx: mpsc::Sender<Result<Event>>) {
-    let mut retry_count = 0;
-
-    loop {
-        if event_tx.is_closed() {
-            break;
-        }
-
-        let host_index = retry_count % client.danmu_info.host_list.len();
-        let host = &client.danmu_info.host_list[host_index];
-        let ws_url = format!("wss://{}:{}/sub", host.host, host.wss_port);
-
-        log::info!("Connecting to {} (attempt {})", ws_url, retry_count + 1);
-
-        match connect_and_run(&client, &ws_url, &event_tx).await {
-            Ok(()) => {
-                // 正常关闭
-                log::info!("Connection closed normally");
-                break;
-            }
-            Err(e) => {
-                log::error!("Connection error: {}", e);
-
-                if !client.auto_reconnect || event_tx.is_closed() {
-                    let _ = event_tx.send(Err(e)).await;
-                    break;
-                }
-
-                // 等待后重试
-                tokio::select! {
-                    _ = event_tx.closed() => break,
-                    _ = tokio::time::sleep(client.reconnect_interval) => {}
-                }
-                retry_count += 1;
-            }
-        }
-    }
-}
-
-/// 连接并运行
-async fn connect_and_run(
-    client: &BliveDmClient,
-    ws_url: &str,
-    event_tx: &mpsc::Sender<Result<Event>>,
-) -> Result<()> {
-    // 连接 WebSocket
-    let ws_stream = timeout(CONNECT_TIMEOUT, connect_async(ws_url))
-        .await
-        .map_err(|_| Error::ConnectionClosed)?
-        .map_err(Error::from)?
-        .0;
-
-    let (mut write, read) = ws_stream.split();
-
-    // 发送进入房间包
-    let enter_packet = Packet::enter_room(
-        client.uid,
-        &client.buvid,
-        client.room_info.room_id,
-        &client.danmu_info.token,
-    );
-    write
-        .send(Message::Binary(enter_packet.to_bytes()))
-        .await
-        .map_err(Error::from)?;
-
-    log::debug!("Sent enter room packet");
-
-    // 启动心跳任务
-    let (heartbeat_tx, heartbeat_rx) = mpsc::channel::<()>(1);
-    let heartbeat_handle = tokio::spawn(heartbeat_loop(write, heartbeat_rx));
-
-    // 消息处理循环
-    let result = message_loop(read, event_tx, client.raw_event_handler.as_deref()).await;
-
-    // 停止心跳
-    drop(heartbeat_tx);
-    let _ = heartbeat_handle.await;
-
-    result
-}
-
-/// 心跳循环
-async fn heartbeat_loop(
-    mut write: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
-    mut stop_rx: mpsc::Receiver<()>,
-) {
-    let mut heartbeat_interval = interval(HEARTBEAT_INTERVAL);
-
-    loop {
-        tokio::select! {
-            _ = heartbeat_interval.tick() => {
-                let heartbeat = Packet::heartbeat();
-                if write.send(Message::Binary(heartbeat.to_bytes())).await.is_err() {
-                    break;
-                }
-                log::debug!("Sent heartbeat");
-            }
-            _ = stop_rx.recv() => {
-                break;
-            }
-        }
-    }
-}
-
-/// 消息处理循环
-async fn message_loop(
-    mut read: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
-    event_tx: &mpsc::Sender<Result<Event>>,
-    raw_event_handler: Option<&RawEventHandler>,
-) -> Result<()> {
-    while let Some(msg_result) = read.next().await {
-        let msg = msg_result.map_err(Error::from)?;
-
-        match msg {
-            Message::Binary(data) => {
-                if let Err(e) = process_message(&data, event_tx, raw_event_handler).await {
-                    log::error!("Failed to process message: {}", e);
-                }
-            }
-            Message::Close(_) => {
-                log::info!("Received close frame");
-                return Err(Error::ConnectionClosed);
-            }
-            Message::Ping(data) => {
-                log::debug!("Received ping");
-                // Pong 由 tungstenite 自动处理
-                let _ = data;
-            }
-            _ => {}
-        }
-    }
-
-    Err(Error::ConnectionClosed)
-}
-
-/// 处理消息
-async fn process_message(
-    data: &[u8],
-    event_tx: &mpsc::Sender<Result<Event>>,
-    raw_event_handler: Option<&RawEventHandler>,
-) -> Result<()> {
-    let packet = Packet::from_bytes(data)?;
-
-    // 解压并切分数据包
-    let packets = packet.parse()?;
-
-    for pkt in packets {
-        if let Some(event) = parse_event(&pkt, raw_event_handler) {
-            log::debug!("Event: {:?}", event);
-
-            if event_tx.send(Ok(event)).await.is_err() {
-                // 接收端已关闭
-                return Err(Error::ConnectionClosed);
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// 事件流
+/// 业务事件流及其连接控制句柄。
 pub struct EventStream {
     rx: mpsc::Receiver<Result<Event>>,
-    _client: Arc<BliveDmClient>,
+    lifecycle_tx: broadcast::Sender<LifecycleEvent>,
+    initial_lifecycle_rx: Option<broadcast::Receiver<LifecycleEvent>>,
+    state_rx: watch::Receiver<ConnectionState>,
+    cancellation: CancellationToken,
+    task: Option<JoinHandle<()>>,
+    dropped_raw_captures: Arc<AtomicU64>,
 }
 
 impl EventStream {
-    /// 检查连接状态
+    /// 检查后台事件通道是否仍打开。
+    ///
+    /// 为兼容旧语义，该方法不代表已经通过入房认证。精确状态请使用 [`Self::state`]。
     pub fn is_connected(&self) -> bool {
         !self.rx.is_closed()
+    }
+
+    /// 返回当前最新连接状态。
+    pub fn state(&self) -> ConnectionState {
+        self.state_rx.borrow().clone()
+    }
+
+    /// 订阅最新连接状态。
+    pub fn subscribe_state(&self) -> watch::Receiver<ConnectionState> {
+        self.state_rx.clone()
+    }
+
+    /// 取得从连接任务启动前就已注册的生命周期接收端。
+    ///
+    /// 这可避免“订阅发生在事件之后”的窗口，但接收端仍遵循 Tokio `broadcast`
+    /// 的有界滞后语义，调用方必须处理 `RecvError::Lagged`。后续调用返回 `None`；
+    /// 如需额外订阅者，使用 [`Self::subscribe_lifecycle`]。
+    pub fn take_lifecycle_receiver(&mut self) -> Option<broadcast::Receiver<LifecycleEvent>> {
+        self.initial_lifecycle_rx.take()
+    }
+
+    /// 从调用时刻开始订阅生命周期事件。
+    pub fn subscribe_lifecycle(&self) -> broadcast::Receiver<LifecycleEvent> {
+        self.lifecycle_tx.subscribe()
+    }
+
+    /// 返回可由上层 supervisor 克隆和组合的取消令牌。
+    pub fn cancellation_token(&self) -> CancellationToken {
+        self.cancellation.clone()
+    }
+
+    /// 请求本次连接及其自动重连循环退出。
+    pub fn cancel(&self) {
+        self.cancellation.cancel();
+    }
+
+    /// 原始旁路通道因满或关闭而丢弃的数据条数。
+    pub fn dropped_raw_captures(&self) -> u64 {
+        self.dropped_raw_captures.load(Ordering::Relaxed)
     }
 }
 
@@ -348,4 +306,50 @@ impl Stream for EventStream {
     }
 }
 
-// Drop 时自动清理（通过 Arc 引用计数）
+impl Drop for EventStream {
+    fn drop(&mut self) {
+        self.cancellation.cancel();
+        if let Some(task) = self.task.take() {
+            // 连接循环没有子任务；abort 会立即释放 socket，防止调用方丢弃流后留下任务。
+            task.abort();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::DanmuHost;
+
+    #[test]
+    fn exposes_stable_room_identity_without_changing_room_info_api() {
+        let client = BliveDmClient {
+            room_info: RoomInfo {
+                room_id: 6_789,
+                short_id: 123,
+                uid: 2,
+                live_status: 1,
+                title: "test".to_string(),
+            },
+            danmu_info: DanmuServerInfo {
+                token: "token".to_string(),
+                host_list: vec![DanmuHost {
+                    host: "localhost".to_string(),
+                    port: 0,
+                    wss_port: 0,
+                    ws_port: 0,
+                }],
+            },
+            uid: 0,
+            buvid: String::new(),
+            auto_reconnect: false,
+            reconnect_interval: Duration::from_millis(10),
+            raw_event_handler: None,
+            raw_capture: None,
+        };
+
+        assert_eq!(client.canonical_room_id(), 6_789);
+        assert_eq!(client.short_room_id(), Some(123));
+        assert_eq!(client.room_info().room_id, 6_789);
+    }
+}

@@ -33,6 +33,10 @@ mod message;
 pub mod packet;
 
 pub use api::RoomInfo;
-pub use client::{BliveDmClient, BliveDmClientBuilder, EventStream, RawEventHandler};
+pub use client::{
+    BliveDmClient, BliveDmClientBuilder, CancellationToken, ConnectionOptions, ConnectionState,
+    DecodeStage, DisconnectReason, EventStream, LifecycleEvent, OnlineTrigger, RawCapture,
+    RawCaptureMode, RawEventHandler,
+};
 pub use error::{Error, Result};
 pub use message::*;

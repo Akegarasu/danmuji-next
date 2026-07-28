@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::client::RawEventHandler;
-use crate::packet::{Operation, Packet};
+use crate::error::{Error, Result};
 
 /// 所有事件类型
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,87 +53,71 @@ pub enum Event {
     Raw { cmd: String, payload: Value },
 }
 
-/// 从数据包解析事件
-pub(crate) fn parse_event(
-    packet: &Packet,
-    raw_event_handler: Option<&RawEventHandler>,
-) -> Option<Event> {
-    match packet.operation {
-        Operation::HeartbeatReply => {
-            // 心跳响应，忽略（人气值已废弃）
-            None
-        }
-        Operation::Notification => {
-            // 通知消息，body 是 JSON
-            let json_str = std::str::from_utf8(&packet.body).ok()?;
-            parse_notification(json_str, raw_event_handler)
-        }
-        Operation::EnterRoomReply => {
-            // 进入房间响应，通常忽略
-            None
-        }
-        _ => None,
-    }
-}
-
 /// 解析通知消息
-fn parse_notification(
-    json_str: &str,
+pub(crate) fn parse_notification(
+    body: &[u8],
     raw_event_handler: Option<&RawEventHandler>,
-) -> Option<Event> {
-    let value: Value = serde_json::from_str(json_str).ok()?;
+) -> Result<Event> {
+    let value: Value = serde_json::from_slice(body)?;
 
     if let Some(handler) = raw_event_handler {
-        handler(&value);
+        // 第三方观察回调不应让协议读取任务因 panic 退出。
+        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(&value))).is_err() {
+            log::error!("raw_event_handler panicked; ignoring callback failure");
+        }
     }
 
-    let cmd = value.get("cmd")?.as_str()?;
+    let cmd = value
+        .get("cmd")
+        .and_then(Value::as_str)
+        .ok_or_else(|| Error::PacketParse("notification has no string cmd".to_string()))?;
 
     // 处理带参数的 CMD（例如 "DANMU_MSG:4:0:2:2:2:0"）
     let cmd_base = cmd.split(':').next().unwrap_or(cmd);
 
     match cmd_base {
         "DANMU_MSG" => {
-            let danmaku = Danmaku::parse(&value)?;
-            Some(Event::Danmaku(danmaku))
+            let danmaku = parse_required(cmd_base, Danmaku::parse(&value))?;
+            Ok(Event::Danmaku(danmaku))
         }
         "SEND_GIFT" => {
-            let gift = Gift::parse(&value)?;
-            Some(Event::Gift(Box::new(gift)))
+            let gift = parse_required(cmd_base, Gift::parse(&value))?;
+            Ok(Event::Gift(Box::new(gift)))
         }
         "SUPER_CHAT_MESSAGE" => {
-            let superchat = SuperChat::parse(&value)?;
-            Some(Event::SuperChat(superchat))
+            let superchat = parse_required(cmd_base, SuperChat::parse(&value))?;
+            Ok(Event::SuperChat(superchat))
         }
         "GUARD_BUY" => {
-            let guard = GuardBuy::parse(&value)?;
-            Some(Event::GuardBuy(guard))
+            let guard = parse_required(cmd_base, GuardBuy::parse(&value))?;
+            Ok(Event::GuardBuy(guard))
         }
         "LIVE" => {
-            let data = LiveStartData::parse(&value)?;
-            Some(Event::LiveStart(data))
+            let data = parse_required(cmd_base, LiveStartData::parse(&value))?;
+            Ok(Event::LiveStart(data))
         }
         "PREPARING" => {
-            let data = PreparingData::parse(&value)?;
-            Some(Event::LiveStop(data))
+            let data = parse_required(cmd_base, PreparingData::parse(&value))?;
+            Ok(Event::LiveStop(data))
         }
         "ONLINE_RANK_COUNT" => {
-            let online_rank_count = OnlineRankCount::parse(&value)?;
-            Some(Event::OnlineRankCount(online_rank_count))
+            let online_rank_count = parse_required(cmd_base, OnlineRankCount::parse(&value))?;
+            Ok(Event::OnlineRankCount(online_rank_count))
         }
         "ONLINE_RANK_V2" => {
-            let online_rank_v2 = OnlineRankV2::parse(&value)?;
-            Some(Event::OnlineRankV2(online_rank_v2))
+            let online_rank_v2 = parse_required(cmd_base, OnlineRankV2::parse(&value))?;
+            Ok(Event::OnlineRankV2(online_rank_v2))
         }
         "INTERACT_WORD" => {
-            let iw = InteractWord::parse(&value)?;
-            Some(Event::InteractWord(iw))
+            let iw = parse_required(cmd_base, InteractWord::parse(&value))?;
+            Ok(Event::InteractWord(iw))
         }
         "INTERACT_WORD_V2" => {
-            let iw = InteractWord::parse_v2(&value)?;
-            Some(Event::InteractWord(iw))
+            let iw = parse_required(cmd_base, InteractWord::parse_v2(&value))?;
+            Ok(Event::InteractWord(iw))
         }
-        // 其他已知但不处理的 CMD
+        // 已知但尚未建模的 CMD 也必须保留为 Raw 事件。调用方可能依赖其中
+        // 的 UID/点赞/入场信息；静默 Ok(None) 会让全局监控产生永久盲区。
         "ENTRY_EFFECT"
         | "COMBO_SEND"
         | "WATCHED_CHANGE"
@@ -146,13 +130,20 @@ fn parse_notification(
         | "COMMON_NOTICE_DANMAKU"
         | "ROOM_REAL_TIME_MESSAGE_UPDATE"
         | "POPULARITY_RED_POCKET_START"
-        | "POPULARITY_RED_POCKET_WINNER_LIST" => None,
+        | "POPULARITY_RED_POCKET_WINNER_LIST" => Ok(Event::Raw {
+            cmd: cmd.to_string(),
+            payload: value,
+        }),
         // 未知 CMD，返回原始数据
-        _ => Some(Event::Raw {
+        _ => Ok(Event::Raw {
             cmd: cmd.to_string(),
             payload: value,
         }),
     }
+}
+
+fn parse_required<T>(cmd: &str, value: Option<T>) -> Result<T> {
+    value.ok_or_else(|| Error::PacketParse(format!("failed to parse notification {cmd}")))
 }
 
 #[cfg(test)]
@@ -161,8 +152,6 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::packet::ProtocolVersion;
-
     #[test]
     fn invokes_raw_event_handler_before_parsing() {
         let calls = Arc::new(AtomicUsize::new(0));
@@ -171,16 +160,23 @@ mod tests {
             assert_eq!(value["cmd"], "UNKNOWN_EVENT");
             handler_calls.fetch_add(1, Ordering::Relaxed);
         };
-        let packet = Packet::new(
-            ProtocolVersion::Plain,
-            Operation::Notification,
-            br#"{"cmd":"UNKNOWN_EVENT"}"#.to_vec(),
-        );
-
         assert!(matches!(
-            parse_event(&packet, Some(&handler)),
-            Some(Event::Raw { .. })
+            parse_notification(br#"{"cmd":"UNKNOWN_EVENT"}"#, Some(&handler)).unwrap(),
+            Event::Raw { .. }
         ));
         assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn preserves_known_but_unmodelled_notifications_as_raw_events() {
+        assert!(matches!(
+            parse_notification(
+                br#"{"cmd":"ENTRY_EFFECT","data":{"uid":42}}"#,
+                None
+            )
+            .unwrap(),
+            Event::Raw { cmd, payload }
+                if cmd == "ENTRY_EFFECT" && payload["data"]["uid"] == 42
+        ));
     }
 }

@@ -133,6 +133,7 @@ impl Packet {
         }
 
         let packet_length = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
+        let header_length = u16::from_be_bytes([data[4], data[5]]) as usize;
         if packet_length != data.len() {
             return Err(Error::PacketParse(format!(
                 "packet length mismatch: expected {}, got {}",
@@ -140,10 +141,16 @@ impl Packet {
                 data.len()
             )));
         }
+        if !(HEADER_LENGTH..=packet_length).contains(&header_length) {
+            return Err(Error::PacketParse(format!(
+                "invalid header length: {}",
+                header_length
+            )));
+        }
 
         let protocol_version = u16::from_be_bytes([data[6], data[7]]);
         let operation = u32::from_be_bytes([data[8], data[9], data[10], data[11]]);
-        let body = data[HEADER_LENGTH..].to_vec();
+        let body = data[header_length..].to_vec();
 
         Ok(Self {
             protocol_version: protocol_version.into(),
@@ -220,8 +227,11 @@ fn slice_packets(data: &[u8]) -> Result<Vec<Packet>> {
     let total = data.len();
 
     while cursor < total {
-        if cursor + 4 > total {
-            break;
+        if cursor + HEADER_LENGTH > total {
+            return Err(Error::PacketParse(format!(
+                "truncated inner packet header at offset {}",
+                cursor
+            )));
         }
 
         let packet_len = u32::from_be_bytes([
@@ -231,8 +241,19 @@ fn slice_packets(data: &[u8]) -> Result<Vec<Packet>> {
             data[cursor + 3],
         ]) as usize;
 
-        if packet_len == 0 || cursor + packet_len > total {
-            break;
+        if packet_len < HEADER_LENGTH {
+            return Err(Error::PacketParse(format!(
+                "invalid inner packet length {} at offset {}",
+                packet_len, cursor
+            )));
+        }
+        if cursor + packet_len > total {
+            return Err(Error::PacketParse(format!(
+                "inner packet at offset {} exceeds payload: length {}, remaining {}",
+                cursor,
+                packet_len,
+                total - cursor
+            )));
         }
 
         let packet = Packet::from_bytes(&data[cursor..cursor + packet_len])?;
@@ -271,5 +292,28 @@ mod tests {
         assert_eq!(parsed.protocol_version, ProtocolVersion::Plain);
         assert_eq!(parsed.operation, Operation::Notification);
         assert_eq!(parsed.body, b"hello");
+    }
+
+    #[test]
+    fn rejects_invalid_header_length() {
+        let mut bytes = Packet::heartbeat().to_bytes();
+        bytes[4..6].copy_from_slice(&8_u16.to_be_bytes());
+
+        assert!(matches!(
+            Packet::from_bytes(&bytes),
+            Err(Error::PacketParse(message)) if message.contains("header length")
+        ));
+    }
+
+    #[test]
+    fn rejects_truncated_inner_packet() {
+        let mut compressed_body =
+            Packet::new(ProtocolVersion::Plain, Operation::Notification, vec![1]).to_bytes();
+        compressed_body.pop();
+
+        assert!(matches!(
+            slice_packets(&compressed_body),
+            Err(Error::PacketParse(message)) if message.contains("exceeds payload")
+        ));
     }
 }
