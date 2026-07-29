@@ -106,9 +106,10 @@ fn normalize_gift(message: SendGiftV2) -> Option<Gift> {
     let gift_icon = item
         .gift_info
         .map(|info| {
-            non_empty(info.webp)
+            // `img_basic` 是静态礼物图；动画资源只作为缺失时的兼容兜底。
+            non_empty(info.img_basic)
+                .or_else(|| non_empty(info.webp))
                 .or_else(|| non_empty(info.gif))
-                .or_else(|| non_empty(info.img_basic))
                 .unwrap_or_default()
         })
         .unwrap_or_default();
@@ -499,8 +500,8 @@ mod tests {
         message.extend(field_bytes(15, &sender));
 
         let encoded = base64::engine::general_purpose::STANDARD.encode(message);
-        let gift = Gift::parse_v2(&json!({ "data": { "pb": encoded } }))
-            .expect("valid SEND_GIFT_V2");
+        let gift =
+            Gift::parse_v2(&json!({ "data": { "pb": encoded } })).expect("valid SEND_GIFT_V2");
 
         assert_eq!(gift.gift_id, 100);
         assert_eq!(gift.sender_uid, 42);
@@ -511,10 +512,12 @@ mod tests {
         assert_eq!(gift.super_batch_gift_num, Some(4));
         assert_eq!(gift.combo_resources_id, Some(10));
         assert_eq!(gift.show_batch_combo_send, Some(true));
-        assert_eq!(gift.gift_icon, "https://example.invalid/gift.webp");
+        assert_eq!(gift.gift_icon, "https://example.invalid/basic.png");
         assert_eq!(gift.revealed_total_coin(), 2_500);
         assert_eq!(
-            gift.blind_gift.as_ref().map(|blind| blind.original_gift_name.as_str()),
+            gift.blind_gift
+                .as_ref()
+                .map(|blind| blind.original_gift_name.as_str()),
             Some("心动盲盒")
         );
     }

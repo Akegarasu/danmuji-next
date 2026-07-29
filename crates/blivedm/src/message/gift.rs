@@ -159,7 +159,9 @@ impl Gift {
         let gift_icon = data
             .get("gift_info")
             .and_then(|info| {
-                ["webp", "gif", "img_basic"]
+                // `img_basic` 是静态礼物图；`webp`/`gif` 可能包含动画，
+                // 仅在静态图缺失时用于兼容旧消息。
+                ["img_basic", "webp", "gif"]
                     .into_iter()
                     .find_map(|key| non_empty_json_string(info.get(key)))
             })
@@ -235,15 +237,9 @@ impl Gift {
         });
         let combo_stay_time = data.get("combo_stay_time").and_then(Value::as_u64);
         let combo_total_coin = data.get("combo_total_coin").and_then(|v| v.as_u64());
-        let super_batch_gift_num = data
-            .get("super_batch_gift_num")
-            .and_then(Value::as_u64);
-        let combo_resources_id = data
-            .get("combo_resources_id")
-            .and_then(Value::as_u64);
-        let show_batch_combo_send = data
-            .get("show_batch_combo_send")
-            .and_then(Value::as_bool);
+        let super_batch_gift_num = data.get("super_batch_gift_num").and_then(Value::as_u64);
+        let combo_resources_id = data.get("combo_resources_id").and_then(Value::as_u64);
+        let show_batch_combo_send = data.get("show_batch_combo_send").and_then(Value::as_bool);
         let blind_gift = data.get("blind_gift").and_then(BlindGift::parse);
 
         let guard_level = data
@@ -411,6 +407,20 @@ mod tests {
     }
 
     #[test]
+    fn prefers_static_gift_icon_over_animated_resources() {
+        let mut raw = minimal_gift();
+        raw["data"]["gift_info"] = json!({
+            "img_basic": "https://example.invalid/static.png",
+            "webp": "https://example.invalid/animated.webp",
+            "gif": "https://example.invalid/animated.gif"
+        });
+
+        let gift = Gift::parse(&raw).expect("gift with presentation resources");
+
+        assert_eq!(gift.gift_icon, "https://example.invalid/static.png");
+    }
+
+    #[test]
     fn prefers_sender_uinfo_and_falls_back_to_top_level_sender() {
         let mut raw = minimal_gift();
         raw["data"]["uid"] = json!(7);
@@ -455,10 +465,47 @@ mod tests {
     }
 
     #[test]
-    fn parses_blind_gift_fixture_and_uses_revealed_value() {
-        let raw: serde_json::Value =
-            serde_json::from_str(include_str!("../../blind_gift.fixture.json"))
-                .expect("valid blind gift fixture");
+    fn parses_blind_gift_and_uses_revealed_value() {
+        let blind_gift = json!({
+            "blind_gift_config_id": 139,
+            "from": 0,
+            "gift_action": "爆出",
+            "gift_tip_price": 16_000,
+            "original_gift_id": 32_251,
+            "original_gift_name": "心动盲盒",
+            "original_gift_price": 15_000
+        });
+        let raw = json!({
+            "data": {
+                "giftId": 32_128,
+                "giftName": "爱心抱枕",
+                "gift_info": {
+                    "img_basic": "https://example.invalid/static.png",
+                    "webp": "https://example.invalid/animated.webp",
+                    "gif": "https://example.invalid/animated.gif"
+                },
+                "num": 1,
+                "price": 16_000,
+                "total_coin": 15_000,
+                "coin_type": "gold",
+                "uid": 12_566_101,
+                "uname": "秋葉aaaki",
+                "timestamp": 1_785_243_039_i64,
+                "batch_combo_id": "blind-combo",
+                "batch_combo_send": {
+                    "action": "投喂",
+                    "batch_combo_id": "blind-combo",
+                    "batch_combo_num": 1,
+                    "gift_id": 32_128,
+                    "gift_name": "爱心抱枕",
+                    "gift_num": 1,
+                    "uid": 12_566_101,
+                    "uname": "秋葉aaaki",
+                    "blind_gift": blind_gift.clone()
+                },
+                "blind_gift": blind_gift
+            }
+        });
 
         let gift = Gift::parse(&raw).expect("blind gift should parse");
         let blind_gift = gift.blind_gift.as_ref().expect("blind gift metadata");

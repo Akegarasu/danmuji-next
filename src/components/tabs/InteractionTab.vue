@@ -369,6 +369,14 @@ onUnmounted(() => {
   overflow-x: hidden;
   padding: 8px;
   min-height: 0;
+
+  // 以弹幕组件原有的密度为准统一间隔，保持互动页与弹幕页的弹幕行高一致。
+  :deep(.danmaku-item),
+  :deep(.gift-item),
+  :deep(.sc-item) {
+    margin: 0.1em 0;
+    font-size: var(--content-font-size-sm);
+  }
 }
 
 .empty-state {
