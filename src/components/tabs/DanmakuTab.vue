@@ -7,7 +7,8 @@ import DanmakuItem from '@/components/items/DanmakuItem.vue'
 import ContextMenu from '@/components/common/ContextMenu.vue'
 import SilentDialog from '@/components/common/SilentDialog.vue'
 import type { MenuItem } from '@/components/common/ContextMenu.vue'
-import type { ProcessedDanmaku } from '@/types'
+import type { ProcessedDanmaku, ProcessedMedal } from '@/types'
+import { shouldShowMedal } from '@/types'
 import { useToast } from '@/composables/useToast'
 import { useContextMenuActions } from '@/composables/useContextMenuActions'
 
@@ -27,6 +28,14 @@ type VirtualListExpose = {
 
 const virtualListRef = ref<VirtualListExpose | null>(null)
 const autoScroll = ref(true)
+
+const isMedalVisible = (medal: ProcessedMedal | undefined): boolean =>
+  shouldShowMedal(
+    medal,
+    danmakuStore.roomInfo.streamerUid,
+    settingsStore.medalShowUnlit,
+    settingsStore.medalShowOtherRoom
+  )
 
 const filteredDanmakuList = computed(() => {
   if (settingsStore.danmakuFilterUids.length === 0) {
@@ -49,6 +58,9 @@ const danmakuLayoutVersion = computed(() => [
   settingsStore.contentFontWeight,
   settingsStore.danmakuFontColor,
   settingsStore.danmakuUsernameColor,
+  settingsStore.medalShowUnlit,
+  settingsStore.medalShowOtherRoom,
+  danmakuStore.roomInfo.streamerUid,
   settingsStore.danmakuFilterUids.join(',')
 ].join('|'))
 
@@ -156,7 +168,7 @@ const getRandomTip = () => {
       <template #default="{ item: msg }">
         <DanmakuItem
           :message="msg"
-          :show-medal="settingsStore.danmakuShowMedal"
+          :show-medal="settingsStore.danmakuShowMedal && isMedalVisible(msg.user.medal)"
           :show-guard="settingsStore.danmakuShowGuard"
           :show-admin="settingsStore.danmakuShowAdmin"
           :show-time="settingsStore.danmakuShowTime"

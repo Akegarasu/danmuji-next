@@ -35,6 +35,10 @@ export const useSettingsStore = defineStore('settings', () => {
   
   const displaySettings = computed(() => settings.value.display)
   const mainWindowSettings = computed(() => settings.value.windows.main || DEFAULT_WINDOW_SETTINGS)
+
+  // 粉丝勋章通用设置
+  const medalShowUnlit = computed(() => settings.value.display.medalShowUnlit)
+  const medalShowOtherRoom = computed(() => settings.value.display.medalShowOtherRoom)
   
   // 弹幕设置
   const danmakuShowMedal = computed(() => settings.value.display.danmakuShowMedal)
@@ -272,6 +276,8 @@ export const useSettingsStore = defineStore('settings', () => {
     // 计算属性
     displaySettings,
     mainWindowSettings,
+    medalShowUnlit,
+    medalShowOtherRoom,
     danmakuShowMedal,
     danmakuShowGuard,
     danmakuShowAdmin,

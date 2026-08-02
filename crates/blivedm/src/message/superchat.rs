@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{GuardLevel, Medal};
+use super::{parse_bool_flag, GuardLevel, Medal};
 
 /// 醒目留言
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,7 +126,8 @@ impl SuperChat {
                     })
                     .and_then(|value| u32::try_from(value).ok())
                     .unwrap_or_default(),
-                anchor_uid: m.get("target_id")?.as_u64().unwrap_or(0),
+                anchor_uid: m.get("target_id").and_then(Value::as_u64).unwrap_or(0),
+                is_light: parse_bool_flag(m.get("is_lighted")).unwrap_or(true),
             })
         });
 

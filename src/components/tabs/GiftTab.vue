@@ -7,12 +7,20 @@ import GiftItem from '@/components/items/GiftItem.vue'
 import SuperChatItem from '@/components/items/SuperChatItem.vue'
 import ContextMenu from '@/components/common/ContextMenu.vue'
 import type { MenuItem } from '@/components/common/ContextMenu.vue'
-import type { ProcessedGift, ProcessedSuperChat } from '@/types'
-import { formatPrice } from '@/types'
+import type { ProcessedGift, ProcessedMedal, ProcessedSuperChat } from '@/types'
+import { formatPrice, shouldShowMedal } from '@/types'
 import { useContextMenuActions } from '@/composables/useContextMenuActions'
 
 const danmakuStore = useDanmakuStore()
 const settingsStore = useSettingsStore()
+
+const isMedalVisible = (medal: ProcessedMedal | undefined): boolean =>
+  shouldShowMedal(
+    medal,
+    danmakuStore.roomInfo.streamerUid,
+    settingsStore.medalShowUnlit,
+    settingsStore.medalShowOtherRoom
+  )
 
 // ==================== 礼物过期 ====================
 
@@ -81,6 +89,9 @@ const giftLayoutVersion = computed(() => [
   settingsStore.superChatFontColor,
   settingsStore.giftShowTime,
   settingsStore.giftShowMedal,
+  settingsStore.medalShowUnlit,
+  settingsStore.medalShowOtherRoom,
+  danmakuStore.roomInfo.streamerUid,
   settingsStore.scMergeWithGift
 ].join('|'))
 
@@ -170,7 +181,7 @@ onUnmounted(() => {
           v-else
           :gift="item"
           :show-time="settingsStore.giftShowTime"
-          :show-medal="settingsStore.giftShowMedal"
+          :show-medal="settingsStore.giftShowMedal && isMedalVisible(item.user.medal)"
           :is-special-follow="settingsStore.isSpecialFollow(item.user.uid)"
           :expired="isGiftExpired(item)"
           :font-family="settingsStore.contentFontFamily"

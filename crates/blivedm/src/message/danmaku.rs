@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{GuardLevel, Medal, User};
+use super::{parse_bool_flag, GuardLevel, Medal, User};
 
 /// 弹幕消息
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,6 +73,11 @@ impl Danmaku {
         let content = info.get(1)?.as_str()?.to_string();
         let user_info = info.get(2)?;
         let medal_info = info.get(3);
+        let nested_medal = meta
+            .get(15)
+            .and_then(|extra| extra.get("user"))
+            .and_then(|user| user.get("medal"))
+            .filter(|medal| !medal.is_null());
 
         // 解析用户信息
         let uid = user_info.get(0)?.as_u64()?;
@@ -103,7 +108,17 @@ impl Danmaku {
                 anchor_name: m.get(2)?.as_str()?.to_string(),
                 room_id: m.get(3)?.as_u64()?,
                 color: m.get(4)?.as_u64()? as u32,
-                anchor_uid: m.get(12)?.as_u64().unwrap_or(0),
+                anchor_uid: nested_medal
+                    .and_then(|medal| medal.get("ruid"))
+                    .and_then(Value::as_u64)
+                    .filter(|uid| *uid != 0)
+                    .or_else(|| m.get(12).and_then(Value::as_u64))
+                    .unwrap_or(0),
+                is_light: parse_bool_flag(
+                    nested_medal.and_then(|medal| medal.get("is_light")),
+                )
+                .or_else(|| parse_bool_flag(m.get(11)))
+                .unwrap_or(true),
             })
         });
 
@@ -154,5 +169,49 @@ impl Danmaku {
             color,
             mode,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{json, Value};
+
+    use super::Danmaku;
+
+    fn medal_message(is_light: u8, anchor_uid: u64) -> Value {
+        json!({
+            "info": [
+                [
+                    0, 1, 25, 16_777_215, 1_785_657_743_032_i64, 0, 0, "", 0, 0, 0,
+                    "", 0, {}, {},
+                    {
+                        "user": {
+                            "medal": {
+                                "is_light": is_light,
+                                "ruid": anchor_uid
+                            }
+                        }
+                    }
+                ],
+                "测试弹幕",
+                [42, "测试用户", 0],
+                [12, "测试牌", "测试主播", 23_151_928, 9_272_486, "", 0, 0, 0, 0, 0, 1, 999],
+                [], [], 0, 0
+            ]
+        })
+    }
+
+    #[test]
+    fn parses_named_medal_light_and_anchor_uid_fields() {
+        let lit = Danmaku::parse(&medal_message(1, 398_629_298)).expect("lit medal danmaku");
+        let lit_medal = lit.sender.medal.expect("lit medal");
+        assert!(lit_medal.is_light);
+        assert_eq!(lit_medal.anchor_uid, 398_629_298);
+
+        let unlit =
+            Danmaku::parse(&medal_message(0, 13_548_043)).expect("unlit medal danmaku");
+        let unlit_medal = unlit.sender.medal.expect("unlit medal");
+        assert!(!unlit_medal.is_light);
+        assert_eq!(unlit_medal.anchor_uid, 13_548_043);
     }
 }

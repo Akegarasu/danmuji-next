@@ -77,6 +77,10 @@ export interface WindowSettings {
 
 /** 显示设置 */
 export interface DisplaySettings {
+  // 粉丝勋章通用设置
+  medalShowUnlit: boolean
+  medalShowOtherRoom: boolean
+
   // 弹幕设置
   danmakuShowMedal: boolean
   danmakuShowGuard: boolean
@@ -160,6 +164,8 @@ export interface AppSettings {
 
 /** 默认显示设置 */
 export const DEFAULT_DISPLAY_SETTINGS: DisplaySettings = {
+  medalShowUnlit: false,
+  medalShowOtherRoom: false,
   danmakuShowMedal: true,
   danmakuShowGuard: true,
   danmakuShowAdmin: true,
@@ -292,6 +298,8 @@ export interface ProcessedMedal {
   name: string
   level: number
   color: string
+  is_light: boolean
+  anchor_uid: number
 }
 
 /** 高能用户排行（来自后端） */
@@ -480,6 +488,26 @@ export interface DataSnapshot {
 }
 
 // ==================== 工具函数 ====================
+
+/** 判断粉丝勋章是否符合当前直播间的展示规则 */
+export const shouldShowMedal = (
+  medal: ProcessedMedal | undefined,
+  streamerUid: number,
+  showUnlit: boolean,
+  showOtherRoom: boolean
+): boolean => {
+  if (!medal) return false
+  if (medal.is_light === false && !showUnlit) return false
+  if (
+    !showOtherRoom
+    && streamerUid > 0
+    && medal.anchor_uid > 0
+    && medal.anchor_uid !== streamerUid
+  ) {
+    return false
+  }
+  return true
+}
 
 /** 格式化价格显示（电池转人民币） */
 export const formatPrice = (battery: number): string => {

@@ -14,12 +14,27 @@ import EntryPanel from '@/components/common/EntryPanel.vue'
 import ContextMenu from '@/components/common/ContextMenu.vue'
 import SilentDialog from '@/components/common/SilentDialog.vue'
 import type { MenuItem } from '@/components/common/ContextMenu.vue'
-import type { ProcessedDanmaku, ProcessedGift, ProcessedSuperChat, InteractionItem } from '@/types'
+import type {
+  ProcessedDanmaku,
+  ProcessedGift,
+  ProcessedMedal,
+  ProcessedSuperChat,
+  InteractionItem
+} from '@/types'
+import { shouldShowMedal } from '@/types'
 import { useToast } from '@/composables/useToast'
 import { useContextMenuActions } from '@/composables/useContextMenuActions'
 
 const danmakuStore = useDanmakuStore()
 const settingsStore = useSettingsStore()
+
+const isMedalVisible = (medal: ProcessedMedal | undefined): boolean =>
+  shouldShowMedal(
+    medal,
+    danmakuStore.roomInfo.streamerUid,
+    settingsStore.medalShowUnlit,
+    settingsStore.medalShowOtherRoom
+  )
 
 // ==================== Composables ====================
 
@@ -113,6 +128,9 @@ const interactionLayoutVersion = computed(() => [
   settingsStore.superChatFontColor,
   settingsStore.giftShowTime,
   settingsStore.giftShowMedal,
+  settingsStore.medalShowUnlit,
+  settingsStore.medalShowOtherRoom,
+  danmakuStore.roomInfo.streamerUid,
   settingsStore.danmakuFilterUids.join(',')
 ].join('|'))
 
@@ -265,7 +283,7 @@ onUnmounted(() => {
           <DanmakuItem
             v-if="item.kind === 'danmaku'"
             :message="item.data"
-            :show-medal="settingsStore.danmakuShowMedal"
+            :show-medal="settingsStore.danmakuShowMedal && isMedalVisible(item.data.user.medal)"
             :show-guard="settingsStore.danmakuShowGuard"
             :show-admin="settingsStore.danmakuShowAdmin"
             :show-time="settingsStore.danmakuShowTime"
@@ -282,7 +300,7 @@ onUnmounted(() => {
             v-else-if="item.kind === 'gift'"
             :gift="item.data"
             :show-time="settingsStore.giftShowTime"
-            :show-medal="settingsStore.giftShowMedal"
+            :show-medal="settingsStore.giftShowMedal && isMedalVisible(item.data.user.medal)"
             :is-special-follow="settingsStore.isSpecialFollow(item.data.user.uid)"
             :expired="isGiftExpired(item.data)"
             :font-family="settingsStore.contentFontFamily"

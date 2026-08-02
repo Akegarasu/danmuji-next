@@ -15,7 +15,8 @@ import {
   disconnectRoom,
   getConnectionStatus,
   getCurrentRoomInfo,
-  type ConnectionStatus
+  type ConnectionStatus,
+  type RoomInfoResponse
 } from '@/services/blive-client'
 import { lookupArchiveUserNames } from '@/services/archive'
 import { checkForUpdate, getAppVersion, isPortable, type UpdateInfo } from '@/services/updater'
@@ -98,6 +99,24 @@ const connectBtnText = computed(() => {
 // 状态事件监听器
 let statusUnlisten: UnlistenFn | null = null
 
+const applyRoomInfo = (roomInfo: RoomInfoResponse) => {
+  danmakuStore.updateRoomInfo({
+    roomId: roomInfo.room_id.toString(),
+    title: roomInfo.title,
+    liveStatus: roomInfo.live_status,
+    streamerUid: roomInfo.uid
+  })
+}
+
+const syncCurrentRoomInfo = async () => {
+  try {
+    const roomInfo = await getCurrentRoomInfo()
+    if (roomInfo) applyRoomInfo(roomInfo)
+  } catch (e) {
+    logger.warn('Failed to sync room info:', e)
+  }
+}
+
 // 初始化连接状态（从后端获取）
 const initConnectionStatus = async () => {
   try {
@@ -109,13 +128,7 @@ const initConnectionStatus = async () => {
       danmakuStore.setConnected(true)
 
       // 获取房间信息
-      const roomInfo = await getCurrentRoomInfo()
-      if (roomInfo) {
-        danmakuStore.updateRoomInfo({
-          roomId: roomInfo.room_id.toString(),
-          title: roomInfo.title
-        })
-      }
+      await syncCurrentRoomInfo()
     } else if (status === 'disconnected') {
       danmakuStore.setConnected(false)
     }
@@ -131,6 +144,7 @@ const initStatusListener = async () => {
 
     if (event.payload === 'connected') {
       danmakuStore.setConnected(true)
+      void syncCurrentRoomInfo()
     } else if (event.payload === 'disconnected') {
       danmakuStore.setConnected(false)
     } else if (typeof event.payload === 'object' && 'error' in event.payload) {
@@ -173,10 +187,7 @@ const toggleConnection = async () => {
         danmakuStore.setConnected(true)
 
         if (result.room_info) {
-          danmakuStore.updateRoomInfo({
-            roomId: result.room_info.room_id.toString(),
-            title: result.room_info.title
-          })
+          applyRoomInfo(result.room_info)
         }
       } else {
         connectionStatus.value = { error: { message: result.message } }
@@ -400,6 +411,16 @@ const autoHideUi = computed({
 const danmakuShowMedal = computed({
   get: () => settings.value.display.danmakuShowMedal,
   set: (v) => settingsStore.updateDisplaySettings({ danmakuShowMedal: v })
+})
+
+const medalShowUnlit = computed({
+  get: () => settings.value.display.medalShowUnlit,
+  set: (v) => settingsStore.updateDisplaySettings({ medalShowUnlit: v })
+})
+
+const medalShowOtherRoom = computed({
+  get: () => settings.value.display.medalShowOtherRoom,
+  set: (v) => settingsStore.updateDisplaySettings({ medalShowOtherRoom: v })
 })
 
 const danmakuShowGuard = computed({
@@ -1085,6 +1106,16 @@ const openProjectUrl = async () => {
           <div class="setting-group toggle">
             <label class="setting-label">显示粉丝勋章</label>
             <input v-model="danmakuShowMedal" type="checkbox" class="toggle-checkbox" />
+          </div>
+
+          <div class="setting-group toggle">
+            <label class="setting-label">显示已熄灭的粉丝勋章</label>
+            <input v-model="medalShowUnlit" type="checkbox" class="toggle-checkbox" />
+          </div>
+
+          <div class="setting-group toggle">
+            <label class="setting-label">显示其他直播间的粉丝勋章</label>
+            <input v-model="medalShowOtherRoom" type="checkbox" class="toggle-checkbox" />
           </div>
 
           <div class="setting-group toggle">

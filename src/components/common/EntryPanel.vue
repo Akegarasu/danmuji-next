@@ -2,8 +2,8 @@
 import { ref, computed, onUnmounted, watch } from 'vue'
 import { useDanmakuStore } from '@/stores/danmaku'
 import { useSettingsStore } from '@/stores/settings'
-import { formatEventTime, getMedalGradient } from '@/types'
-import type { ProcessedInteractWord } from '@/types'
+import { formatEventTime, getMedalGradient, shouldShowMedal } from '@/types'
+import type { ProcessedInteractWord, ProcessedMedal } from '@/types'
 import ContextMenu from '@/components/common/ContextMenu.vue'
 import SilentDialog from '@/components/common/SilentDialog.vue'
 import type { MenuItem } from '@/components/common/ContextMenu.vue'
@@ -15,6 +15,14 @@ const danmakuStore = useDanmakuStore()
 const settingsStore = useSettingsStore()
 const { showToast, toastMessage, toastType, showToastMessage } = useToast()
 const { openUserPage, copyUsername, toggleSpecialFollow } = useContextMenuActions(showToastMessage)
+
+const isMedalVisible = (medal: ProcessedMedal | undefined): boolean =>
+  shouldShowMedal(
+    medal,
+    danmakuStore.roomInfo.streamerUid,
+    settingsStore.medalShowUnlit,
+    settingsStore.medalShowOtherRoom
+  )
 
 // ==================== 面板高度与拖拽 ====================
 
@@ -215,7 +223,7 @@ onUnmounted(() => {
         </span>
 
         <span
-          v-if="settingsStore.entryShowMedal && entry.user.medal"
+          v-if="settingsStore.entryShowMedal && entry.user.medal && isMedalVisible(entry.user.medal)"
           class="medal-badge"
           :style="{ backgroundImage: getMedalGradient(entry.user.medal.level) }"
         >

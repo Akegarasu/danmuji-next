@@ -68,7 +68,8 @@ export const useDanmakuStore = defineStore('danmaku', () => {
   const roomInfo = ref({
     roomId: '',
     title: '',
-    liveStatus: 0
+    liveStatus: 0,
+    streamerUid: 0
   })
 
   // ==================== 数据设置方法（用于快照同步）====================

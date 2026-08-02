@@ -192,6 +192,14 @@ pub struct ProcessedMedal {
     pub name: String,
     pub level: u32,
     pub color: String,
+    #[serde(default = "default_medal_light")]
+    pub is_light: bool,
+    #[serde(default)]
+    pub anchor_uid: u64,
+}
+
+fn default_medal_light() -> bool {
+    true
 }
 
 /// 高能用户排行
@@ -375,6 +383,8 @@ pub fn convert_medal(medal: &Medal) -> ProcessedMedal {
         name: medal.name.clone(),
         level: medal.level,
         color: format!("#{:06x}", medal.color),
+        is_light: medal.is_light,
+        anchor_uid: medal.anchor_uid,
     }
 }
 

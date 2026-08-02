@@ -4,7 +4,7 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{GuardLevel, Medal, User};
+use super::{parse_bool_flag, GuardLevel, Medal, User};
 
 /// 进入直播间消息
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,8 +55,9 @@ impl InteractWord {
                 name: fm.get("medal_name")?.as_str()?.to_string(),
                 color: fm.get("medal_color")?.as_u64()? as u32,
                 room_id: fm.get("anchor_roomid")?.as_u64()?,
-                anchor_uid: fm.get("target_id")?.as_u64().unwrap_or(0),
+                anchor_uid: fm.get("target_id").and_then(Value::as_u64).unwrap_or(0),
                 anchor_name: String::new(),
+                is_light: parse_bool_flag(fm.get("is_lighted")).unwrap_or(true),
             })
         });
 
@@ -125,6 +126,7 @@ impl InteractWord {
                 },
                 anchor_uid: m.ruid,
                 anchor_name: String::new(),
+                is_light: m.is_lighted.unwrap_or(true),
             })
             .or_else(|| {
                 user_medal.filter(|m| m.level > 0).map(|m| Medal {
@@ -134,6 +136,7 @@ impl InteractWord {
                     room_id: msg.room_id as u64,
                     anchor_uid: m.ruid,
                     anchor_name: String::new(),
+                    is_light: true,
                 })
             });
 
@@ -174,7 +177,7 @@ struct TopMedal {
     ruid: u64,
     level: u32,
     name: String,
-    is_lighted: u32,
+    is_lighted: Option<bool>,
     guard_level: u32,
     room_id: u32,
 }
@@ -329,7 +332,7 @@ fn parse_top_medal(buf: &[u8]) -> PbResult<TopMedal> {
             (1, 0) => out.ruid = p.varint()?,
             (2, 0) => out.level = p.varint()? as u32,
             (3, 2) => out.name = p.string()?,
-            (8, 0) => out.is_lighted = p.varint()? as u32,
+            (8, 0) => out.is_lighted = Some(p.varint()? != 0),
             (9, 0) => out.guard_level = p.varint()? as u32,
             (12, 0) => out.room_id = p.varint()? as u32,
             _ => p.skip(wire)?,

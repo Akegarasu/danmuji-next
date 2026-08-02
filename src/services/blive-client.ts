@@ -88,6 +88,27 @@ export async function getCurrentRoomInfo(): Promise<RoomInfoResponse | null> {
   return await invoke<RoomInfoResponse | null>('get_current_room_info')
 }
 
+function applyRoomInfo(
+  store: ReturnType<typeof useDanmakuStore>,
+  roomInfo: RoomInfoResponse
+): void {
+  store.updateRoomInfo({
+    roomId: roomInfo.room_id.toString(),
+    title: roomInfo.title,
+    liveStatus: roomInfo.live_status,
+    streamerUid: roomInfo.uid
+  })
+}
+
+async function syncCurrentRoomInfo(store: ReturnType<typeof useDanmakuStore>): Promise<void> {
+  try {
+    const roomInfo = await getCurrentRoomInfo()
+    if (roomInfo) applyRoomInfo(store, roomInfo)
+  } catch (e) {
+    logger.warn('Failed to sync room info:', e)
+  }
+}
+
 // ==================== 事件订阅 API ====================
 
 /** 订阅事件 */
@@ -189,6 +210,7 @@ export async function initBliveClient(eventTypes?: EventType[]): Promise<void> {
     const status = await getConnectionStatus()
     if (status === 'connected' || status === 'reconnecting') {
       danmakuStore.setConnected(true)
+      await syncCurrentRoomInfo(danmakuStore)
     } else if (status === 'disconnected' || typeof status === 'object') {
       danmakuStore.setConnected(false)
     }
@@ -201,6 +223,7 @@ export async function initBliveClient(eventTypes?: EventType[]): Promise<void> {
   statusUnlisten = await listen<ConnectionStatus>('blive-status', (event) => {
     if (event.payload === 'connected') {
       danmakuStore.setConnected(true)
+      void syncCurrentRoomInfo(danmakuStore)
     } else if (event.payload === 'disconnected') {
       danmakuStore.setConnected(false)
     } else if (typeof event.payload === 'object' && 'error' in event.payload) {
@@ -397,11 +420,7 @@ export async function autoConnect(): Promise<void> {
 
   if (result.success && result.room_info) {
     const danmakuStore = useDanmakuStore()
-    danmakuStore.updateRoomInfo({
-      roomId: result.room_info.room_id.toString(),
-      title: result.room_info.title,
-      liveStatus: result.room_info.live_status
-    })
+    applyRoomInfo(danmakuStore, result.room_info)
   } else {
     logger.error('Auto connect failed:', result.message)
   }

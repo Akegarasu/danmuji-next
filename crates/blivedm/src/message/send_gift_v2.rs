@@ -66,6 +66,7 @@ struct MedalInfo {
     ruid: u64,
     level: u32,
     name: String,
+    is_lighted: Option<bool>,
 }
 
 #[derive(Debug, Default)]
@@ -133,6 +134,7 @@ fn normalize_gift(message: SendGiftV2) -> Option<Gift> {
             room_id: 0,
             anchor_uid: medal.ruid,
             anchor_name: String::new(),
+            is_light: medal.is_lighted.unwrap_or(true),
         })
     });
     let guard_level = i64::try_from(message.guard_level)
@@ -364,6 +366,7 @@ fn parse_medal_info(buf: &[u8]) -> PbResult<MedalInfo> {
             (1, 0) => out.ruid = pb.varint()?,
             (5, 0) => out.level = pb.u32()?,
             (6, 2) => out.name = pb.string()?,
+            (11, 0) => out.is_lighted = Some(pb.varint()? != 0),
             (_, wire) => pb.skip(wire)?,
         }
     }

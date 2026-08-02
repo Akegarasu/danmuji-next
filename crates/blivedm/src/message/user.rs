@@ -1,6 +1,7 @@
 //! 用户相关类型
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// 用户信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,9 +36,28 @@ pub struct Medal {
     /// 主播房间号
     pub room_id: u64,
     /// 主播 UID
+    #[serde(default)]
     pub anchor_uid: u64,
     /// 主播名称
     pub anchor_name: String,
+    /// 粉丝勋章是否点亮
+    #[serde(default = "default_medal_light")]
+    pub is_light: bool,
+}
+
+fn default_medal_light() -> bool {
+    true
+}
+
+pub(crate) fn parse_bool_flag(value: Option<&Value>) -> Option<bool> {
+    match value? {
+        Value::Bool(value) => Some(*value),
+        Value::Number(value) => value
+            .as_u64()
+            .map(|value| value != 0)
+            .or_else(|| value.as_i64().map(|value| value != 0)),
+        _ => None,
+    }
 }
 
 /// 舰队等级
