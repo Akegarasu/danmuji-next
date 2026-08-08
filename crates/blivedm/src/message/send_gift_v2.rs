@@ -121,9 +121,11 @@ fn normalize_gift(message: SendGiftV2) -> Option<Gift> {
             || !blind_gift.original_gift_name.is_empty()
     });
     if let Some(blind_gift) = blind_gift.as_mut() {
-        if blind_gift.gift_tip_price == 0 {
-            blind_gift.gift_tip_price = item.gift_tip_price;
-        }
+        blind_gift.gift_tip_price = if item.gift_tip_price > 0 {
+            item.gift_tip_price
+        } else {
+            blind_gift.original_gift_price
+        };
     }
 
     let medal = message.medal_info.and_then(|medal| {
@@ -391,8 +393,7 @@ fn parse_gift_info(buf: &[u8]) -> PbResult<GiftInfo> {
     Ok(out)
 }
 
-// `BlindGift` 在当前 bundle 中与 JSON 字段顺序一致。字段缺失时保留
-// protobuf 默认值，`gift_item.gift_tip_price` 会补齐爆出价值。
+// `gift_item.gift_tip_price` 会在归一化阶段提供爆出礼物单价。
 fn parse_blind_gift(buf: &[u8]) -> PbResult<BlindGift> {
     let mut pb = Pb::new(buf);
     let mut out = BlindGift {
@@ -409,12 +410,12 @@ fn parse_blind_gift(buf: &[u8]) -> PbResult<BlindGift> {
         let tag = pb.u32()?;
         match (tag >> 3, tag & 7) {
             (1, 0) => out.blind_gift_config_id = pb.varint()?,
-            (2, 0) => out.from = pb.varint()?,
-            (3, 2) => out.gift_action = pb.string()?,
-            (4, 0) => out.gift_tip_price = pb.varint()?,
-            (5, 0) => out.original_gift_id = pb.varint()?,
-            (6, 2) => out.original_gift_name = pb.string()?,
-            (7, 0) => out.original_gift_price = pb.varint()?,
+            (2, 0) => out.original_gift_id = pb.varint()?,
+            (3, 2) => out.original_gift_name = pb.string()?,
+            (4, 0) => out.from = pb.varint()?,
+            (5, 2) => out.gift_action = pb.string()?,
+            (6, 0) => out.original_gift_price = pb.varint()?,
+            (7, 0) => out.gift_tip_price = pb.varint()?,
             (_, wire) => pb.skip(wire)?,
         }
     }
@@ -488,12 +489,12 @@ mod tests {
         item.extend(field_varint(36, 2_500));
 
         let mut blind = field_varint(1, 139);
-        blind.extend(field_varint(2, 0));
-        blind.extend(field_bytes(3, "爆出".as_bytes()));
-        blind.extend(field_varint(4, 2_500));
-        blind.extend(field_varint(5, 200));
-        blind.extend(field_bytes(6, "心动盲盒".as_bytes()));
-        blind.extend(field_varint(7, 2_000));
+        blind.extend(field_varint(2, 200));
+        blind.extend(field_bytes(3, "心动盲盒".as_bytes()));
+        blind.extend(field_varint(4, 3));
+        blind.extend(field_bytes(5, "爆出".as_bytes()));
+        blind.extend(field_varint(6, 2_000));
+        blind.extend(field_varint(7, 9_999));
 
         let mut message = field_varint(1, 7);
         message.extend(field_bytes(2, "顶层用户".as_bytes()));
@@ -505,8 +506,10 @@ mod tests {
         let encoded = base64::engine::general_purpose::STANDARD.encode(message);
         let gift =
             Gift::parse_v2(&json!({ "data": { "pb": encoded } })).expect("valid SEND_GIFT_V2");
+        let blind = gift.blind_gift.as_ref().expect("blind gift metadata");
 
         assert_eq!(gift.gift_id, 100);
+        assert_eq!(gift.num, 2);
         assert_eq!(gift.sender_uid, 42);
         assert_eq!(gift.sender_name, "嵌套用户");
         assert_eq!(gift.transaction_id.as_deref(), Some("txn-v2"));
@@ -516,12 +519,13 @@ mod tests {
         assert_eq!(gift.combo_resources_id, Some(10));
         assert_eq!(gift.show_batch_combo_send, Some(true));
         assert_eq!(gift.gift_icon, "https://example.invalid/basic.png");
-        assert_eq!(gift.revealed_total_coin(), 2_500);
-        assert_eq!(
-            gift.blind_gift
-                .as_ref()
-                .map(|blind| blind.original_gift_name.as_str()),
-            Some("心动盲盒")
-        );
+        assert_eq!(gift.revealed_total_coin(), 5_000);
+        assert_eq!(blind.blind_gift_config_id, 139);
+        assert_eq!(blind.original_gift_id, 200);
+        assert_eq!(blind.original_gift_name, "心动盲盒");
+        assert_eq!(blind.from, 3);
+        assert_eq!(blind.gift_action, "爆出");
+        assert_eq!(blind.original_gift_price, 2_000);
+        assert_eq!(blind.gift_tip_price, 2_500);
     }
 }

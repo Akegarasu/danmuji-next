@@ -245,7 +245,6 @@ impl LiveData {
 
     /// 处理礼物
     pub fn process_gift(&mut self, gift: Gift) {
-        let has_transaction_id = gift.transaction_id.is_some();
         if let Some(transaction_id) = gift.transaction_id.as_deref() {
             if !self.remember_gift_transaction(transaction_id) {
                 return;
@@ -275,12 +274,6 @@ impl LiveData {
             0
         };
         let revenue_value = if is_paid { gift.total_coin / 100 } else { 0 };
-        let combo_display_value = if is_paid {
-            gift.combo_display_total_coin().map(|value| value / 100)
-        } else {
-            None
-        };
-        let combo_total_num = gift.combo_total_num();
         let processed_combo = convert_gift_combo(&gift);
         let processed_blind_gift = gift
             .blind_gift
@@ -304,73 +297,28 @@ impl LiveData {
         let (processed, action) = if let Some(index) = existing_index {
             let existing = self
                 .gift_list
-                .get(index)
-                .expect("validated gift merge index");
-
-            // 没有 tid 时，用服务端累计进度挡住重复/过期快照。没有累计字段
-            // 则宁可保留事件，也不猜测两个同秒同金额的礼物是重复包。
-            if !has_transaction_id
-                && combo_has_progress_marker(&gift)
-                && !combo_snapshot_progresses(existing, &gift)
-            {
-                return;
-            }
-
-            let existing = self
-                .gift_list
                 .get_mut(index)
                 .expect("validated gift merge index");
-            existing.num = match combo_total_num {
-                Some(total) => existing.num.max(saturating_u32(total)),
-                None => existing.num.saturating_add(gift.num),
-            };
-            existing.total_value = match combo_display_value {
-                Some(total) => existing.total_value.max(total),
-                None => existing.total_value.saturating_add(display_value),
-            };
+            existing.num = existing.num.saturating_add(gift.num);
+            existing.total_value = existing.total_value.saturating_add(display_value);
             existing.revenue_value = existing.revenue_value.saturating_add(revenue_value);
-            existing.timestamp = existing.timestamp.max(gift.timestamp);
-
-            if existing.gift_name.is_empty() && !gift.gift_name.is_empty() {
-                existing.gift_name = gift.gift_name.clone();
-            }
-            if existing.gift_icon.is_empty() && !gift.gift_icon.is_empty() {
-                existing.gift_icon = gift.gift_icon.clone();
-            }
-            if existing.user.name.is_empty() && !gift.sender_name.is_empty() {
-                existing.user.name = gift.sender_name.clone();
-            }
-            if existing.user.face.is_none() {
-                existing.user.face = gift.sender_face.clone();
-            }
-            if existing.user.medal.is_none() {
-                existing.user.medal = gift.medal.as_ref().map(convert_medal);
-            }
-            if existing.user.guard_level == 0 {
-                existing.user.guard_level = guard_level_to_u8(&gift.guard_level);
-            }
-            merge_gift_combo(&mut existing.combo, processed_combo);
-
-            if existing.blind_gift.is_none() {
-                existing.blind_gift = processed_blind_gift;
-            }
+            existing.timestamp = gift.timestamp;
+            existing.combo = processed_combo;
+            existing.blind_gift = processed_blind_gift;
             if let Some(blind_gift) = existing.blind_gift.as_mut() {
                 blind_gift.total_value = existing.revenue_value;
             }
 
             (existing.clone(), UpsertAction::Update)
         } else {
-            let initial_num = combo_total_num
-                .map(saturating_u32)
-                .unwrap_or(gift.num);
             let processed = ProcessedGift {
                 id,
                 merge_key: merge_key.clone(),
                 gift_id: gift.gift_id,
                 gift_name: gift.gift_name,
                 gift_icon: gift.gift_icon,
-                num: initial_num,
-                total_value: combo_display_value.unwrap_or(display_value),
+                num: gift.num,
+                total_value: display_value,
                 revenue_value,
                 is_paid,
                 combo: processed_combo,
@@ -768,69 +716,121 @@ fn convert_gift_combo(gift: &Gift) -> Option<ProcessedGiftCombo> {
     })
 }
 
-fn combo_has_progress_marker(gift: &Gift) -> bool {
-    gift.combo_total_coin.is_some_and(|value| value > 0)
-        || gift.combo_total_num().is_some_and(|value| value > 0)
-}
+#[cfg(test)]
+mod tests {
+    use super::LiveData;
+    use blivedm::{BatchComboSend, BlindGift, CoinType, Gift, GuardLevel};
 
-fn combo_snapshot_progresses(existing: &ProcessedGift, gift: &Gift) -> bool {
-    let existing_combo = existing.combo.as_ref();
-    let coin_progressed = gift
-        .combo_total_coin
-        .filter(|value| *value > 0)
-        .is_some_and(|incoming| {
-            existing_combo
-                .and_then(|combo| combo.combo_total_coin)
-                .map_or(true, |current| incoming > current)
-        });
-    let num_progressed = gift
-        .combo_total_num()
-        .filter(|value| *value > 0)
-        .is_some_and(|incoming| incoming > u64::from(existing.num));
-
-    coin_progressed || num_progressed
-}
-
-fn merge_gift_combo(
-    existing: &mut Option<ProcessedGiftCombo>,
-    incoming: Option<ProcessedGiftCombo>,
-) {
-    let Some(incoming) = incoming else {
-        return;
-    };
-    let Some(existing) = existing.as_mut() else {
-        *existing = Some(incoming);
-        return;
-    };
-
-    existing.combo_total_coin = max_optional(existing.combo_total_coin, incoming.combo_total_coin);
-    existing.super_batch_gift_num = max_optional(
-        existing.super_batch_gift_num,
-        incoming.super_batch_gift_num,
-    );
-    if let Some(value) = incoming.combo_resources_id {
-        if value != 0 || existing.combo_resources_id.is_none() {
-            existing.combo_resources_id = Some(value);
+    fn blind_combo_gift(
+        gift_id: u64,
+        gift_name: &str,
+        unit_coin: u64,
+        paid_coin: u64,
+        combo_total_coin: u64,
+        sequence: u32,
+    ) -> Gift {
+        Gift {
+            gift_id,
+            gift_name: gift_name.to_owned(),
+            gift_icon: String::new(),
+            num: 1,
+            price: unit_coin,
+            total_coin: paid_coin,
+            coin_type: CoinType::Gold,
+            sender_uid: 42,
+            sender_name: "tester".to_owned(),
+            sender_face: None,
+            action: "爆出".to_owned(),
+            timestamp: 1_700_000_000 + i64::from(sequence),
+            transaction_id: Some(format!("txn-{gift_id}-{sequence}")),
+            batch_combo_id: Some("blind-combo".to_owned()),
+            batch_combo_send: Some(BatchComboSend {
+                action: "投喂".to_owned(),
+                batch_combo_id: "blind-combo".to_owned(),
+                batch_combo_num: 1,
+                gift_id,
+                gift_name: gift_name.to_owned(),
+                gift_num: 1,
+                uid: 42,
+                uname: "tester".to_owned(),
+                blind_gift: None,
+            }),
+            combo_send: None,
+            combo_stay_time: Some(5),
+            combo_total_coin: Some(combo_total_coin),
+            super_batch_gift_num: Some(10),
+            combo_resources_id: Some(1),
+            show_batch_combo_send: Some(true),
+            blind_gift: Some(BlindGift {
+                blind_gift_config_id: 139,
+                from: 0,
+                gift_action: "爆出".to_owned(),
+                gift_tip_price: unit_coin,
+                original_gift_id: 32_251,
+                original_gift_name: "心动盲盒".to_owned(),
+                original_gift_price: 15_000,
+            }),
+            medal: None,
+            guard_level: GuardLevel::None,
         }
     }
-    if let Some(value) = incoming.combo_stay_time {
-        if value != 0 || existing.combo_stay_time.is_none() {
-            existing.combo_stay_time = Some(value);
+
+    #[test]
+    fn aggregates_blind_combo_by_revealed_item_quantity() {
+        let mut data = LiveData::default();
+
+        for sequence in 1..=7 {
+            data.process_gift(blind_combo_gift(
+                32_000,
+                "棉花糖",
+                9_000,
+                15_000,
+                9_000 * u64::from(sequence),
+                sequence,
+            ));
         }
-    }
-    if incoming.show_batch_combo_send.is_some() {
-        existing.show_batch_combo_send = incoming.show_batch_combo_send;
-    }
-}
+        data.process_gift(blind_combo_gift(
+            32_001,
+            "绮彩权杖",
+            40_000,
+            15_000,
+            40_000,
+            8,
+        ));
+        for sequence in 9..=10 {
+            data.process_gift(blind_combo_gift(
+                32_002,
+                "爱心抱枕",
+                16_000,
+                15_000,
+                16_000 * u64::from(sequence - 8),
+                sequence,
+            ));
+        }
 
-fn max_optional(left: Option<u64>, right: Option<u64>) -> Option<u64> {
-    match (left, right) {
-        (Some(left), Some(right)) => Some(left.max(right)),
-        (Some(value), None) | (None, Some(value)) => Some(value),
-        (None, None) => None,
-    }
-}
+        assert_eq!(data.gift_list.len(), 3);
+        let gifts: Vec<_> = data.gift_list.iter().collect();
+        assert_eq!(gifts[0].gift_name, "棉花糖");
+        assert_eq!(gifts[0].num, 7);
+        assert_eq!(gifts[0].total_value, 630);
+        assert_eq!(gifts[0].revenue_value, 1_050);
+        assert_eq!(gifts[0].blind_gift.as_ref().unwrap().total_value, 1_050);
 
-fn saturating_u32(value: u64) -> u32 {
-    u32::try_from(value).unwrap_or(u32::MAX)
+        assert_eq!(gifts[1].gift_name, "绮彩权杖");
+        assert_eq!(gifts[1].num, 1);
+        assert_eq!(gifts[1].total_value, 400);
+        assert_eq!(gifts[1].revenue_value, 150);
+
+        assert_eq!(gifts[2].gift_name, "爱心抱枕");
+        assert_eq!(gifts[2].num, 2);
+        assert_eq!(gifts[2].total_value, 320);
+        assert_eq!(gifts[2].revenue_value, 300);
+
+        assert_eq!(
+            gifts[0].combo.as_ref().unwrap().super_batch_gift_num,
+            Some(10)
+        );
+        assert_eq!(data.stats.gift_revenue, 1_500);
+        assert_eq!(data.stats.total_revenue, 1_500);
+    }
 }

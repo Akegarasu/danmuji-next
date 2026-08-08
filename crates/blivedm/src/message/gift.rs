@@ -111,7 +111,7 @@ pub struct BlindGift {
     pub from: u64,
     /// 礼物动作（例如“爆出”）
     pub gift_action: String,
-    /// 爆出礼物总价值（金瓜子）
+    /// 爆出礼物单价（金瓜子）
     pub gift_tip_price: u64,
     /// 原盲盒礼物 ID
     pub original_gift_id: u64,
@@ -310,11 +310,15 @@ impl Gift {
     /// 礼物用于展示的总价值（金瓜子）。
     ///
     /// 盲盒消息的 `total_coin` 是盲盒消费金额，爆出礼物价值由
-    /// `blind_gift.gift_tip_price` 给出。
+    /// `blind_gift.gift_tip_price * num` 给出。
     pub fn revealed_total_coin(&self) -> u64 {
         self.blind_gift
             .as_ref()
-            .map_or(self.total_coin, |blind_gift| blind_gift.gift_tip_price)
+            .map_or(self.total_coin, |blind_gift| {
+                blind_gift
+                    .gift_tip_price
+                    .saturating_mul(u64::from(self.num))
+            })
     }
 
     /// 盲盒实际消费金额（人民币，分）
@@ -327,27 +331,6 @@ impl Gift {
         self.batch_combo_id.is_some()
     }
 
-    /// 服务端提供的连击累计数量。
-    pub fn combo_total_num(&self) -> Option<u64> {
-        self.batch_combo_send
-            .as_ref()
-            .map(|combo| u64::from(combo.batch_combo_num))
-            .filter(|num| *num > 0)
-            .or_else(|| self.super_batch_gift_num.filter(|num| *num > 0))
-            .or_else(|| {
-                self.combo_send
-                    .as_ref()
-                    .map(|combo| u64::from(combo.combo_num))
-                    .filter(|num| *num > 0)
-            })
-    }
-
-    /// 用于 combo 展示的累计价值（金瓜子）。
-    pub fn combo_display_total_coin(&self) -> Option<u64> {
-        self.is_combo()
-            .then(|| self.combo_total_coin.filter(|value| *value > 0))
-            .flatten()
-    }
 }
 
 fn non_empty_json_string(value: Option<&Value>) -> Option<String> {
@@ -485,7 +468,7 @@ mod tests {
                     "webp": "https://example.invalid/animated.webp",
                     "gif": "https://example.invalid/animated.gif"
                 },
-                "num": 1,
+                "num": 7,
                 "price": 16_000,
                 "total_coin": 15_000,
                 "coin_type": "gold",
@@ -513,6 +496,13 @@ mod tests {
 
         assert_eq!(gift.gift_id, 32128);
         assert_eq!(gift.gift_name, "爱心抱枕");
+        assert_eq!(gift.num, 7);
+        assert_eq!(
+            gift.batch_combo_send
+                .as_ref()
+                .map(|combo| combo.batch_combo_num),
+            Some(1)
+        );
         assert_eq!(gift.total_coin, 15_000);
         assert_eq!(blind_gift.blind_gift_config_id, 139);
         assert_eq!(blind_gift.gift_action, "爆出");
@@ -520,8 +510,8 @@ mod tests {
         assert_eq!(blind_gift.original_gift_id, 32251);
         assert_eq!(blind_gift.original_gift_name, "心动盲盒");
         assert_eq!(blind_gift.original_gift_price, 15_000);
-        assert_eq!(gift.revealed_total_coin(), 16_000);
-        assert_eq!(gift.value_cny_fen(), 1_600);
+        assert_eq!(gift.revealed_total_coin(), 112_000);
+        assert_eq!(gift.value_cny_fen(), 11_200);
         assert_eq!(gift.blind_gift_cost_cny_fen(), Some(1_500));
         assert!(gift
             .batch_combo_send

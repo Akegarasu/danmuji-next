@@ -26,6 +26,7 @@ mod video_info;
 mod video_request;
 mod voting;
 mod window_state;
+mod window_topmost;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -51,6 +52,22 @@ pub fn is_dev_mode() -> bool {
 
 fn should_reapply_always_on_top(label: &str) -> bool {
     matches!(label, "main" | "settings") || label.starts_with("tab-")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_reapply_always_on_top;
+
+    #[test]
+    fn reapply_topmost_targets_only_always_on_top_windows() {
+        for label in ["main", "settings", "tab-danmaku", "tab-gifts"] {
+            assert!(should_reapply_always_on_top(label), "{label}");
+        }
+
+        for label in ["archive", "extension", "tab", ""] {
+            assert!(!should_reapply_always_on_top(label), "{label}");
+        }
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -112,11 +129,8 @@ pub fn run() {
                     "reapply_topmost" => {
                         for (label, window) in app.webview_windows() {
                             if should_reapply_always_on_top(&label) {
-                                if let Err(e) = window.set_always_on_top(false) {
-                                    log::warn!("Failed to unset always-on-top for {}: {}", label, e);
-                                }
-                                if let Err(e) = window.set_always_on_top(true) {
-                                    log::warn!("Failed to reapply always-on-top for {}: {}", label, e);
+                                if let Err(e) = window_topmost::set_topmost(&window, true) {
+                                    log::warn!("Failed to reapply topmost for {}: {}", label, e);
                                 }
                             }
                         }
