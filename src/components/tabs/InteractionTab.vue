@@ -180,16 +180,39 @@ const onSilentToast = (msg: string, type: 'success' | 'error' | 'info') => {
 const dynamicMenuItems = computed<MenuItem[]>(() => {
   if (!currentItem.value) return []
 
+  const currentUser = currentItem.value.data.user
   const items: MenuItem[] = [
     {
-      label: '打开用户主页',
-      icon: '🔗',
-      action: () => currentItem.value && openUserPage(currentItem.value.data.user.uid)
-    },
-    {
-      label: '复制用户名',
-      icon: '📋',
-      action: () => currentItem.value && copyUsername(currentItem.value.data.user.name)
+      label: currentUser.name,
+      avatar: currentUser.face ?? null,
+      children: [
+        {
+          label: '打开用户主页',
+          icon: '🔗',
+          action: () => currentItem.value && openUserPage(currentItem.value.data.user.uid)
+        },
+        {
+          label: '复制用户名',
+          icon: '📋',
+          action: () => currentItem.value && copyUsername(currentItem.value.data.user.name)
+        },
+        {
+          label: '复制UID',
+          icon: '🪪',
+          action: () => currentItem.value && copyContent(String(currentItem.value.data.user.uid), 'UID')
+        },
+        {
+          label: isCurrentSpecialFollow.value ? '取消特别关注' : '特别关注',
+          icon: '⭐',
+          action: () => currentItem.value && toggleSpecialFollow(currentItem.value.data.user.uid, currentItem.value.data.user.name)
+        },
+        {
+          label: '禁言',
+          icon: '🔇',
+          disabled: !canSilent.value,
+          action: () => openSilentDialog()
+        }
+      ]
     }
   ]
 
@@ -207,22 +230,6 @@ const dynamicMenuItems = computed<MenuItem[]>(() => {
       action: () => currentItem.value?.kind === 'superchat' && copyContent(currentItem.value.data.content, 'SC内容')
     })
   }
-
-  items.push({ divider: true, label: '', action: () => { } })
-
-  items.push({
-    label: isCurrentSpecialFollow.value ? '取消特别关注' : '特别关注',
-    icon: '⭐',
-    action: () => currentItem.value && toggleSpecialFollow(currentItem.value.data.user.uid, currentItem.value.data.user.name)
-  })
-
-  // 禁言（所有类型都支持）
-  items.push({
-    label: '禁言',
-    icon: '🔇',
-    disabled: !canSilent.value,
-    action: () => openSilentDialog()
-  })
 
   return items
 })

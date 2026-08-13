@@ -32,6 +32,7 @@ test/
 __pycache__/
 
 .git_old
+.zed
 
 docs/
 

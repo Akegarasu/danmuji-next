@@ -73,9 +73,11 @@ impl Danmaku {
         let content = info.get(1)?.as_str()?.to_string();
         let user_info = info.get(2)?;
         let medal_info = info.get(3);
-        let nested_medal = meta
+        let nested_user = meta
             .get(15)
             .and_then(|extra| extra.get("user"))
+            .filter(|user| !user.is_null());
+        let nested_medal = nested_user
             .and_then(|user| user.get("medal"))
             .filter(|medal| !medal.is_null());
 
@@ -83,6 +85,12 @@ impl Danmaku {
         let uid = user_info.get(0)?.as_u64()?;
         let name = user_info.get(1)?.as_str()?.to_string();
         let is_admin = user_info.get(2)?.as_i64().unwrap_or(0) == 1;
+        let face = nested_user
+            .and_then(|user| user.get("base"))
+            .and_then(|base| base.get("face"))
+            .and_then(Value::as_str)
+            .filter(|face| !face.is_empty())
+            .map(String::from);
         let user_level = user_info
             .get(16)
             .and_then(|v| v.get(0))
@@ -157,7 +165,7 @@ impl Danmaku {
             sender: User {
                 uid,
                 name,
-                face: None,
+                face,
                 medal,
                 guard_level,
                 user_level,
@@ -186,6 +194,9 @@ mod tests {
                     "", 0, {}, {},
                     {
                         "user": {
+                            "base": {
+                                "face": "https://i0.hdslb.com/bfs/face/test.jpg"
+                            },
                             "medal": {
                                 "is_light": is_light,
                                 "ruid": anchor_uid
@@ -205,6 +216,10 @@ mod tests {
     fn parses_named_medal_light_and_anchor_uid_fields() {
         let lit = Danmaku::parse(&medal_message(1, 398_629_298)).expect("lit medal danmaku");
         let lit_medal = lit.sender.medal.expect("lit medal");
+        assert_eq!(
+            lit.sender.face.as_deref(),
+            Some("https://i0.hdslb.com/bfs/face/test.jpg")
+        );
         assert!(lit_medal.is_light);
         assert_eq!(lit_medal.anchor_uid, 398_629_298);
 

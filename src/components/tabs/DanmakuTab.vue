@@ -103,31 +103,41 @@ const onSilentToast = (msg: string, type: 'success' | 'error' | 'info') => {
 
 const menuItems = computed<MenuItem[]>(() => ([
   {
-    label: '打开用户主页',
-    icon: '🔗',
-    action: () => currentDanmaku.value && openUserPage(currentDanmaku.value.user.uid)
-  },
-  {
-    label: '复制用户名',
-    icon: '📋',
-    action: () => currentDanmaku.value && copyUsername(currentDanmaku.value.user.name)
+    label: currentDanmaku.value?.user.name ?? '用户',
+    avatar: currentDanmaku.value?.user.face ?? null,
+    children: [
+      {
+        label: '打开用户主页',
+        icon: '🔗',
+        action: () => currentDanmaku.value && openUserPage(currentDanmaku.value.user.uid)
+      },
+      {
+        label: '复制用户名',
+        icon: '📋',
+        action: () => currentDanmaku.value && copyUsername(currentDanmaku.value.user.name)
+      },
+      {
+        label: '复制UID',
+        icon: '🪪',
+        action: () => currentDanmaku.value && copyContent(String(currentDanmaku.value.user.uid), 'UID')
+      },
+      {
+        label: isCurrentSpecialFollow.value ? '取消特别关注' : '特别关注',
+        icon: '⭐',
+        action: () => currentDanmaku.value && toggleSpecialFollow(currentDanmaku.value.user.uid, currentDanmaku.value.user.name)
+      },
+      {
+        label: '禁言',
+        icon: '🔇',
+        disabled: !canSilent.value,
+        action: () => openSilentDialog()
+      }
+    ]
   },
   {
     label: '复制弹幕',
     icon: '📝',
     action: () => currentDanmaku.value && copyContent(currentDanmaku.value.content, '弹幕内容')
-  },
-  { divider: true, label: '', action: () => { } },
-  {
-    label: isCurrentSpecialFollow.value ? '取消特别关注' : '特别关注',
-    icon: '⭐',
-    action: () => currentDanmaku.value && toggleSpecialFollow(currentDanmaku.value.user.uid, currentDanmaku.value.user.name)
-  },
-  {
-    label: '禁言',
-    icon: '🔇',
-    disabled: !canSilent.value,
-    action: () => openSilentDialog()
   }
 ]))
 
