@@ -8,159 +8,15 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{named_params, params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, Mutex};
 
+use crate::archive_migrations;
 use crate::live_types::{
     LiveStats, ProcessedBlindGift, ProcessedDanmaku, ProcessedGift, ProcessedGiftCombo,
     ProcessedSuperChat,
 };
-
-// ==================== 数据库初始化 ====================
-
-const SCHEMA_SQL: &str = r#"
-CREATE TABLE IF NOT EXISTS sessions (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    room_id         INTEGER NOT NULL,
-    room_title      TEXT NOT NULL DEFAULT '',
-    streamer_uid    INTEGER NOT NULL DEFAULT 0,
-    start_time      INTEGER NOT NULL,
-    end_time        INTEGER,
-    total_revenue   INTEGER NOT NULL DEFAULT 0,
-    gift_revenue    INTEGER NOT NULL DEFAULT 0,
-    sc_revenue      INTEGER NOT NULL DEFAULT 0,
-    guard_revenue   INTEGER NOT NULL DEFAULT 0,
-    danmaku_count   INTEGER NOT NULL DEFAULT 0,
-    gift_count      INTEGER NOT NULL DEFAULT 0,
-    sc_count        INTEGER NOT NULL DEFAULT 0
-);
-
-CREATE TABLE IF NOT EXISTS danmaku (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id      INTEGER NOT NULL REFERENCES sessions(id),
-    original_id     TEXT NOT NULL,
-    content         TEXT NOT NULL,
-    user_uid        INTEGER NOT NULL,
-    user_name       TEXT NOT NULL,
-    timestamp       INTEGER NOT NULL,
-    is_emoticon     INTEGER NOT NULL DEFAULT 0,
-    emoticon_url    TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_danmaku_session ON danmaku(session_id);
-CREATE INDEX IF NOT EXISTS idx_danmaku_timestamp ON danmaku(session_id, timestamp);
-CREATE INDEX IF NOT EXISTS idx_danmaku_user ON danmaku(session_id, user_uid);
-
-CREATE TABLE IF NOT EXISTS gifts (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id      INTEGER NOT NULL REFERENCES sessions(id),
-    original_id     TEXT NOT NULL,
-    gift_id         INTEGER NOT NULL,
-    gift_name       TEXT NOT NULL,
-    gift_icon       TEXT,
-    num             INTEGER NOT NULL,
-    total_value     INTEGER NOT NULL,
-    revenue_value   INTEGER,
-    blind_gift_id   INTEGER,
-    blind_gift_name TEXT,
-    blind_gift_total_value INTEGER,
-    is_paid         INTEGER NOT NULL DEFAULT 0,
-    user_uid        INTEGER NOT NULL,
-    user_name       TEXT NOT NULL,
-    timestamp       INTEGER NOT NULL,
-    guard_level     INTEGER,
-    batch_combo_id  TEXT,
-    combo_total_coin INTEGER,
-    super_batch_gift_num INTEGER,
-    combo_resources_id INTEGER,
-    combo_stay_time INTEGER,
-    show_batch_combo_send INTEGER
-);
-
-CREATE INDEX IF NOT EXISTS idx_gifts_session ON gifts(session_id);
-CREATE INDEX IF NOT EXISTS idx_gifts_value ON gifts(session_id, total_value);
-CREATE INDEX IF NOT EXISTS idx_gifts_original_id ON gifts(session_id, original_id);
-
-CREATE TABLE IF NOT EXISTS super_chats (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id      INTEGER NOT NULL REFERENCES sessions(id),
-    original_id     TEXT NOT NULL,
-    content         TEXT NOT NULL,
-    price           INTEGER NOT NULL,
-    user_uid        INTEGER NOT NULL,
-    user_name       TEXT NOT NULL,
-    background_color TEXT,
-    duration        INTEGER NOT NULL,
-    start_time      INTEGER NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_sc_session ON super_chats(session_id);
-CREATE INDEX IF NOT EXISTS idx_sc_price ON super_chats(session_id, price);
-"#;
-
-fn migrate_gifts_table(conn: &Connection) -> Result<(), String> {
-    let columns = {
-        let mut stmt = conn
-            .prepare("PRAGMA table_info(gifts)")
-            .map_err(|e| format!("读取礼物表结构失败: {}", e))?;
-        let rows = stmt
-            .query_map([], |row| row.get::<_, String>(1))
-            .map_err(|e| format!("读取礼物表字段失败: {}", e))?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(|e| format!("读取礼物表字段失败: {}", e))?
-    };
-
-    for (column, sql) in [
-        (
-            "revenue_value",
-            "ALTER TABLE gifts ADD COLUMN revenue_value INTEGER",
-        ),
-        (
-            "blind_gift_id",
-            "ALTER TABLE gifts ADD COLUMN blind_gift_id INTEGER",
-        ),
-        (
-            "blind_gift_name",
-            "ALTER TABLE gifts ADD COLUMN blind_gift_name TEXT",
-        ),
-        (
-            "blind_gift_total_value",
-            "ALTER TABLE gifts ADD COLUMN blind_gift_total_value INTEGER",
-        ),
-        (
-            "batch_combo_id",
-            "ALTER TABLE gifts ADD COLUMN batch_combo_id TEXT",
-        ),
-        (
-            "combo_total_coin",
-            "ALTER TABLE gifts ADD COLUMN combo_total_coin INTEGER",
-        ),
-        (
-            "super_batch_gift_num",
-            "ALTER TABLE gifts ADD COLUMN super_batch_gift_num INTEGER",
-        ),
-        (
-            "combo_resources_id",
-            "ALTER TABLE gifts ADD COLUMN combo_resources_id INTEGER",
-        ),
-        (
-            "combo_stay_time",
-            "ALTER TABLE gifts ADD COLUMN combo_stay_time INTEGER",
-        ),
-        (
-            "show_batch_combo_send",
-            "ALTER TABLE gifts ADD COLUMN show_batch_combo_send INTEGER",
-        ),
-    ] {
-        if !columns.iter().any(|existing| existing == column) {
-            conn.execute(sql, [])
-                .map_err(|e| format!("迁移礼物表字段 {} 失败: {}", column, e))?;
-        }
-    }
-
-    Ok(())
-}
 
 // ==================== 存档事件（用于 channel 传输）====================
 
@@ -245,6 +101,83 @@ pub struct ArchivedUserName {
     pub name: String,
 }
 
+/// 首页与房间页共用的聚合统计。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ArchiveSummary {
+    pub room_count: u64,
+    pub session_count: u64,
+    pub live_duration: u64,
+    pub total_revenue: u64,
+    pub gift_revenue: u64,
+    pub sc_revenue: u64,
+    pub guard_revenue: u64,
+    pub danmaku_count: u64,
+    pub gift_count: u64,
+    pub sc_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArchiveRoomSummary {
+    pub room_id: u64,
+    pub room_title: String,
+    pub streamer_uid: u64,
+    pub session_count: u64,
+    pub live_duration: u64,
+    pub total_revenue: u64,
+    pub danmaku_count: u64,
+    pub gift_count: u64,
+    pub sc_count: u64,
+    pub first_live_time: i64,
+    pub last_live_time: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArchiveOverview {
+    pub summary: ArchiveSummary,
+    pub rooms: Vec<ArchiveRoomSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArchiveDailyStat {
+    pub date: String,
+    pub session_count: u64,
+    pub live_duration: u64,
+    pub total_revenue: u64,
+    pub gift_revenue: u64,
+    pub sc_revenue: u64,
+    pub guard_revenue: u64,
+    pub danmaku_count: u64,
+    pub gift_count: u64,
+    pub sc_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArchiveStatistics {
+    pub summary: ArchiveSummary,
+    pub daily: Vec<ArchiveDailyStat>,
+}
+
+/// 跨事件类型的统一搜索结果。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArchiveSearchItem {
+    pub event_type: String,
+    pub id: i64,
+    pub session_id: i64,
+    pub room_id: u64,
+    pub room_title: String,
+    pub content: String,
+    pub detail: Option<String>,
+    pub user_uid: u64,
+    pub user_name: String,
+    pub timestamp: i64,
+    pub amount: Option<u64>,
+    pub quantity: Option<u32>,
+    pub image_url: Option<String>,
+    pub is_emoticon: bool,
+    pub is_paid: bool,
+    pub guard_level: Option<u8>,
+}
+
 // ==================== ArchiveManager ====================
 
 pub struct ArchiveManager {
@@ -255,16 +188,14 @@ pub struct ArchiveManager {
 impl ArchiveManager {
     /// 创建并初始化 ArchiveManager
     pub fn new(db_path: std::path::PathBuf) -> Result<Self, String> {
-        let conn = Connection::open(&db_path).map_err(|e| format!("打开存档数据库失败: {}", e))?;
+        let mut conn =
+            Connection::open(&db_path).map_err(|e| format!("打开存档数据库失败: {}", e))?;
 
         // 性能优化
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
             .map_err(|e| format!("设置 PRAGMA 失败: {}", e))?;
 
-        // 初始化表
-        conn.execute_batch(SCHEMA_SQL)
-            .map_err(|e| format!("初始化存档表失败: {}", e))?;
-        migrate_gifts_table(&conn)?;
+        archive_migrations::initialize(&mut conn)?;
 
         Ok(Self {
             db: Mutex::new(conn),
@@ -498,8 +429,7 @@ impl ArchiveManager {
             }
         }
 
-        tx.commit()
-            .map_err(|e| format!("提交事务失败: {}", e))?;
+        tx.commit().map_err(|e| format!("提交事务失败: {}", e))?;
         Ok(())
     }
 
@@ -677,6 +607,342 @@ impl ArchiveManager {
         .map_err(|e| format!("获取存档详情失败: {}", e))
     }
 
+    /// 获取归档首页：总统计以及按直播间聚合的卡片。
+    pub async fn get_overview(
+        &self,
+        from_time: Option<i64>,
+        to_time: Option<i64>,
+        query: &str,
+    ) -> Result<ArchiveOverview, String> {
+        validate_time_range(from_time, to_time)?;
+        let db = self.db.lock().await;
+        let summary = query_archive_summary(&db, None, from_time, to_time)?;
+        let query = query.trim();
+        let pattern = format!("%{query}%");
+
+        let mut stmt = db
+            .prepare(
+                r#"
+SELECT
+    s.room_id,
+    COALESCE(
+        NULLIF((
+            SELECT latest.room_title
+            FROM sessions latest
+            WHERE latest.room_id = s.room_id AND latest.room_title <> ''
+            ORDER BY latest.start_time DESC
+            LIMIT 1
+        ), ''),
+        '房间 ' || s.room_id
+    ) AS room_title,
+    COALESCE((
+        SELECT latest.streamer_uid
+        FROM sessions latest
+        WHERE latest.room_id = s.room_id
+        ORDER BY latest.start_time DESC
+        LIMIT 1
+    ), 0) AS streamer_uid,
+    COUNT(*) AS session_count,
+    COALESCE(SUM(MAX(COALESCE(s.end_time, CAST(strftime('%s', 'now') AS INTEGER)) - s.start_time, 0)), 0),
+    COALESCE(SUM(s.total_revenue), 0),
+    COALESCE(SUM(s.danmaku_count), 0),
+    COALESCE(SUM(s.gift_count), 0),
+    COALESCE(SUM(s.sc_count), 0),
+    MIN(s.start_time),
+    MAX(s.start_time)
+FROM sessions s
+WHERE (:from_time IS NULL OR s.start_time >= :from_time)
+  AND (:to_time IS NULL OR s.start_time < :to_time)
+  AND (
+      :query = ''
+      OR CAST(s.room_id AS TEXT) LIKE :pattern
+      OR EXISTS (
+          SELECT 1
+          FROM sessions matched
+          WHERE matched.room_id = s.room_id
+            AND (
+                matched.room_title LIKE :pattern COLLATE NOCASE
+                OR CAST(matched.streamer_uid AS TEXT) LIKE :pattern
+            )
+      )
+  )
+GROUP BY s.room_id
+ORDER BY MAX(s.start_time) DESC
+"#,
+            )
+            .map_err(|e| format!("准备直播间聚合查询失败: {e}"))?;
+        let rows = stmt
+            .query_map(
+                named_params! {
+                    ":from_time": from_time,
+                    ":to_time": to_time,
+                    ":query": query,
+                    ":pattern": pattern,
+                },
+                |row| {
+                    Ok(ArchiveRoomSummary {
+                        room_id: row.get::<_, i64>(0)? as u64,
+                        room_title: row.get(1)?,
+                        streamer_uid: row.get::<_, i64>(2)? as u64,
+                        session_count: row.get::<_, i64>(3)? as u64,
+                        live_duration: row.get::<_, i64>(4)? as u64,
+                        total_revenue: row.get::<_, i64>(5)? as u64,
+                        danmaku_count: row.get::<_, i64>(6)? as u64,
+                        gift_count: row.get::<_, i64>(7)? as u64,
+                        sc_count: row.get::<_, i64>(8)? as u64,
+                        first_live_time: row.get(9)?,
+                        last_live_time: row.get(10)?,
+                    })
+                },
+            )
+            .map_err(|e| format!("查询直播间聚合失败: {e}"))?;
+        let rooms = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("读取直播间聚合失败: {e}"))?;
+
+        Ok(ArchiveOverview { summary, rooms })
+    }
+
+    /// 按直播间分页获取场次。
+    pub async fn get_room_sessions(
+        &self,
+        room_id: u64,
+        from_time: Option<i64>,
+        to_time: Option<i64>,
+        page: u32,
+        page_size: u32,
+    ) -> Result<PagedResult<ArchiveSession>, String> {
+        validate_time_range(from_time, to_time)?;
+        let (page, page_size, offset) = normalize_pagination(page, page_size);
+        let db = self.db.lock().await;
+        let room_id = room_id as i64;
+        let total = db
+            .query_row(
+                r#"
+SELECT COUNT(*)
+FROM sessions
+WHERE room_id = :room_id
+  AND (:from_time IS NULL OR start_time >= :from_time)
+  AND (:to_time IS NULL OR start_time < :to_time)
+"#,
+                named_params! {
+                    ":room_id": room_id,
+                    ":from_time": from_time,
+                    ":to_time": to_time,
+                },
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|e| format!("统计直播场次失败: {e}"))? as u64;
+
+        let mut stmt = db
+            .prepare(
+                r#"
+SELECT id, room_id, room_title, streamer_uid, start_time, end_time,
+       total_revenue, gift_revenue, sc_revenue, guard_revenue,
+       danmaku_count, gift_count, sc_count
+FROM sessions
+WHERE room_id = :room_id
+  AND (:from_time IS NULL OR start_time >= :from_time)
+  AND (:to_time IS NULL OR start_time < :to_time)
+ORDER BY start_time DESC
+LIMIT :limit OFFSET :offset
+"#,
+            )
+            .map_err(|e| format!("准备直播场次查询失败: {e}"))?;
+        let rows = stmt
+            .query_map(
+                named_params! {
+                    ":room_id": room_id,
+                    ":from_time": from_time,
+                    ":to_time": to_time,
+                    ":limit": page_size as i64,
+                    ":offset": offset,
+                },
+                map_session_row,
+            )
+            .map_err(|e| format!("查询直播场次失败: {e}"))?;
+        let items = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("读取直播场次失败: {e}"))?;
+
+        Ok(PagedResult {
+            items,
+            total,
+            page,
+            page_size,
+        })
+    }
+
+    /// 获取全局或单个直播间的按日统计。
+    pub async fn get_statistics(
+        &self,
+        room_id: Option<u64>,
+        from_time: Option<i64>,
+        to_time: Option<i64>,
+    ) -> Result<ArchiveStatistics, String> {
+        validate_time_range(from_time, to_time)?;
+        let db = self.db.lock().await;
+        let room_id = room_id.map(|value| value as i64);
+        let summary = query_archive_summary(&db, room_id, from_time, to_time)?;
+        let mut stmt = db
+            .prepare(
+                r#"
+SELECT
+    strftime('%Y-%m-%d', start_time, 'unixepoch', 'localtime') AS day,
+    COUNT(*),
+    COALESCE(SUM(MAX(COALESCE(end_time, CAST(strftime('%s', 'now') AS INTEGER)) - start_time, 0)), 0),
+    COALESCE(SUM(total_revenue), 0),
+    COALESCE(SUM(gift_revenue), 0),
+    COALESCE(SUM(sc_revenue), 0),
+    COALESCE(SUM(guard_revenue), 0),
+    COALESCE(SUM(danmaku_count), 0),
+    COALESCE(SUM(gift_count), 0),
+    COALESCE(SUM(sc_count), 0)
+FROM sessions
+WHERE (:room_id IS NULL OR room_id = :room_id)
+  AND (:from_time IS NULL OR start_time >= :from_time)
+  AND (:to_time IS NULL OR start_time < :to_time)
+GROUP BY day
+ORDER BY day ASC
+"#,
+            )
+            .map_err(|e| format!("准备归档趋势查询失败: {e}"))?;
+        let rows = stmt
+            .query_map(
+                named_params! {
+                    ":room_id": room_id,
+                    ":from_time": from_time,
+                    ":to_time": to_time,
+                },
+                |row| {
+                    Ok(ArchiveDailyStat {
+                        date: row.get(0)?,
+                        session_count: row.get::<_, i64>(1)? as u64,
+                        live_duration: row.get::<_, i64>(2)? as u64,
+                        total_revenue: row.get::<_, i64>(3)? as u64,
+                        gift_revenue: row.get::<_, i64>(4)? as u64,
+                        sc_revenue: row.get::<_, i64>(5)? as u64,
+                        guard_revenue: row.get::<_, i64>(6)? as u64,
+                        danmaku_count: row.get::<_, i64>(7)? as u64,
+                        gift_count: row.get::<_, i64>(8)? as u64,
+                        sc_count: row.get::<_, i64>(9)? as u64,
+                    })
+                },
+            )
+            .map_err(|e| format!("查询归档趋势失败: {e}"))?;
+        let daily = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("读取归档趋势失败: {e}"))?;
+
+        Ok(ArchiveStatistics { summary, daily })
+    }
+
+    /// 跨弹幕、礼物和醒目留言统一搜索，可限制到直播间或单场直播。
+    #[allow(clippy::too_many_arguments)]
+    pub async fn search(
+        &self,
+        room_id: Option<u64>,
+        session_id: Option<i64>,
+        query: &str,
+        event_type: &str,
+        from_time: Option<i64>,
+        to_time: Option<i64>,
+        page: u32,
+        page_size: u32,
+    ) -> Result<PagedResult<ArchiveSearchItem>, String> {
+        validate_time_range(from_time, to_time)?;
+        if !matches!(event_type, "all" | "danmaku" | "gift" | "superchat") {
+            return Err("不支持的归档事件类型".to_string());
+        }
+        let (page, page_size, offset) = normalize_pagination(page, page_size);
+        let query = query.trim();
+        let pattern = format!("%{query}%");
+        let room_id = room_id.map(|value| value as i64);
+        let db = self.db.lock().await;
+
+        let total = db
+            .query_row(
+                r#"
+SELECT COUNT(*)
+FROM archive_events
+WHERE (:room_id IS NULL OR room_id = :room_id)
+  AND (:session_id IS NULL OR session_id = :session_id)
+  AND (:from_time IS NULL OR timestamp >= :from_time)
+  AND (:to_time IS NULL OR timestamp < :to_time)
+  AND (:event_type = 'all' OR event_type = :event_type)
+  AND (
+      :query = ''
+      OR content LIKE :pattern COLLATE NOCASE
+      OR detail LIKE :pattern COLLATE NOCASE
+      OR user_name LIKE :pattern COLLATE NOCASE
+      OR CAST(user_uid AS TEXT) LIKE :pattern
+  )
+"#,
+                named_params! {
+                    ":room_id": room_id,
+                    ":session_id": session_id,
+                    ":from_time": from_time,
+                    ":to_time": to_time,
+                    ":event_type": event_type,
+                    ":query": query,
+                    ":pattern": pattern,
+                },
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|e| format!("统计归档搜索结果失败: {e}"))? as u64;
+
+        let mut stmt = db
+            .prepare(
+                r#"
+SELECT event_type, id, session_id, room_id, room_title, content, detail,
+       user_uid, user_name, timestamp, amount, quantity, image_url,
+       is_emoticon, is_paid, guard_level
+FROM archive_events
+WHERE (:room_id IS NULL OR room_id = :room_id)
+  AND (:session_id IS NULL OR session_id = :session_id)
+  AND (:from_time IS NULL OR timestamp >= :from_time)
+  AND (:to_time IS NULL OR timestamp < :to_time)
+  AND (:event_type = 'all' OR event_type = :event_type)
+  AND (
+      :query = ''
+      OR content LIKE :pattern COLLATE NOCASE
+      OR detail LIKE :pattern COLLATE NOCASE
+      OR user_name LIKE :pattern COLLATE NOCASE
+      OR CAST(user_uid AS TEXT) LIKE :pattern
+  )
+ORDER BY timestamp DESC, id DESC
+LIMIT :limit OFFSET :offset
+"#,
+            )
+            .map_err(|e| format!("准备归档搜索失败: {e}"))?;
+        let rows = stmt
+            .query_map(
+                named_params! {
+                    ":room_id": room_id,
+                    ":session_id": session_id,
+                    ":from_time": from_time,
+                    ":to_time": to_time,
+                    ":event_type": event_type,
+                    ":query": query,
+                    ":pattern": pattern,
+                    ":limit": page_size as i64,
+                    ":offset": offset,
+                },
+                map_search_row,
+            )
+            .map_err(|e| format!("查询归档失败: {e}"))?;
+        let items = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("读取归档搜索结果失败: {e}"))?;
+
+        Ok(PagedResult {
+            items,
+            total,
+            page,
+            page_size,
+        })
+    }
+
     pub async fn search_danmaku(
         &self,
         session_id: i64,
@@ -685,60 +951,61 @@ impl ArchiveManager {
         page_size: u32,
     ) -> Result<PagedResult<ArchivedDanmaku>, String> {
         let db = self.db.lock().await;
-        let offset = (page.saturating_sub(1)) * page_size;
-
-        let (where_clause, query_param) = if query.is_empty() {
-            ("session_id = ?1".to_string(), None)
-        } else {
-            (
-                "session_id = ?1 AND (content LIKE ?2 OR user_name LIKE ?2)".to_string(),
-                Some(format!("%{}%", query)),
-            )
-        };
-
-        let total: u64 = if let Some(ref q) = query_param {
-            db.query_row(
-                &format!("SELECT COUNT(*) FROM danmaku WHERE {}", where_clause),
-                params![session_id, q],
+        let (page, page_size, offset) = normalize_pagination(page, page_size);
+        let query = query.trim();
+        let pattern = format!("%{query}%");
+        let total = db
+            .query_row(
+                r#"
+SELECT COUNT(*) FROM danmaku
+WHERE session_id = :session_id
+  AND (
+      :query = ''
+      OR content LIKE :pattern COLLATE NOCASE
+      OR user_name LIKE :pattern COLLATE NOCASE
+      OR CAST(user_uid AS TEXT) LIKE :pattern
+  )
+"#,
+                named_params! {
+                    ":session_id": session_id,
+                    ":query": query,
+                    ":pattern": pattern,
+                },
                 |row| row.get::<_, i64>(0),
             )
-        } else {
-            db.query_row(
-                &format!("SELECT COUNT(*) FROM danmaku WHERE {}", where_clause),
-                params![session_id],
-                |row| row.get::<_, i64>(0),
+            .map_err(|e| e.to_string())? as u64;
+
+        let mut stmt = db
+            .prepare(
+                r#"
+SELECT id, content, user_uid, user_name, timestamp, is_emoticon, emoticon_url
+FROM danmaku
+WHERE session_id = :session_id
+  AND (
+      :query = ''
+      OR content LIKE :pattern COLLATE NOCASE
+      OR user_name LIKE :pattern COLLATE NOCASE
+      OR CAST(user_uid AS TEXT) LIKE :pattern
+  )
+ORDER BY timestamp ASC
+LIMIT :limit OFFSET :offset
+"#,
             )
-        }
-        .map_err(|e| e.to_string())? as u64;
-
-        let sql = format!(
-            "SELECT id, content, user_uid, user_name, timestamp, is_emoticon, emoticon_url FROM danmaku WHERE {} ORDER BY timestamp ASC LIMIT ?{} OFFSET ?{}",
-            where_clause,
-            if query_param.is_some() { "3" } else { "2" },
-            if query_param.is_some() { "4" } else { "3" },
-        );
-
-        let items = if let Some(ref q) = query_param {
-            let mut stmt = db.prepare(&sql).map_err(|e| e.to_string())?;
-            let rows = stmt
-                .query_map(
-                    params![session_id, q, page_size as i64, offset as i64],
-                    map_danmaku_row,
-                )
-                .map_err(|e| e.to_string())?;
-            rows.collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())?
-        } else {
-            let mut stmt = db.prepare(&sql).map_err(|e| e.to_string())?;
-            let rows = stmt
-                .query_map(
-                    params![session_id, page_size as i64, offset as i64],
-                    map_danmaku_row,
-                )
-                .map_err(|e| e.to_string())?;
-            rows.collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())?
-        };
+            .map_err(|e| e.to_string())?;
+        let items = stmt
+            .query_map(
+                named_params! {
+                    ":session_id": session_id,
+                    ":query": query,
+                    ":pattern": pattern,
+                    ":limit": page_size as i64,
+                    ":offset": offset,
+                },
+                map_danmaku_row,
+            )
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
 
         Ok(PagedResult {
             items,
@@ -749,10 +1016,7 @@ impl ArchiveManager {
     }
 
     pub async fn lookup_user_names(&self, uids: Vec<u64>) -> Result<Vec<ArchivedUserName>, String> {
-        let mut uids = uids
-            .into_iter()
-            .filter(|uid| *uid > 0)
-            .collect::<Vec<_>>();
+        let mut uids = uids.into_iter().filter(|uid| *uid > 0).collect::<Vec<_>>();
         uids.sort_unstable();
         uids.dedup();
 
@@ -761,15 +1025,6 @@ impl ArchiveManager {
         }
 
         let db = self.db.lock().await;
-        db.execute_batch(
-            r#"
-CREATE INDEX IF NOT EXISTS idx_danmaku_user_latest ON danmaku(user_uid, timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_gifts_user_latest ON gifts(user_uid, timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_sc_user_latest ON super_chats(user_uid, start_time DESC);
-"#,
-        )
-        .map_err(|e| format!("初始化用户查询索引失败: {}", e))?;
-
         let mut result = Vec::new();
 
         for uid in uids {
@@ -789,7 +1044,7 @@ CREATE INDEX IF NOT EXISTS idx_sc_user_latest ON super_chats(user_uid, start_tim
                 if let Some((name, timestamp)) = row {
                     if latest
                         .as_ref()
-                        .map_or(true, |(_, latest_timestamp)| timestamp > *latest_timestamp)
+                        .is_none_or(|(_, latest_timestamp)| timestamp > *latest_timestamp)
                     {
                         latest = Some((name, timestamp));
                     }
@@ -814,91 +1069,96 @@ CREATE INDEX IF NOT EXISTS idx_sc_user_latest ON super_chats(user_uid, start_tim
         page_size: u32,
     ) -> Result<PagedResult<ArchivedGift>, String> {
         let db = self.db.lock().await;
-        let offset = (page.saturating_sub(1)) * page_size;
-
-        let mut conditions = vec!["session_id = ?1".to_string()];
-        let mut param_idx = 2;
-
-        if !query.is_empty() {
-            conditions.push(format!(
-                "(gift_name LIKE ?{0} OR blind_gift_name LIKE ?{0} OR user_name LIKE ?{0})",
-                param_idx
-            ));
-            param_idx += 1;
-        }
-        if min_price.is_some() {
-            conditions.push(format!("total_value >= ?{}", param_idx));
-            param_idx += 1;
-        }
-        if max_price.is_some() {
-            conditions.push(format!("total_value <= ?{}", param_idx));
-            param_idx += 1;
-        }
-
-        let where_clause = conditions.join(" AND ");
-        let limit_param = param_idx;
-        let offset_param = param_idx + 1;
-
-        // Build dynamic params
-        let count_sql = format!("SELECT COUNT(*) FROM gifts WHERE {}", where_clause);
-        let data_sql = format!(
-            "SELECT id, gift_name, gift_icon, num, total_value, is_paid, user_uid, user_name, timestamp, guard_level, blind_gift_id, blind_gift_name, blind_gift_total_value, revenue_value, batch_combo_id, combo_total_coin, super_batch_gift_num, combo_resources_id, combo_stay_time, show_batch_combo_send FROM gifts WHERE {} ORDER BY timestamp ASC LIMIT ?{} OFFSET ?{}",
-            where_clause, limit_param, offset_param
-        );
-
-        // We need to use dynamic params; rusqlite supports this via a Vec<Box<dyn ToSql>>
-        use rusqlite::types::ToSql;
-        let mut bind_values: Vec<Box<dyn ToSql>> = Vec::new();
-        bind_values.push(Box::new(session_id));
-        if !query.is_empty() {
-            bind_values.push(Box::new(format!("%{}%", query)));
-        }
-        if let Some(min) = min_price {
-            bind_values.push(Box::new(min as i64));
-        }
-        if let Some(max) = max_price {
-            bind_values.push(Box::new(max as i64));
-        }
-
-        let bind_refs: Vec<&dyn ToSql> = bind_values.iter().map(|b| b.as_ref()).collect();
-
-        let total: u64 = db
-            .query_row(&count_sql, bind_refs.as_slice(), |row| {
-                row.get::<_, i64>(0)
-            })
+        let (page, page_size, offset) = normalize_pagination(page, page_size);
+        let query = query.trim();
+        let pattern = format!("%{query}%");
+        let min_price = min_price.map(|value| value as i64);
+        let max_price = max_price.map(|value| value as i64);
+        let total = db
+            .query_row(
+                r#"
+SELECT COUNT(*) FROM gifts
+WHERE session_id = :session_id
+  AND (:min_price IS NULL OR total_value >= :min_price)
+  AND (:max_price IS NULL OR total_value <= :max_price)
+  AND (
+      :query = ''
+      OR gift_name LIKE :pattern COLLATE NOCASE
+      OR blind_gift_name LIKE :pattern COLLATE NOCASE
+      OR user_name LIKE :pattern COLLATE NOCASE
+      OR CAST(user_uid AS TEXT) LIKE :pattern
+  )
+"#,
+                named_params! {
+                    ":session_id": session_id,
+                    ":min_price": min_price,
+                    ":max_price": max_price,
+                    ":query": query,
+                    ":pattern": pattern,
+                },
+                |row| row.get::<_, i64>(0),
+            )
             .map_err(|e| e.to_string())? as u64;
 
-        let mut data_bind_values = bind_values;
-        data_bind_values.push(Box::new(page_size as i64));
-        data_bind_values.push(Box::new(offset as i64));
-        let data_bind_refs: Vec<&dyn ToSql> =
-            data_bind_values.iter().map(|b| b.as_ref()).collect();
-
-        let mut stmt = db.prepare(&data_sql).map_err(|e| e.to_string())?;
+        let mut stmt = db
+            .prepare(
+                r#"
+SELECT id, gift_name, gift_icon, num, total_value, is_paid, user_uid,
+       user_name, timestamp, guard_level, blind_gift_id, blind_gift_name,
+       blind_gift_total_value, revenue_value, batch_combo_id, combo_total_coin,
+       super_batch_gift_num, combo_resources_id, combo_stay_time,
+       show_batch_combo_send
+FROM gifts
+WHERE session_id = :session_id
+  AND (:min_price IS NULL OR total_value >= :min_price)
+  AND (:max_price IS NULL OR total_value <= :max_price)
+  AND (
+      :query = ''
+      OR gift_name LIKE :pattern COLLATE NOCASE
+      OR blind_gift_name LIKE :pattern COLLATE NOCASE
+      OR user_name LIKE :pattern COLLATE NOCASE
+      OR CAST(user_uid AS TEXT) LIKE :pattern
+  )
+ORDER BY timestamp ASC
+LIMIT :limit OFFSET :offset
+"#,
+            )
+            .map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map(data_bind_refs.as_slice(), |row| {
-                let blind_gift_id = row.get::<_, Option<i64>>(10)?;
-                let blind_gift_name = row.get::<_, Option<String>>(11)?;
-                let blind_gift_total_value = row.get::<_, Option<i64>>(12)?;
-                let revenue_value = row
-                    .get::<_, Option<i64>>(13)?
-                    .or(blind_gift_total_value)
-                    .unwrap_or(row.get::<_, i64>(4)?);
-                let blind_gift = match (blind_gift_id, blind_gift_name, blind_gift_total_value) {
-                    (Some(gift_id), Some(gift_name), Some(total_value)) => {
-                        Some(ProcessedBlindGift {
-                            gift_id: gift_id as u64,
-                            gift_name,
-                            total_value: total_value as u64,
-                        })
-                    }
-                    _ => None,
-                };
-                let combo = if let Some(batch_combo_id) = row
-                    .get::<_, Option<String>>(14)?
-                    .filter(|batch_combo_id| !batch_combo_id.is_empty())
-                {
-                    Some(ProcessedGiftCombo {
+            .query_map(
+                named_params! {
+                    ":session_id": session_id,
+                    ":min_price": min_price,
+                    ":max_price": max_price,
+                    ":query": query,
+                    ":pattern": pattern,
+                    ":limit": page_size as i64,
+                    ":offset": offset,
+                },
+                |row| {
+                    let blind_gift_id = row.get::<_, Option<i64>>(10)?;
+                    let blind_gift_name = row.get::<_, Option<String>>(11)?;
+                    let blind_gift_total_value = row.get::<_, Option<i64>>(12)?;
+                    let revenue_value = row
+                        .get::<_, Option<i64>>(13)?
+                        .or(blind_gift_total_value)
+                        .unwrap_or(row.get::<_, i64>(4)?);
+                    let blind_gift = match (blind_gift_id, blind_gift_name, blind_gift_total_value)
+                    {
+                        (Some(gift_id), Some(gift_name), Some(total_value)) => {
+                            Some(ProcessedBlindGift {
+                                gift_id: gift_id as u64,
+                                gift_name,
+                                total_value: total_value as u64,
+                            })
+                        }
+                        _ => None,
+                    };
+                    let combo = if let Some(batch_combo_id) = row
+                        .get::<_, Option<String>>(14)?
+                        .filter(|batch_combo_id| !batch_combo_id.is_empty())
+                    {
+                        Some(ProcessedGiftCombo {
                             batch_combo_id,
                             combo_total_coin: row
                                 .get::<_, Option<i64>>(15)?
@@ -915,29 +1175,28 @@ CREATE INDEX IF NOT EXISTS idx_sc_user_latest ON super_chats(user_uid, start_tim
                             show_batch_combo_send: row
                                 .get::<_, Option<i32>>(19)?
                                 .map(|value| value != 0),
-                    })
-                } else {
-                    None
-                };
+                        })
+                    } else {
+                        None
+                    };
 
-                Ok(ArchivedGift {
-                    id: row.get(0)?,
-                    gift_name: row.get(1)?,
-                    gift_icon: row.get(2)?,
-                    num: row.get::<_, i64>(3)? as u32,
-                    total_value: row.get::<_, i64>(4)? as u64,
-                    revenue_value: revenue_value as u64,
-                    is_paid: row.get::<_, i32>(5)? != 0,
-                    combo,
-                    blind_gift,
-                    user_uid: row.get::<_, i64>(6)? as u64,
-                    user_name: row.get(7)?,
-                    timestamp: row.get(8)?,
-                    guard_level: row
-                        .get::<_, Option<i64>>(9)?
-                        .map(|g| g as u8),
-                })
-            })
+                    Ok(ArchivedGift {
+                        id: row.get(0)?,
+                        gift_name: row.get(1)?,
+                        gift_icon: row.get(2)?,
+                        num: row.get::<_, i64>(3)? as u32,
+                        total_value: row.get::<_, i64>(4)? as u64,
+                        revenue_value: revenue_value as u64,
+                        is_paid: row.get::<_, i32>(5)? != 0,
+                        combo,
+                        blind_gift,
+                        user_uid: row.get::<_, i64>(6)? as u64,
+                        user_name: row.get(7)?,
+                        timestamp: row.get(8)?,
+                        guard_level: row.get::<_, Option<i64>>(9)?.map(|g| g as u8),
+                    })
+                },
+            )
             .map_err(|e| e.to_string())?;
 
         let items = rows
@@ -962,78 +1221,79 @@ CREATE INDEX IF NOT EXISTS idx_sc_user_latest ON super_chats(user_uid, start_tim
         page_size: u32,
     ) -> Result<PagedResult<ArchivedSuperChat>, String> {
         let db = self.db.lock().await;
-        let offset = (page.saturating_sub(1)) * page_size;
-
-        let mut conditions = vec!["session_id = ?1".to_string()];
-        let mut param_idx = 2;
-
-        if !query.is_empty() {
-            conditions.push(format!(
-                "(content LIKE ?{0} OR user_name LIKE ?{0})",
-                param_idx
-            ));
-            param_idx += 1;
-        }
-        if min_price.is_some() {
-            conditions.push(format!("price >= ?{}", param_idx));
-            param_idx += 1;
-        }
-        if max_price.is_some() {
-            conditions.push(format!("price <= ?{}", param_idx));
-            param_idx += 1;
-        }
-
-        let where_clause = conditions.join(" AND ");
-        let limit_param = param_idx;
-        let offset_param = param_idx + 1;
-
-        let count_sql = format!("SELECT COUNT(*) FROM super_chats WHERE {}", where_clause);
-        let data_sql = format!(
-            "SELECT id, content, price, user_uid, user_name, background_color, duration, start_time FROM super_chats WHERE {} ORDER BY start_time ASC LIMIT ?{} OFFSET ?{}",
-            where_clause, limit_param, offset_param
-        );
-
-        use rusqlite::types::ToSql;
-        let mut bind_values: Vec<Box<dyn ToSql>> = Vec::new();
-        bind_values.push(Box::new(session_id));
-        if !query.is_empty() {
-            bind_values.push(Box::new(format!("%{}%", query)));
-        }
-        if let Some(min) = min_price {
-            bind_values.push(Box::new(min as i64));
-        }
-        if let Some(max) = max_price {
-            bind_values.push(Box::new(max as i64));
-        }
-
-        let bind_refs: Vec<&dyn ToSql> = bind_values.iter().map(|b| b.as_ref()).collect();
-
-        let total: u64 = db
-            .query_row(&count_sql, bind_refs.as_slice(), |row| {
-                row.get::<_, i64>(0)
-            })
+        let (page, page_size, offset) = normalize_pagination(page, page_size);
+        let query = query.trim();
+        let pattern = format!("%{query}%");
+        let min_price = min_price.map(|value| value as i64);
+        let max_price = max_price.map(|value| value as i64);
+        let total = db
+            .query_row(
+                r#"
+SELECT COUNT(*) FROM super_chats
+WHERE session_id = :session_id
+  AND (:min_price IS NULL OR price >= :min_price)
+  AND (:max_price IS NULL OR price <= :max_price)
+  AND (
+      :query = ''
+      OR content LIKE :pattern COLLATE NOCASE
+      OR user_name LIKE :pattern COLLATE NOCASE
+      OR CAST(user_uid AS TEXT) LIKE :pattern
+  )
+"#,
+                named_params! {
+                    ":session_id": session_id,
+                    ":min_price": min_price,
+                    ":max_price": max_price,
+                    ":query": query,
+                    ":pattern": pattern,
+                },
+                |row| row.get::<_, i64>(0),
+            )
             .map_err(|e| e.to_string())? as u64;
 
-        let mut data_bind_values = bind_values;
-        data_bind_values.push(Box::new(page_size as i64));
-        data_bind_values.push(Box::new(offset as i64));
-        let data_bind_refs: Vec<&dyn ToSql> =
-            data_bind_values.iter().map(|b| b.as_ref()).collect();
-
-        let mut stmt = db.prepare(&data_sql).map_err(|e| e.to_string())?;
+        let mut stmt = db
+            .prepare(
+                r#"
+SELECT id, content, price, user_uid, user_name, background_color, duration, start_time
+FROM super_chats
+WHERE session_id = :session_id
+  AND (:min_price IS NULL OR price >= :min_price)
+  AND (:max_price IS NULL OR price <= :max_price)
+  AND (
+      :query = ''
+      OR content LIKE :pattern COLLATE NOCASE
+      OR user_name LIKE :pattern COLLATE NOCASE
+      OR CAST(user_uid AS TEXT) LIKE :pattern
+  )
+ORDER BY start_time ASC
+LIMIT :limit OFFSET :offset
+"#,
+            )
+            .map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map(data_bind_refs.as_slice(), |row| {
-                Ok(ArchivedSuperChat {
-                    id: row.get(0)?,
-                    content: row.get(1)?,
-                    price: row.get::<_, i64>(2)? as u64,
-                    user_uid: row.get::<_, i64>(3)? as u64,
-                    user_name: row.get(4)?,
-                    background_color: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
-                    duration: row.get::<_, i64>(6)? as u32,
-                    start_time: row.get(7)?,
-                })
-            })
+            .query_map(
+                named_params! {
+                    ":session_id": session_id,
+                    ":min_price": min_price,
+                    ":max_price": max_price,
+                    ":query": query,
+                    ":pattern": pattern,
+                    ":limit": page_size as i64,
+                    ":offset": offset,
+                },
+                |row| {
+                    Ok(ArchivedSuperChat {
+                        id: row.get(0)?,
+                        content: row.get(1)?,
+                        price: row.get::<_, i64>(2)? as u64,
+                        user_uid: row.get::<_, i64>(3)? as u64,
+                        user_name: row.get(4)?,
+                        background_color: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
+                        duration: row.get::<_, i64>(6)? as u32,
+                        start_time: row.get(7)?,
+                    })
+                },
+            )
             .map_err(|e| e.to_string())?;
 
         let items = rows
@@ -1048,28 +1308,58 @@ CREATE INDEX IF NOT EXISTS idx_sc_user_latest ON super_chats(user_uid, start_tim
         })
     }
 
-    pub async fn delete_session(&self, session_id: i64) -> Result<(), String> {
+    /// 删除没有任何事件的历史场次，当前正在录制的场次始终保留。
+    pub async fn prune_empty_sessions(&self) -> Result<u64, String> {
+        let active_session_id = self.get_active_session_id().await;
         let db = self.db.lock().await;
-        db.execute(
+        let deleted = db
+            .execute(
+                r#"
+DELETE FROM sessions
+WHERE (:active_session_id IS NULL OR id <> :active_session_id)
+  AND NOT EXISTS (SELECT 1 FROM danmaku WHERE danmaku.session_id = sessions.id)
+  AND NOT EXISTS (SELECT 1 FROM gifts WHERE gifts.session_id = sessions.id)
+  AND NOT EXISTS (SELECT 1 FROM super_chats WHERE super_chats.session_id = sessions.id)
+"#,
+                named_params! { ":active_session_id": active_session_id },
+            )
+            .map_err(|e| format!("清理空归档场次失败: {e}"))?;
+        if deleted > 0 {
+            log::info!("Pruned {} empty archive session(s)", deleted);
+        }
+        Ok(deleted as u64)
+    }
+
+    pub async fn delete_session(&self, session_id: i64) -> Result<(), String> {
+        if self.get_active_session_id().await == Some(session_id) {
+            return Err("直播进行中，不能删除当前场次".to_string());
+        }
+        let db = self.db.lock().await;
+        let tx = db
+            .unchecked_transaction()
+            .map_err(|e| format!("开启删除事务失败: {e}"))?;
+        tx.execute(
             "DELETE FROM danmaku WHERE session_id = ?1",
             rusqlite::params![session_id],
         )
         .map_err(|e| format!("删除存档失败: {}", e))?;
-        db.execute(
+        tx.execute(
             "DELETE FROM gifts WHERE session_id = ?1",
             rusqlite::params![session_id],
         )
         .map_err(|e| format!("删除存档失败: {}", e))?;
-        db.execute(
+        tx.execute(
             "DELETE FROM super_chats WHERE session_id = ?1",
             rusqlite::params![session_id],
         )
         .map_err(|e| format!("删除存档失败: {}", e))?;
-        db.execute(
+        tx.execute(
             "DELETE FROM sessions WHERE id = ?1",
             rusqlite::params![session_id],
         )
         .map_err(|e| format!("删除存档失败: {}", e))?;
+        tx.commit()
+            .map_err(|e| format!("提交删除存档事务失败: {e}"))?;
         log::info!("Archive session deleted: id={}", session_id);
         Ok(())
     }
@@ -1107,7 +1397,14 @@ pub fn spawn_archive_writer(
                 }
                 Ok(None) => {
                     // Channel closed, flush and exit
-                    flush_buffers(&archive, session_id, &mut danmaku_buf, &mut gift_buf, &mut sc_buf).await;
+                    flush_buffers(
+                        &archive,
+                        session_id,
+                        &mut danmaku_buf,
+                        &mut gift_buf,
+                        &mut sc_buf,
+                    )
+                    .await;
                     break;
                 }
                 Err(_) => {
@@ -1116,10 +1413,19 @@ pub fn spawn_archive_writer(
             }
 
             // Flush when buffer is large enough or on timeout
-            if danmaku_buf.len() >= 100 || gift_buf.len() >= 50 || sc_buf.len() >= 20 {
-                flush_buffers(&archive, session_id, &mut danmaku_buf, &mut gift_buf, &mut sc_buf).await;
-            } else if is_timeout && (!danmaku_buf.is_empty() || !gift_buf.is_empty() || !sc_buf.is_empty()) {
-                flush_buffers(&archive, session_id, &mut danmaku_buf, &mut gift_buf, &mut sc_buf).await;
+            let reached_batch_size =
+                danmaku_buf.len() >= 100 || gift_buf.len() >= 50 || sc_buf.len() >= 20;
+            let has_buffered_events =
+                !danmaku_buf.is_empty() || !gift_buf.is_empty() || !sc_buf.is_empty();
+            if reached_batch_size || (is_timeout && has_buffered_events) {
+                flush_buffers(
+                    &archive,
+                    session_id,
+                    &mut danmaku_buf,
+                    &mut gift_buf,
+                    &mut sc_buf,
+                )
+                .await;
             }
         }
 
@@ -1135,7 +1441,7 @@ async fn flush_buffers(
     sc_buf: &mut Vec<ProcessedSuperChat>,
 ) {
     if !danmaku_buf.is_empty() {
-        let items: Vec<_> = danmaku_buf.drain(..).collect();
+        let items = std::mem::take(danmaku_buf);
         if let Err(e) = archive.save_danmaku_batch(session_id, &items).await {
             log::error!("Archive flush danmaku error: {}", e);
         }
@@ -1154,6 +1460,106 @@ async fn flush_buffers(
 
 // ==================== Helper ====================
 
+fn normalize_pagination(page: u32, page_size: u32) -> (u32, u32, i64) {
+    let page = page.max(1);
+    let page_size = page_size.clamp(1, 100);
+    let offset = (u64::from(page - 1) * u64::from(page_size)).min(i64::MAX as u64) as i64;
+    (page, page_size, offset)
+}
+
+fn validate_time_range(from_time: Option<i64>, to_time: Option<i64>) -> Result<(), String> {
+    if matches!((from_time, to_time), (Some(from), Some(to)) if from >= to) {
+        return Err("开始时间必须早于结束时间".to_string());
+    }
+    Ok(())
+}
+
+fn query_archive_summary(
+    db: &Connection,
+    room_id: Option<i64>,
+    from_time: Option<i64>,
+    to_time: Option<i64>,
+) -> Result<ArchiveSummary, String> {
+    db.query_row(
+        r#"
+SELECT
+    COUNT(DISTINCT room_id),
+    COUNT(*),
+    COALESCE(SUM(MAX(COALESCE(end_time, CAST(strftime('%s', 'now') AS INTEGER)) - start_time, 0)), 0),
+    COALESCE(SUM(total_revenue), 0),
+    COALESCE(SUM(gift_revenue), 0),
+    COALESCE(SUM(sc_revenue), 0),
+    COALESCE(SUM(guard_revenue), 0),
+    COALESCE(SUM(danmaku_count), 0),
+    COALESCE(SUM(gift_count), 0),
+    COALESCE(SUM(sc_count), 0)
+FROM sessions
+WHERE (:room_id IS NULL OR room_id = :room_id)
+  AND (:from_time IS NULL OR start_time >= :from_time)
+  AND (:to_time IS NULL OR start_time < :to_time)
+"#,
+        named_params! {
+            ":room_id": room_id,
+            ":from_time": from_time,
+            ":to_time": to_time,
+        },
+        |row| {
+            Ok(ArchiveSummary {
+                room_count: row.get::<_, i64>(0)? as u64,
+                session_count: row.get::<_, i64>(1)? as u64,
+                live_duration: row.get::<_, i64>(2)? as u64,
+                total_revenue: row.get::<_, i64>(3)? as u64,
+                gift_revenue: row.get::<_, i64>(4)? as u64,
+                sc_revenue: row.get::<_, i64>(5)? as u64,
+                guard_revenue: row.get::<_, i64>(6)? as u64,
+                danmaku_count: row.get::<_, i64>(7)? as u64,
+                gift_count: row.get::<_, i64>(8)? as u64,
+                sc_count: row.get::<_, i64>(9)? as u64,
+            })
+        },
+    )
+    .map_err(|e| format!("查询归档统计失败: {e}"))
+}
+
+fn map_session_row(row: &rusqlite::Row) -> rusqlite::Result<ArchiveSession> {
+    Ok(ArchiveSession {
+        id: row.get(0)?,
+        room_id: row.get::<_, i64>(1)? as u64,
+        room_title: row.get(2)?,
+        streamer_uid: row.get::<_, i64>(3)? as u64,
+        start_time: row.get(4)?,
+        end_time: row.get(5)?,
+        total_revenue: row.get::<_, i64>(6)? as u64,
+        gift_revenue: row.get::<_, i64>(7)? as u64,
+        sc_revenue: row.get::<_, i64>(8)? as u64,
+        guard_revenue: row.get::<_, i64>(9)? as u64,
+        danmaku_count: row.get::<_, i64>(10)? as u64,
+        gift_count: row.get::<_, i64>(11)? as u64,
+        sc_count: row.get::<_, i64>(12)? as u64,
+    })
+}
+
+fn map_search_row(row: &rusqlite::Row) -> rusqlite::Result<ArchiveSearchItem> {
+    Ok(ArchiveSearchItem {
+        event_type: row.get(0)?,
+        id: row.get(1)?,
+        session_id: row.get(2)?,
+        room_id: row.get::<_, i64>(3)? as u64,
+        room_title: row.get(4)?,
+        content: row.get(5)?,
+        detail: row.get(6)?,
+        user_uid: row.get::<_, i64>(7)? as u64,
+        user_name: row.get(8)?,
+        timestamp: row.get(9)?,
+        amount: row.get::<_, Option<i64>>(10)?.map(|value| value as u64),
+        quantity: row.get::<_, Option<i64>>(11)?.map(|value| value as u32),
+        image_url: row.get(12)?,
+        is_emoticon: row.get::<_, i32>(13)? != 0,
+        is_paid: row.get::<_, i32>(14)? != 0,
+        guard_level: row.get::<_, Option<i64>>(15)?.map(|value| value as u8),
+    })
+}
+
 fn map_danmaku_row(row: &rusqlite::Row) -> rusqlite::Result<ArchivedDanmaku> {
     Ok(ArchivedDanmaku {
         id: row.get(0)?,
@@ -1168,54 +1574,16 @@ fn map_danmaku_row(row: &rusqlite::Row) -> rusqlite::Result<ArchivedDanmaku> {
 
 #[cfg(test)]
 mod tests {
-    use super::{migrate_gifts_table, ArchiveManager, SCHEMA_SQL};
-    use crate::live_types::{
-        ProcessedGift, ProcessedGiftCombo, ProcessedUser,
-    };
+    use super::ArchiveManager;
+    use crate::archive_migrations;
+    use crate::live_types::{ProcessedGift, ProcessedGiftCombo, ProcessedUser};
     use rusqlite::{params, Connection};
     use tokio::sync::Mutex;
 
-    #[test]
-    fn migrates_existing_gifts_table_for_gift_metadata() {
-        let conn = Connection::open_in_memory().expect("in-memory database");
-        conn.execute_batch(
-            "CREATE TABLE gifts (
-                id INTEGER PRIMARY KEY,
-                gift_name TEXT NOT NULL,
-                total_value INTEGER NOT NULL
-            );",
-        )
-        .expect("legacy gifts table");
-
-        migrate_gifts_table(&conn).expect("first migration");
-        migrate_gifts_table(&conn).expect("migration should be idempotent");
-
-        let mut stmt = conn
-            .prepare("PRAGMA table_info(gifts)")
-            .expect("gift table info");
-        let columns = stmt
-            .query_map([], |row| row.get::<_, String>(1))
-            .expect("gift columns")
-            .collect::<Result<Vec<_>, _>>()
-            .expect("column names");
-
-        assert!(columns.iter().any(|column| column == "blind_gift_id"));
-        assert!(columns.iter().any(|column| column == "blind_gift_name"));
-        assert!(columns
-            .iter()
-            .any(|column| column == "blind_gift_total_value"));
-        assert!(columns.iter().any(|column| column == "revenue_value"));
-        assert!(columns.iter().any(|column| column == "batch_combo_id"));
-        assert!(columns
-            .iter()
-            .any(|column| column == "show_batch_combo_send"));
-    }
-
     #[tokio::test]
     async fn updates_combo_snapshot_instead_of_inserting_duplicate_rows() {
-        let conn = Connection::open_in_memory().expect("in-memory database");
-        conn.execute_batch(SCHEMA_SQL).expect("archive schema");
-        migrate_gifts_table(&conn).expect("gift migration");
+        let mut conn = Connection::open_in_memory().expect("in-memory database");
+        archive_migrations::initialize(&mut conn).expect("archive schema");
         conn.execute(
             "INSERT INTO sessions (id, room_id, start_time) VALUES (1, 1, 1700000000)",
             [],
@@ -1274,5 +1642,117 @@ mod tests {
             )
             .expect("saved combo snapshot");
         assert_eq!((count, num, revenue), (1, 2, 2));
+    }
+
+    #[tokio::test]
+    async fn queries_room_overview_statistics_and_unified_search() {
+        let mut conn = Connection::open_in_memory().expect("in-memory database");
+        archive_migrations::initialize(&mut conn).expect("archive schema");
+        conn.execute_batch(
+            r#"
+INSERT INTO sessions (
+    id, room_id, room_title, streamer_uid, start_time, end_time,
+    total_revenue, gift_revenue, sc_revenue, guard_revenue,
+    danmaku_count, gift_count, sc_count
+) VALUES
+    (1, 100, '测试房间', 9001, 1700000000, 1700003600, 1500, 1000, 500, 0, 1, 1, 1),
+    (2, 100, '测试房间', 9001, 1700086400, 1700090000, 200, 200, 0, 0, 0, 0, 0),
+    (3, 200, '另一个房间', 9002, 1700172800, 1700176400, 0, 0, 0, 0, 0, 0, 0);
+
+INSERT INTO danmaku (
+    session_id, original_id, content, user_uid, user_name, timestamp
+) VALUES (1, 'd1', '你好，世界', 42, 'Alice', 1700000100);
+
+INSERT INTO gifts (
+    session_id, original_id, gift_id, gift_name, num, total_value,
+    revenue_value, is_paid, user_uid, user_name, timestamp
+) VALUES (1, 'g1', 1, '小花花', 2, 1000, 1000, 1, 42, 'Alice', 1700000200);
+
+INSERT INTO super_chats (
+    session_id, original_id, content, price, user_uid, user_name, duration, start_time
+) VALUES (1, 'sc1', '支持主播', 500, 84, 'Bob', 60, 1700000300);
+"#,
+        )
+        .expect("seed archive data");
+        let archive = ArchiveManager {
+            db: Mutex::new(conn),
+            active_session_id: Mutex::new(None),
+        };
+
+        let overview = archive
+            .get_overview(None, None, "")
+            .await
+            .expect("archive overview");
+        assert_eq!(overview.summary.room_count, 2);
+        assert_eq!(overview.summary.session_count, 3);
+        assert_eq!(overview.summary.total_revenue, 1700);
+        assert_eq!(overview.rooms.len(), 2);
+
+        let sessions = archive
+            .get_room_sessions(100, None, None, 1, 20)
+            .await
+            .expect("room sessions");
+        assert_eq!(sessions.total, 2);
+        assert_eq!(sessions.items[0].id, 2);
+
+        let statistics = archive
+            .get_statistics(Some(100), None, None)
+            .await
+            .expect("room statistics");
+        assert_eq!(statistics.summary.total_revenue, 1700);
+        assert_eq!(statistics.daily.len(), 2);
+
+        let by_content = archive
+            .search(None, None, "世界", "all", None, None, 1, 20)
+            .await
+            .expect("global content search");
+        assert_eq!(by_content.total, 1);
+        assert_eq!(by_content.items[0].event_type, "danmaku");
+
+        let by_uid = archive
+            .search(Some(100), None, "42", "all", None, None, 1, 20)
+            .await
+            .expect("room uid search");
+        assert_eq!(by_uid.total, 2);
+
+        let session_events = archive
+            .search(None, Some(1), "", "superchat", None, None, 1, 20)
+            .await
+            .expect("session event search");
+        assert_eq!(session_events.total, 1);
+        assert_eq!(session_events.items[0].content, "支持主播");
+    }
+
+    #[tokio::test]
+    async fn prunes_only_inactive_sessions_without_events() {
+        let mut conn = Connection::open_in_memory().expect("in-memory database");
+        archive_migrations::initialize(&mut conn).expect("archive schema");
+        conn.execute_batch(
+            r#"
+INSERT INTO sessions (id, room_id, start_time) VALUES
+    (1, 100, 1700000000),
+    (2, 100, 1700000100),
+    (3, 100, 1700000200);
+INSERT INTO danmaku (
+    session_id, original_id, content, user_uid, user_name, timestamp
+) VALUES (2, 'd1', '保留', 42, 'Alice', 1700000110);
+"#,
+        )
+        .expect("seed archive data");
+        let archive = ArchiveManager {
+            db: Mutex::new(conn),
+            active_session_id: Mutex::new(Some(3)),
+        };
+
+        assert_eq!(archive.prune_empty_sessions().await.expect("prune"), 1);
+        let db = archive.db.lock().await;
+        let ids = db
+            .prepare("SELECT id FROM sessions ORDER BY id")
+            .expect("session query")
+            .query_map([], |row| row.get::<_, i64>(0))
+            .expect("session rows")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("session ids");
+        assert_eq!(ids, vec![2, 3]);
     }
 }

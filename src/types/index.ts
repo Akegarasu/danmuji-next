@@ -571,6 +571,78 @@ export interface ArchiveSession {
   sc_count: number
 }
 
+/** 归档聚合统计 */
+export interface ArchiveSummary {
+  room_count: number
+  session_count: number
+  live_duration: number
+  total_revenue: number
+  gift_revenue: number
+  sc_revenue: number
+  guard_revenue: number
+  danmaku_count: number
+  gift_count: number
+  sc_count: number
+}
+
+/** 按直播间聚合的归档摘要 */
+export interface ArchiveRoomSummary {
+  room_id: number
+  room_title: string
+  streamer_uid: number
+  session_count: number
+  live_duration: number
+  total_revenue: number
+  danmaku_count: number
+  gift_count: number
+  sc_count: number
+  first_live_time: number
+  last_live_time: number
+}
+
+export interface ArchiveOverview {
+  summary: ArchiveSummary
+  rooms: ArchiveRoomSummary[]
+}
+
+export interface ArchiveDailyStat {
+  date: string
+  session_count: number
+  live_duration: number
+  total_revenue: number
+  gift_revenue: number
+  sc_revenue: number
+  guard_revenue: number
+  danmaku_count: number
+  gift_count: number
+  sc_count: number
+}
+
+export interface ArchiveStatistics {
+  summary: ArchiveSummary
+  daily: ArchiveDailyStat[]
+}
+
+/** 跨弹幕、礼物与醒目留言的统一搜索结果 */
+export interface ArchiveSearchItem {
+  event_type: Exclude<ArchiveContentType, 'all'>
+  id: number
+  session_id: number
+  room_id: number
+  room_title: string
+  content: string
+  detail?: string
+  user_uid: number
+  user_name: string
+  timestamp: number
+  amount?: number
+  quantity?: number
+  image_url?: string
+  is_emoticon: boolean
+  is_paid: boolean
+  guard_level?: number
+}
+
 /** 分页结果 */
 export interface PagedResult<T> {
   items: T[]

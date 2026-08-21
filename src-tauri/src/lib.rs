@@ -13,6 +13,7 @@
 
 mod auth;
 mod archive;
+mod archive_migrations;
 mod blive_service;
 mod commands;
 mod config;
@@ -214,12 +215,17 @@ pub fn run() {
             commands::get_window_lock_state,
             commands::get_locked_windows,
             // 存档
+            commands::get_archive_overview,
+            commands::get_archive_room_sessions,
+            commands::get_archive_statistics,
+            commands::search_archive,
             commands::get_archive_sessions,
             commands::get_archive_session_detail,
             commands::search_archive_danmaku,
             commands::lookup_archive_user_names,
             commands::search_archive_gifts,
             commands::search_archive_superchat,
+            commands::prune_empty_archive_sessions,
             commands::delete_archive_session,
             commands::create_archive_window,
             // 扩展

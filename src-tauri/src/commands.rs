@@ -13,8 +13,8 @@ use std::sync::Mutex;
 
 use crate::auth::{self, QRCodeData, QRCodeStatus, UserInfo};
 use crate::archive::{
-    ArchiveManager, ArchiveSession, ArchivedDanmaku, ArchivedGift, ArchivedSuperChat,
-    ArchivedUserName, PagedResult,
+    ArchiveManager, ArchiveOverview, ArchiveSearchItem, ArchiveSession, ArchiveStatistics,
+    ArchivedDanmaku, ArchivedGift, ArchivedSuperChat, ArchivedUserName, PagedResult,
 };
 use crate::blive_service::BliveService;
 use crate::live_types::{
@@ -676,6 +676,71 @@ pub async fn get_locked_windows(
 
 // ==================== 存档操作 ====================
 
+/// 获取存档首页统计及按房间聚合的数据。
+#[tauri::command]
+pub async fn get_archive_overview(
+    archive: State<'_, Arc<ArchiveManager>>,
+    from_time: Option<i64>,
+    to_time: Option<i64>,
+    query: String,
+) -> Result<ArchiveOverview, String> {
+    archive.get_overview(from_time, to_time, &query).await
+}
+
+/// 按房间分页获取直播场次。
+#[tauri::command]
+pub async fn get_archive_room_sessions(
+    archive: State<'_, Arc<ArchiveManager>>,
+    room_id: u64,
+    from_time: Option<i64>,
+    to_time: Option<i64>,
+    page: u32,
+    page_size: u32,
+) -> Result<PagedResult<ArchiveSession>, String> {
+    archive
+        .get_room_sessions(room_id, from_time, to_time, page, page_size)
+        .await
+}
+
+/// 获取全局或指定房间的按日统计。
+#[tauri::command]
+pub async fn get_archive_statistics(
+    archive: State<'_, Arc<ArchiveManager>>,
+    room_id: Option<u64>,
+    from_time: Option<i64>,
+    to_time: Option<i64>,
+) -> Result<ArchiveStatistics, String> {
+    archive.get_statistics(room_id, from_time, to_time).await
+}
+
+/// 统一搜索弹幕、礼物与醒目留言。
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn search_archive(
+    archive: State<'_, Arc<ArchiveManager>>,
+    room_id: Option<u64>,
+    session_id: Option<i64>,
+    query: String,
+    event_type: String,
+    from_time: Option<i64>,
+    to_time: Option<i64>,
+    page: u32,
+    page_size: u32,
+) -> Result<PagedResult<ArchiveSearchItem>, String> {
+    archive
+        .search(
+            room_id,
+            session_id,
+            &query,
+            &event_type,
+            from_time,
+            to_time,
+            page,
+            page_size,
+        )
+        .await
+}
+
 /// 获取所有存档会话
 #[tauri::command]
 pub async fn get_archive_sessions(
@@ -746,6 +811,14 @@ pub async fn search_archive_superchat(
     archive
         .search_superchat(session_id, &query, min_price, max_price, page, page_size)
         .await
+}
+
+/// 清理没有任何事件的历史场次
+#[tauri::command]
+pub async fn prune_empty_archive_sessions(
+    archive: State<'_, Arc<ArchiveManager>>,
+) -> Result<u64, String> {
+    archive.prune_empty_sessions().await
 }
 
 /// 删除存档会话
