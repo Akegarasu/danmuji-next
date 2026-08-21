@@ -173,7 +173,7 @@ const getGuardName = (level: number) => {
 
 const getInteractAction = (msgType: number) => {
   switch (msgType) {
-    case 2: return '关注'
+    case 2: return '关注了直播间'
     case 3: return '分享'
     case 4: return '特别关注'
     case 5: return '互相关注'
