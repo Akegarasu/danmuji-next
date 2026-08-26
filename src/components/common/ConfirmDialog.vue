@@ -5,14 +5,20 @@ const props = withDefaults(defineProps<{
   message: string
   confirmText?: string
   cancelText?: string
+  loadingText?: string
   showCancel?: boolean
   danger?: boolean
+  loading?: boolean
+  closeOnConfirm?: boolean
 }>(), {
   title: '确认',
   confirmText: '确定',
   cancelText: '取消',
+  loadingText: '处理中…',
   showCancel: true,
-  danger: false
+  danger: false,
+  loading: false,
+  closeOnConfirm: true
 })
 
 const emit = defineEmits<{
@@ -22,12 +28,14 @@ const emit = defineEmits<{
 }>()
 
 const close = () => {
+  if (props.loading) return
   emit('update:visible', false)
   emit('cancel')
 }
 
 const confirm = () => {
-  emit('update:visible', false)
+  if (props.loading) return
+  if (props.closeOnConfirm) emit('update:visible', false)
   emit('confirm')
 }
 </script>
@@ -36,17 +44,23 @@ const confirm = () => {
   <Teleport to="body">
     <Transition name="confirm-fade">
       <div v-if="visible" class="confirm-overlay" @click.self="close">
-        <div class="confirm-dialog">
+        <div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title">
           <div class="confirm-header">
-            <h3>{{ title }}</h3>
+            <h3 id="confirm-dialog-title">{{ title }}</h3>
           </div>
           <div class="confirm-body">
             {{ message }}
           </div>
           <div class="confirm-footer">
-            <button v-if="showCancel" class="confirm-btn cancel" @click="close">{{ cancelText }}</button>
-            <button class="confirm-btn" :class="danger ? 'danger' : 'primary'" @click="confirm">
-              {{ confirmText }}
+            <button v-if="showCancel" class="confirm-btn cancel" :disabled="loading" @click="close">{{ cancelText }}</button>
+            <button
+              class="confirm-btn"
+              :class="danger ? 'danger' : 'primary'"
+              :disabled="loading"
+              @click="confirm"
+            >
+              <span v-if="loading" class="button-spinner" aria-hidden="true" />
+              {{ loading ? loadingText : confirmText }}
             </button>
           </div>
         </div>
@@ -123,12 +137,17 @@ const confirm = () => {
   cursor: pointer;
   transition: all 0.15s;
 
+  &:disabled {
+    cursor: wait;
+    opacity: 0.65;
+  }
+
   &.cancel {
     background: transparent;
     border: 1px solid var(--border-color);
     color: var(--text-secondary);
 
-    &:hover {
+    &:hover:not(:disabled) {
       background: var(--bg-hover);
       color: var(--text-primary);
     }
@@ -139,7 +158,7 @@ const confirm = () => {
     border: none;
     color: white;
 
-    &:hover {
+    &:hover:not(:disabled) {
       opacity: 0.9;
     }
   }
@@ -149,10 +168,26 @@ const confirm = () => {
     border: none;
     color: white;
 
-    &:hover {
+    &:hover:not(:disabled) {
       background: #dc2626;
     }
   }
+}
+
+.button-spinner {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  margin-right: 5px;
+  vertical-align: -1px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: confirmSpin 0.7s linear infinite;
+}
+
+@keyframes confirmSpin {
+  to { transform: rotate(360deg); }
 }
 
 .confirm-fade-enter-active,

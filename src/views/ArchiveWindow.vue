@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import TitleBar from '@/components/common/TitleBar.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import ArchiveSearchResults from '@/components/archive/ArchiveSearchResults.vue'
 import ArchiveStatsPanel from '@/components/archive/ArchiveStatsPanel.vue'
 import { useArchiveStore } from '@/stores/archive'
@@ -14,14 +15,16 @@ const roomFilterInput = ref('')
 const startDate = ref('')
 const endDate = ref('')
 const dateError = ref('')
-const confirmDelete = ref<number | null>(null)
-const confirmPrune = ref(false)
-const pruneNotice = ref('')
+const dateDirty = ref(false)
+const activeRange = ref<'7' | '30' | 'all' | 'custom'>('all')
+const roomSort = ref<'recent' | 'revenue' | 'sessions' | 'danmaku'>('recent')
+const deleteTarget = ref<ArchiveSession | null>(null)
+const deleteDialogVisible = ref(false)
+const pruneDialogVisible = ref(false)
+const operationNotice = ref<{ message: string; type: 'success' | 'error' } | null>(null)
 let activityTimer: ReturnType<typeof setTimeout> | undefined
 let roomTimer: ReturnType<typeof setTimeout> | undefined
-let deleteTimer: ReturnType<typeof setTimeout> | undefined
-let pruneTimer: ReturnType<typeof setTimeout> | undefined
-let pruneNoticeTimer: ReturnType<typeof setTimeout> | undefined
+let noticeTimer: ReturnType<typeof setTimeout> | undefined
 
 const contentTypes: { value: ArchiveContentType; label: string }[] = [
   { value: 'all', label: '全部' },
@@ -36,6 +39,43 @@ const pageTitle = computed(() => {
   return '归档总览'
 })
 
+const sortedRooms = computed(() => {
+  const rooms = [...archiveStore.overview.rooms]
+  const sorters = {
+    recent: (a: typeof rooms[number], b: typeof rooms[number]) => b.last_live_time - a.last_live_time,
+    revenue: (a: typeof rooms[number], b: typeof rooms[number]) => b.total_revenue - a.total_revenue,
+    sessions: (a: typeof rooms[number], b: typeof rooms[number]) => b.session_count - a.session_count,
+    danmaku: (a: typeof rooms[number], b: typeof rooms[number]) => b.danmaku_count - a.danmaku_count,
+  }
+  return rooms.sort(sorters[roomSort.value])
+})
+
+const roomCountText = computed(() => {
+  const shown = archiveStore.overview.rooms.length
+  const total = archiveStore.overview.summary.room_count
+  return roomFilterInput.value.trim() ? `显示 ${shown} / ${total} 个房间` : `${total} 个房间`
+})
+
+const hasDateFilter = computed(() => Boolean(startDate.value || endDate.value))
+const rangeLabel = computed(() => {
+  if (!startDate.value && !endDate.value) return '全部时间'
+  if (startDate.value && endDate.value) return `${startDate.value} 至 ${endDate.value}`
+  if (startDate.value) return `${startDate.value} 起`
+  return `截至 ${endDate.value}`
+})
+
+const searchEmptyText = computed(() => {
+  if (archiveStore.searchQuery) return '没有匹配当前关键词的归档记录'
+  if (hasDateFilter.value) return '所选时间范围内没有归档记录'
+  return archiveStore.view === 'session' ? '本场直播没有可展示的互动记录' : '该直播间还没有互动记录'
+})
+
+const deleteMessage = computed(() => {
+  if (!deleteTarget.value) return ''
+  const title = deleteTarget.value.room_title || archiveStore.selectedRoom?.room_title || '当前直播间'
+  return `${title}\n${formatDateTime(deleteTarget.value.start_time)}\n\n将永久删除本场弹幕、礼物和醒目留言，且无法恢复。`
+})
+
 const formatDateTime = (timestamp: number) => {
   const date = new Date(timestamp * 1000)
   return new Intl.DateTimeFormat('zh-CN', {
@@ -48,10 +88,20 @@ const formatShortDate = (timestamp: number) =>
   new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
     .format(new Date(timestamp * 1000))
 
+const formatMonthDay = (timestamp: number) =>
+  new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit' })
+    .format(new Date(timestamp * 1000))
+
+const formatSecondsDuration = (seconds: number) => {
+  const minutes = Math.max(0, Math.floor(seconds / 60))
+  if (minutes >= 1440) return `${Math.floor(minutes / 1440)}天 ${Math.floor((minutes % 1440) / 60)}小时`
+  if (minutes >= 60) return `${Math.floor(minutes / 60)}小时 ${minutes % 60}分`
+  return `${minutes}分钟`
+}
+
 const formatDuration = (session: ArchiveSession) => {
   if (!session.end_time) return '进行中'
-  const minutes = Math.max(0, Math.floor((session.end_time - session.start_time) / 60))
-  return minutes >= 60 ? `${Math.floor(minutes / 60)}小时 ${minutes % 60}分` : `${minutes}分钟`
+  return formatSecondsDuration(session.end_time - session.start_time)
 }
 
 const localDateValue = (date: Date) => {
@@ -66,7 +116,13 @@ const toTimestamp = (value: string, endExclusive = false) => {
   return Math.floor(date.getTime() / 1000)
 }
 
-const applyDateRange = async () => {
+const markDateDirty = () => {
+  activeRange.value = 'custom'
+  dateDirty.value = true
+  dateError.value = ''
+}
+
+const applyDateRange = async (range: typeof activeRange.value = 'custom') => {
   const fromTime = toTimestamp(startDate.value)
   const toTime = toTimestamp(endDate.value, true)
   if (fromTime !== undefined && toTime !== undefined && fromTime >= toTime) {
@@ -74,21 +130,24 @@ const applyDateRange = async () => {
     return
   }
   dateError.value = ''
+  activeRange.value = range
+  dateDirty.value = false
   await archiveStore.applyDateFilter({ fromTime, toTime })
 }
 
-const setRecentDays = async (days?: number) => {
+const setRecentDays = async (days?: 7 | 30) => {
   if (!days) {
     startDate.value = ''
     endDate.value = ''
-  } else {
-    const end = new Date()
-    const start = new Date()
-    start.setDate(start.getDate() - days + 1)
-    startDate.value = localDateValue(start)
-    endDate.value = localDateValue(end)
+    await applyDateRange('all')
+    return
   }
-  await applyDateRange()
+  const end = new Date()
+  const start = new Date()
+  start.setDate(start.getDate() - days + 1)
+  startDate.value = localDateValue(start)
+  endDate.value = localDateValue(end)
+  await applyDateRange(String(days) as '7' | '30')
 }
 
 const onActivityInput = () => {
@@ -96,56 +155,97 @@ const onActivityInput = () => {
   activityTimer = setTimeout(() => archiveStore.runSearch(activityInput.value, 1), 300)
 }
 
+const submitActivitySearch = async () => {
+  if (activityTimer) clearTimeout(activityTimer)
+  await archiveStore.runSearch(activityInput.value, 1)
+}
+
+const clearActivitySearch = async () => {
+  if (activityTimer) clearTimeout(activityTimer)
+  activityInput.value = ''
+  await archiveStore.runSearch('', 1)
+}
+
+const setContentType = async (type: ArchiveContentType) => {
+  if (activityTimer) clearTimeout(activityTimer)
+  await archiveStore.setContentType(type, activityInput.value)
+}
+
 const onRoomFilterInput = () => {
   if (roomTimer) clearTimeout(roomTimer)
   roomTimer = setTimeout(() => archiveStore.loadOverview(roomFilterInput.value), 250)
 }
 
+const clearRoomFilter = async () => {
+  if (roomTimer) clearTimeout(roomTimer)
+  roomFilterInput.value = ''
+  await archiveStore.loadOverview('')
+}
+
+const clearPendingInputs = () => {
+  if (activityTimer) clearTimeout(activityTimer)
+  if (roomTimer) clearTimeout(roomTimer)
+}
+
 const openRoom = async (room: Parameters<typeof archiveStore.openRoom>[0]) => {
+  clearPendingInputs()
   activityInput.value = ''
   await archiveStore.openRoom(room)
 }
 
 const openSession = async (session: ArchiveSession) => {
+  clearPendingInputs()
   activityInput.value = ''
   await archiveStore.openSession(session)
 }
 
 const goOverview = async () => {
+  clearPendingInputs()
   activityInput.value = ''
   roomFilterInput.value = ''
   await archiveStore.goOverview()
 }
 
 const goRoom = async () => {
+  clearPendingInputs()
   activityInput.value = ''
   await archiveStore.goRoom()
 }
 
-const handleDelete = async (sessionId: number) => {
-  if (confirmDelete.value !== sessionId) {
-    confirmDelete.value = sessionId
-    if (deleteTimer) clearTimeout(deleteTimer)
-    deleteTimer = setTimeout(() => { confirmDelete.value = null }, 3000)
-    return
-  }
-  await archiveStore.removeSession(sessionId)
-  confirmDelete.value = null
+const showOperationNotice = (message: string, type: 'success' | 'error' = 'success') => {
+  operationNotice.value = { message, type }
+  if (noticeTimer) clearTimeout(noticeTimer)
+  noticeTimer = setTimeout(() => { operationNotice.value = null }, 4000)
 }
 
-const handlePrune = async () => {
-  if (!confirmPrune.value) {
-    confirmPrune.value = true
-    pruneNotice.value = ''
-    if (pruneTimer) clearTimeout(pruneTimer)
-    pruneTimer = setTimeout(() => { confirmPrune.value = false }, 3000)
-    return
+const requestDelete = (session: ArchiveSession) => {
+  deleteTarget.value = session
+  deleteDialogVisible.value = true
+}
+
+const confirmDeleteSession = async () => {
+  const target = deleteTarget.value
+  if (!target) return
+  try {
+    await archiveStore.removeSession(target.id)
+    deleteDialogVisible.value = false
+    deleteTarget.value = null
+    showOperationNotice('场次归档已删除')
+  } catch {
+    deleteDialogVisible.value = false
+    showOperationNotice('删除失败，请根据错误提示重试', 'error')
   }
-  const deleted = await archiveStore.pruneEmptySessions()
-  confirmPrune.value = false
-  pruneNotice.value = deleted > 0 ? `已清理 ${deleted} 个空场次` : '没有需要清理的空场次'
-  if (pruneNoticeTimer) clearTimeout(pruneNoticeTimer)
-  pruneNoticeTimer = setTimeout(() => { pruneNotice.value = '' }, 4000)
+}
+
+const confirmPrune = async () => {
+  try {
+    const deleted = await archiveStore.pruneEmptySessions()
+    pruneDialogVisible.value = false
+    showOperationNotice(deleted > 0 ? `已清理 ${deleted} 个空场次` : '没有需要清理的空场次')
+  } catch {
+    pruneDialogVisible.value = false
+    showOperationNotice('清理失败，请根据错误提示重试', 'error')
+  }
 }
 
 onMounted(async () => {
@@ -156,9 +256,7 @@ onMounted(async () => {
 onUnmounted(async () => {
   if (activityTimer) clearTimeout(activityTimer)
   if (roomTimer) clearTimeout(roomTimer)
-  if (deleteTimer) clearTimeout(deleteTimer)
-  if (pruneTimer) clearTimeout(pruneTimer)
-  if (pruneNoticeTimer) clearTimeout(pruneNoticeTimer)
+  if (noticeTimer) clearTimeout(noticeTimer)
   await cleanupWindowManager('archive')
 })
 </script>
@@ -169,7 +267,7 @@ onUnmounted(async () => {
 
     <main class="archive-body">
       <header class="page-toolbar">
-        <div class="breadcrumb">
+        <div class="breadcrumb" aria-label="当前位置">
           <button v-if="archiveStore.view !== 'overview'" @click="goOverview">总览</button>
           <span v-if="archiveStore.view !== 'overview'">/</span>
           <button v-if="archiveStore.view === 'session'" @click="goRoom">
@@ -179,27 +277,56 @@ onUnmounted(async () => {
           <strong>{{ pageTitle }}</strong>
         </div>
 
-        <div class="date-filter">
-          <div class="quick-ranges">
-            <button @click="setRecentDays(7)">近 7 天</button>
-            <button @click="setRecentDays(30)">近 30 天</button>
-            <button @click="setRecentDays()">全部</button>
+        <div class="filter-toolbar">
+          <div class="quick-ranges" aria-label="快捷时间范围">
+            <button :class="{ active: activeRange === '7' }" @click="setRecentDays(7)">近 7 天</button>
+            <button :class="{ active: activeRange === '30' }" @click="setRecentDays(30)">近 30 天</button>
+            <button :class="{ active: activeRange === 'all' }" @click="setRecentDays()">全部</button>
           </div>
-          <label><span>从</span><input v-model="startDate" type="date" @change="applyDateRange" /></label>
-          <label><span>至</span><input v-model="endDate" type="date" @change="applyDateRange" /></label>
+          <div class="date-filter" :title="`当前范围：${rangeLabel}`">
+            <label><span>从</span><input v-model="startDate" type="date" @input="markDateDirty" /></label>
+            <label><span>至</span><input v-model="endDate" type="date" @input="markDateDirty" /></label>
+            <button class="apply-date" :disabled="!dateDirty" @click="applyDateRange('custom')">应用</button>
+          </div>
+          <button
+            class="refresh-button"
+            :disabled="archiveStore.loadingPage || archiveStore.loadingSessions"
+            title="刷新当前归档"
+            aria-label="刷新当前归档"
+            @click="archiveStore.refreshCurrentView"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M18.5 9A7 7 0 0 0 6.2 6.5L4 11M5.5 15A7 7 0 0 0 17.8 17.5L20 13" /></svg>
+          </button>
         </div>
       </header>
 
-      <div v-if="dateError || archiveStore.error" class="error-banner">
-        {{ dateError || archiveStore.error }}
+      <div v-if="archiveStore.loadingPage || archiveStore.loadingSessions" class="top-progress" aria-label="正在更新归档" />
+
+      <div v-if="dateError || archiveStore.error" class="error-banner" role="alert">
+        <span>{{ dateError || archiveStore.error }}</span>
+        <div>
+          <button v-if="archiveStore.error" @click="archiveStore.refreshCurrentView">重试</button>
+          <button aria-label="关闭错误提示" @click="dateError = ''; archiveStore.dismissError()">×</button>
+        </div>
       </div>
 
-      <div v-if="archiveStore.loadingPage && archiveStore.overview.summary.session_count === 0" class="page-loading">
-        正在整理归档数据…
+      <Transition name="notice">
+        <div v-if="operationNotice" class="operation-notice" :class="operationNotice.type" role="status">
+          {{ operationNotice.message }}
+        </div>
+      </Transition>
+
+      <div v-if="archiveStore.loadingPage && !archiveStore.initialized" class="page-loading">
+        <i aria-hidden="true" />
+        <span>正在整理归档数据…</span>
       </div>
 
       <template v-else-if="archiveStore.view === 'overview'">
-        <ArchiveStatsPanel :summary="archiveStore.overview.summary" :daily="archiveStore.statistics.daily" />
+        <ArchiveStatsPanel
+          :summary="archiveStore.overview.summary"
+          :daily="archiveStore.statistics.daily"
+          :loading="archiveStore.loadingPage"
+        />
 
         <section class="panel global-search">
           <div class="section-heading">
@@ -211,132 +338,170 @@ onUnmounted(async () => {
           </div>
           <div class="search-row">
             <div class="search-box">
-              <span>⌕</span>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg>
               <input
                 v-model="activityInput"
                 type="search"
                 placeholder="输入弹幕内容、用户名或 UID…"
                 @input="onActivityInput"
-                @keyup.enter="archiveStore.runSearch(activityInput, 1)"
+                @keyup.enter="submitActivitySearch"
               />
+              <button v-if="activityInput" aria-label="清空搜索" @click="clearActivitySearch">×</button>
             </div>
-            <div class="type-tabs">
+            <div class="type-tabs" aria-label="记录类型">
               <button
                 v-for="type in contentTypes"
                 :key="type.value"
                 :class="{ active: archiveStore.contentType === type.value }"
-                @click="archiveStore.setContentType(type.value)"
+                :aria-pressed="archiveStore.contentType === type.value"
+                @click="setContentType(type.value)"
               >{{ type.label }}</button>
             </div>
           </div>
           <ArchiveSearchResults
-            v-if="archiveStore.searchQuery"
+            v-if="archiveStore.searchQuery || archiveStore.loadingSearch || archiveStore.searchError"
             :result="archiveStore.searchResult"
             :loading="archiveStore.loadingSearch"
+            :error="archiveStore.searchError"
+            empty-text="没有匹配当前关键词的归档记录"
             show-room
             @page="page => archiveStore.runSearch(activityInput, page)"
+            @retry="archiveStore.runSearch(activityInput, archiveStore.searchResult.page)"
           />
         </section>
 
         <section class="rooms-section">
-          <div class="section-heading">
+          <div class="section-heading rooms-heading">
             <div>
               <h2>直播间</h2>
-              <p>{{ archiveStore.overview.summary.room_count }} 个房间，按最近直播排序</p>
+              <p>{{ roomCountText }}，按所选方式排序</p>
             </div>
             <div class="rooms-actions">
-              <span v-if="pruneNotice" class="prune-notice">{{ pruneNotice }}</span>
               <button
                 class="prune-button"
-                :class="{ confirming: confirmPrune }"
-                :title="confirmPrune ? '再次点击确认清理' : '删除没有弹幕、礼物或醒目留言的历史场次'"
-                @click="handlePrune"
-              >{{ confirmPrune ? '确认清理' : '清理空场次' }}</button>
-              <input
-                v-model="roomFilterInput"
-                class="room-filter"
-                type="search"
-                placeholder="筛选房间标题 / ID"
-                @input="onRoomFilterInput"
-              />
+                title="删除没有弹幕、礼物或醒目留言的历史场次"
+                :disabled="archiveStore.pruning"
+                @click="pruneDialogVisible = true"
+              >清理空场次</button>
+              <label class="sort-select">
+                <span>排序</span>
+                <select v-model="roomSort">
+                  <option value="recent">最近直播</option>
+                  <option value="revenue">累计收益</option>
+                  <option value="sessions">直播场次</option>
+                  <option value="danmaku">弹幕数量</option>
+                </select>
+              </label>
+              <div class="room-filter-wrap">
+                <input
+                  v-model="roomFilterInput"
+                  class="room-filter"
+                  type="search"
+                  placeholder="筛选标题 / 房间 ID / UID"
+                  @input="onRoomFilterInput"
+                />
+                <button v-if="roomFilterInput" aria-label="清空房间筛选" @click="clearRoomFilter">×</button>
+              </div>
             </div>
           </div>
 
-          <div v-if="archiveStore.overview.rooms.length" class="room-grid">
+          <div v-if="sortedRooms.length" class="room-grid" :class="{ refreshing: archiveStore.loadingPage }">
             <button
-              v-for="room in archiveStore.overview.rooms"
+              v-for="room in sortedRooms"
               :key="room.room_id"
               class="room-card"
               @click="openRoom(room)"
             >
-              <div class="room-avatar">{{ (room.room_title || '房').slice(0, 1) }}</div>
+              <div class="room-avatar" aria-hidden="true">{{ (room.room_title || '房').slice(0, 1) }}</div>
               <div class="room-info">
                 <div class="room-title-line">
                   <strong>{{ room.room_title }}</strong>
                   <span>#{{ room.room_id }}</span>
                 </div>
-                <p>最近直播 {{ formatShortDate(room.last_live_time) }}</p>
+                <p>最近直播 {{ formatShortDate(room.last_live_time) }} · {{ formatSecondsDuration(room.live_duration) }}</p>
                 <div class="room-metrics">
                   <span><b>{{ room.session_count }}</b> 场</span>
                   <span><b>{{ room.danmaku_count }}</b> 弹幕</span>
                   <span><b>{{ formatPrice(room.total_revenue) || '¥0' }}</b> 收益</span>
                 </div>
               </div>
-              <span class="room-arrow">›</span>
+              <span class="room-arrow" aria-hidden="true">›</span>
             </button>
           </div>
-          <div v-else class="empty-panel">所选条件下没有直播间归档</div>
+          <div v-else class="empty-panel">
+            <strong>{{ roomFilterInput ? '没有匹配的直播间' : hasDateFilter ? '所选时间内没有直播间归档' : '还没有直播间归档' }}</strong>
+            <span v-if="roomFilterInput">请尝试其他标题、房间 ID 或主播 UID</span>
+            <button v-if="roomFilterInput" @click="clearRoomFilter">清空筛选</button>
+          </div>
         </section>
       </template>
 
       <template v-else-if="archiveStore.view === 'room' && archiveStore.selectedRoom">
         <section class="room-hero">
-          <div class="room-avatar large">{{ archiveStore.selectedRoom.room_title.slice(0, 1) }}</div>
+          <div class="room-avatar large" aria-hidden="true">{{ archiveStore.selectedRoom.room_title.slice(0, 1) }}</div>
           <div>
             <h1>{{ archiveStore.selectedRoom.room_title }}</h1>
             <p>房间 {{ archiveStore.selectedRoom.room_id }} · 主播 UID {{ archiveStore.selectedRoom.streamer_uid }}</p>
           </div>
         </section>
 
-        <ArchiveStatsPanel :summary="archiveStore.statistics.summary" :daily="archiveStore.statistics.daily" />
+        <ArchiveStatsPanel
+          :summary="archiveStore.statistics.summary"
+          :daily="archiveStore.statistics.daily"
+          :loading="archiveStore.loadingPage"
+        />
 
         <div class="room-content-grid">
           <section class="panel session-panel">
             <div class="section-heading compact">
               <div>
                 <h2>直播场次</h2>
-                <p>共 {{ archiveStore.roomSessions.total }} 场</p>
+                <p>共 {{ archiveStore.roomSessions.total }} 场 · {{ rangeLabel }}</p>
               </div>
             </div>
-            <div v-if="archiveStore.roomSessions.items.length" class="session-list">
+
+            <div v-if="archiveStore.loadingSessions && archiveStore.roomSessions.items.length === 0" class="session-skeleton" aria-label="正在加载直播场次">
+              <i v-for="index in 4" :key="index" />
+            </div>
+            <div v-else-if="archiveStore.roomSessions.items.length" class="session-list" :class="{ refreshing: archiveStore.loadingSessions }">
               <article
                 v-for="session in archiveStore.roomSessions.items"
                 :key="session.id"
                 class="session-card"
-                @click="openSession(session)"
               >
-                <div class="session-date">
-                  <strong>{{ formatShortDate(session.start_time).slice(5) }}</strong>
-                  <span>{{ new Date(session.start_time * 1000).getFullYear() }}</span>
-                </div>
-                <div class="session-info">
-                  <strong>{{ session.room_title || archiveStore.selectedRoom.room_title }}</strong>
-                  <p>{{ formatDateTime(session.start_time) }} · {{ formatDuration(session) }}</p>
-                  <div><span>{{ session.danmaku_count }} 弹幕</span><span>{{ session.gift_count }} 礼物</span><b>{{ formatPrice(session.total_revenue) || '¥0' }}</b></div>
-                </div>
+                <button class="session-open" @click="openSession(session)">
+                  <div class="session-date">
+                    <strong>{{ formatMonthDay(session.start_time) }}</strong>
+                    <span>{{ new Date(session.start_time * 1000).getFullYear() }}</span>
+                  </div>
+                  <div class="session-info">
+                    <div class="session-title-line">
+                      <strong>{{ session.room_title || archiveStore.selectedRoom.room_title }}</strong>
+                      <span v-if="!session.end_time" class="live-badge">进行中</span>
+                    </div>
+                    <p>{{ formatDateTime(session.start_time) }} · {{ formatDuration(session) }}</p>
+                    <div><span>{{ session.danmaku_count }} 弹幕</span><span>{{ session.gift_count }} 礼物</span><b>{{ formatPrice(session.total_revenue) || '¥0' }}</b></div>
+                  </div>
+                </button>
                 <button
+                  v-if="session.end_time"
                   class="delete-button"
-                  :class="{ confirming: confirmDelete === session.id }"
-                  :title="confirmDelete === session.id ? '再次点击确认删除' : '删除本场归档'"
-                  @click.stop="handleDelete(session.id)"
-                >{{ confirmDelete === session.id ? '确认' : '×' }}</button>
+                  title="删除本场归档"
+                  aria-label="删除本场归档"
+                  @click="requestDelete(session)"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5" /></svg>
+                </button>
               </article>
             </div>
-            <div v-else class="empty-panel">所选时间内没有直播场次</div>
+            <div v-else class="empty-panel small">
+              <strong>所选时间内没有直播场次</strong>
+              <span>可调整顶部日期范围后重试</span>
+            </div>
             <div v-if="archiveStore.roomPages > 1" class="pagination">
-              <button :disabled="archiveStore.roomSessions.page <= 1" @click="archiveStore.loadRoomSessions(archiveStore.roomSessions.page - 1)">上一页</button>
+              <button :disabled="archiveStore.loadingSessions || archiveStore.roomSessions.page <= 1" @click="archiveStore.loadRoomSessions(archiveStore.roomSessions.page - 1)">上一页</button>
               <span>{{ archiveStore.roomSessions.page }} / {{ archiveStore.roomPages }}</span>
-              <button :disabled="archiveStore.roomSessions.page >= archiveStore.roomPages" @click="archiveStore.loadRoomSessions(archiveStore.roomSessions.page + 1)">下一页</button>
+              <button :disabled="archiveStore.loadingSessions || archiveStore.roomSessions.page >= archiveStore.roomPages" @click="archiveStore.loadRoomSessions(archiveStore.roomSessions.page + 1)">下一页</button>
             </div>
           </section>
 
@@ -350,17 +515,21 @@ onUnmounted(async () => {
             </div>
             <div class="stacked-search">
               <div class="search-box">
-                <span>⌕</span>
-                <input v-model="activityInput" type="search" placeholder="内容、用户名或 UID" @input="onActivityInput" />
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg>
+                <input v-model="activityInput" type="search" placeholder="内容、用户名或 UID" @input="onActivityInput" @keyup.enter="submitActivitySearch" />
+                <button v-if="activityInput" aria-label="清空搜索" @click="clearActivitySearch">×</button>
               </div>
-              <div class="type-tabs">
-                <button v-for="type in contentTypes" :key="type.value" :class="{ active: archiveStore.contentType === type.value }" @click="archiveStore.setContentType(type.value)">{{ type.label }}</button>
+              <div class="type-tabs" aria-label="记录类型">
+                <button v-for="type in contentTypes" :key="type.value" :class="{ active: archiveStore.contentType === type.value }" :aria-pressed="archiveStore.contentType === type.value" @click="setContentType(type.value)">{{ type.label }}</button>
               </div>
             </div>
             <ArchiveSearchResults
               :result="archiveStore.searchResult"
               :loading="archiveStore.loadingSearch"
+              :error="archiveStore.searchError"
+              :empty-text="searchEmptyText"
               @page="page => archiveStore.runSearch(activityInput, page)"
+              @retry="archiveStore.runSearch(activityInput, archiveStore.searchResult.page)"
             />
           </section>
         </div>
@@ -385,27 +554,55 @@ onUnmounted(async () => {
           <div class="section-heading">
             <div>
               <h2>本场记录</h2>
-              <p>搜索本场弹幕内容、用户名或 UID</p>
+              <p>搜索本场弹幕内容、用户名或 UID<span v-if="hasDateFilter"> · 已应用 {{ rangeLabel }}</span></p>
             </div>
             <span class="result-count">{{ archiveStore.searchResult.total }} 条</span>
           </div>
           <div class="search-row">
             <div class="search-box">
-              <span>⌕</span>
-              <input v-model="activityInput" type="search" placeholder="搜索本场记录…" @input="onActivityInput" />
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg>
+              <input v-model="activityInput" type="search" placeholder="搜索本场记录…" @input="onActivityInput" @keyup.enter="submitActivitySearch" />
+              <button v-if="activityInput" aria-label="清空搜索" @click="clearActivitySearch">×</button>
             </div>
-            <div class="type-tabs">
-              <button v-for="type in contentTypes" :key="type.value" :class="{ active: archiveStore.contentType === type.value }" @click="archiveStore.setContentType(type.value)">{{ type.label }}</button>
+            <div class="type-tabs" aria-label="记录类型">
+              <button v-for="type in contentTypes" :key="type.value" :class="{ active: archiveStore.contentType === type.value }" :aria-pressed="archiveStore.contentType === type.value" @click="setContentType(type.value)">{{ type.label }}</button>
             </div>
           </div>
           <ArchiveSearchResults
             :result="archiveStore.searchResult"
             :loading="archiveStore.loadingSearch"
+            :error="archiveStore.searchError"
+            :empty-text="searchEmptyText"
             @page="page => archiveStore.runSearch(activityInput, page)"
+            @retry="archiveStore.runSearch(activityInput, archiveStore.searchResult.page)"
           />
         </section>
       </template>
     </main>
+
+    <ConfirmDialog
+      v-model:visible="deleteDialogVisible"
+      title="删除场次归档"
+      :message="deleteMessage"
+      confirm-text="永久删除"
+      loading-text="正在删除…"
+      danger
+      :loading="archiveStore.deletingSessionId !== null"
+      :close-on-confirm="false"
+      @confirm="confirmDeleteSession"
+      @cancel="deleteTarget = null"
+    />
+    <ConfirmDialog
+      v-model:visible="pruneDialogVisible"
+      title="清理空场次"
+      :message="'将删除没有弹幕、礼物或醒目留言的历史场次。\n\n该操作不会影响包含任何互动记录的存档。'"
+      confirm-text="开始清理"
+      loading-text="正在清理…"
+      danger
+      :loading="archiveStore.pruning"
+      :close-on-confirm="false"
+      @confirm="confirmPrune"
+    />
   </div>
 </template>
 
@@ -419,11 +616,11 @@ onUnmounted(async () => {
   background: var(--bg-primary);
   color: var(--text-primary);
 }
-
-.archive-body { flex: 1; overflow-y: auto; padding: 14px 16px 22px; }
-
-button, input { font: inherit; }
+.archive-body { position: relative; flex: 1; overflow-y: auto; padding: 14px 16px 22px; }
+button, input, select { font: inherit; }
 button { color: inherit; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 1px; }
+button:disabled { cursor: default; opacity: 0.45; }
 
 .page-toolbar {
   position: sticky;
@@ -434,26 +631,26 @@ button { color: inherit; }
   justify-content: space-between;
   gap: 12px;
   margin: -14px -16px 14px;
-  padding: 11px 16px;
+  padding: 10px 16px;
   border-bottom: 1px solid var(--border-color);
   background: rgb(25, 25, 25);
 }
-
-.breadcrumb { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: var(--font-size-sm); }
-.breadcrumb button { border: 0; background: transparent; color: var(--accent-primary); cursor: pointer; }
+.breadcrumb { display: flex; min-width: 90px; align-items: center; gap: 7px; font-size: var(--font-size-sm); }
+.breadcrumb button { overflow: hidden; border: 0; background: transparent; color: var(--accent-primary); cursor: pointer; text-overflow: ellipsis; white-space: nowrap; }
 .breadcrumb strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .breadcrumb span { color: var(--text-muted); }
-
-.date-filter, .quick-ranges, .date-filter label { display: flex; align-items: center; gap: 5px; }
-.quick-ranges { margin-right: 4px; }
-.quick-ranges button, .pagination button {
+.filter-toolbar, .date-filter, .quick-ranges, .date-filter label { display: flex; align-items: center; gap: 5px; }
+.filter-toolbar { min-width: 0; justify-content: flex-end; }
+.quick-ranges { margin-right: 3px; }
+.quick-ranges button, .apply-date, .pagination button, .refresh-button {
   padding: 5px 8px;
   border: 1px solid var(--border-color);
   border-radius: 4px;
   background: var(--bg-card);
   cursor: pointer;
 }
-.quick-ranges button:hover, .pagination button:hover:not(:disabled) { background: var(--bg-hover); }
+.quick-ranges button:hover, .apply-date:hover:not(:disabled), .pagination button:hover:not(:disabled), .refresh-button:hover:not(:disabled) { background: var(--bg-hover); }
+.quick-ranges button.active { border-color: rgba(92, 158, 255, 0.55); background: rgba(92, 158, 255, 0.16); color: #a9cbff; }
 .date-filter label span { color: var(--text-muted); font-size: var(--font-size-xs); }
 .date-filter input {
   width: 116px;
@@ -467,49 +664,64 @@ button { color: inherit; }
   font-size: var(--font-size-xs);
 }
 .date-filter input:focus { border-color: var(--accent-primary); }
+.apply-date { color: var(--accent-primary); font-size: var(--font-size-xs); }
+.refresh-button { display: grid; width: 28px; height: 28px; padding: 5px; place-items: center; }
+.refresh-button svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
-.error-banner { margin-bottom: 12px; padding: 8px 10px; border: 1px solid rgba(220, 60, 60, 0.4); border-radius: 6px; background: rgba(220, 60, 60, 0.12); color: #ef8a8a; font-size: var(--font-size-sm); }
-.page-loading { display: grid; height: 240px; place-items: center; color: var(--text-muted); }
+.top-progress { position: sticky; z-index: 6; top: 37px; height: 2px; margin: -14px -16px 12px; overflow: hidden; background: rgba(92, 158, 255, 0.12); }
+.top-progress::after { display: block; width: 40%; height: 100%; background: var(--accent-primary); content: ''; animation: progressMove 1s ease-in-out infinite; }
+.error-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; padding: 8px 10px; border: 1px solid rgba(220, 60, 60, 0.4); border-radius: 6px; background: rgba(220, 60, 60, 0.12); color: #ef8a8a; font-size: var(--font-size-sm); }
+.error-banner > span { min-width: 0; word-break: break-word; }
+.error-banner > div { display: flex; flex: 0 0 auto; gap: 5px; }
+.error-banner button { padding: 2px 6px; border: 0; border-radius: 3px; background: transparent; color: inherit; cursor: pointer; }
+.error-banner button:hover { background: rgba(255, 255, 255, 0.08); }
+.operation-notice { position: fixed; z-index: 20; top: 50px; left: 50%; padding: 7px 12px; transform: translateX(-50%); border: 1px solid rgba(74, 180, 115, 0.4); border-radius: 6px; background: rgb(31, 54, 40); color: #8de0ad; box-shadow: 0 5px 18px rgba(0, 0, 0, 0.25); font-size: var(--font-size-xs); }
+.operation-notice.error { border-color: rgba(220, 60, 60, 0.45); background: rgb(63, 34, 34); color: #ef8a8a; }
+.page-loading { display: flex; height: 240px; align-items: center; justify-content: center; gap: 9px; color: var(--text-muted); }
+.page-loading i { width: 16px; height: 16px; border: 2px solid var(--border-color); border-top-color: var(--accent-primary); border-radius: 50%; animation: spin 0.7s linear infinite; }
 
 .panel, .rooms-section { margin-top: 14px; border: 1px solid var(--border-color); border-radius: var(--border-radius); background: var(--bg-secondary); }
-.panel { padding: 14px; }
-.rooms-section { padding: 14px; }
+.panel, .rooms-section { padding: 14px; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 11px; }
 .section-heading.compact { margin-bottom: 9px; }
 .section-heading h2 { font-size: var(--font-size-base); font-weight: 600; }
 .section-heading p { margin-top: 2px; color: var(--text-muted); font-size: var(--font-size-xs); }
 .result-count { flex: 0 0 auto; color: var(--text-secondary); font-size: var(--font-size-xs); }
-.rooms-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
-.prune-notice { color: var(--text-secondary); font-size: var(--font-size-xs); white-space: nowrap; }
-.prune-button { padding: 6px 9px; border: 1px solid var(--border-color); border-radius: var(--border-radius-sm); background: var(--bg-card); color: var(--text-secondary); cursor: pointer; font-size: var(--font-size-xs); white-space: nowrap; }
-.prune-button:hover { background: var(--bg-hover); color: var(--text-primary); }
-.prune-button.confirming { border-color: rgba(220, 60, 60, 0.5); background: rgba(220, 60, 60, 0.14); color: #ef7373; }
 
 .search-row, .stacked-search { display: flex; align-items: center; gap: 8px; margin-bottom: 11px; }
 .stacked-search { align-items: stretch; flex-direction: column; }
-.search-box { display: flex; min-width: 160px; flex: 1; align-items: center; gap: 7px; height: 32px; padding: 0 9px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-card); }
+.search-box { display: flex; min-width: 160px; flex: 1; align-items: center; gap: 7px; height: 32px; padding: 0 7px 0 9px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-card); }
 .search-box:focus-within { border-color: var(--accent-primary); }
-.search-box > span { color: var(--text-muted); font-size: 17px; }
+.search-box > svg { width: 15px; height: 15px; flex: 0 0 auto; fill: none; stroke: var(--text-muted); stroke-width: 1.7; stroke-linecap: round; }
 .search-box input { width: 100%; border: 0; outline: 0; background: transparent; color: var(--text-primary); font-size: var(--font-size-sm); }
+.search-box button, .room-filter-wrap button { display: grid; width: 20px; height: 20px; flex: 0 0 20px; place-items: center; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.search-box button:hover, .room-filter-wrap button:hover { background: var(--bg-hover); color: var(--text-primary); }
 .search-box input::placeholder, .room-filter::placeholder { color: var(--text-muted); }
-
+.search-box input::-webkit-search-cancel-button, .room-filter::-webkit-search-cancel-button { display: none; }
 .type-tabs { display: flex; align-items: center; gap: 2px; padding: 2px; border-radius: 6px; background: var(--bg-card); }
 .type-tabs button { padding: 5px 9px; border: 0; border-radius: 4px; background: transparent; color: var(--text-secondary); cursor: pointer; font-size: var(--font-size-xs); }
 .type-tabs button:hover { color: var(--text-primary); }
 .type-tabs button.active { background: var(--accent-primary); color: white; }
 
-.room-filter { width: 190px; padding: 6px 8px; border: 1px solid var(--border-color); border-radius: 5px; outline: 0; background: var(--bg-card); color: var(--text-primary); font-size: var(--font-size-xs); }
-.room-filter:focus { border-color: var(--accent-primary); }
-.room-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.room-card { display: flex; align-items: center; gap: 11px; min-width: 0; padding: 12px; border: 1px solid var(--border-color); border-radius: var(--border-radius); background: var(--bg-card); cursor: pointer; text-align: left; transition: border-color 0.15s, background 0.15s; }
-.room-card:hover { border-color: var(--accent-primary); background: var(--bg-hover); }
-.room-avatar { display: grid; width: 38px; height: 38px; flex: 0 0 38px; place-items: center; border: 1px solid var(--border-color); border-radius: var(--border-radius); background: var(--bg-active); color: var(--accent-primary); font-weight: 600; }
+.rooms-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
+.prune-button { padding: 6px 9px; border: 1px solid var(--border-color); border-radius: var(--border-radius-sm); background: var(--bg-card); color: var(--text-secondary); cursor: pointer; font-size: var(--font-size-xs); white-space: nowrap; }
+.prune-button:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
+.sort-select { display: flex; align-items: center; gap: 4px; color: var(--text-muted); font-size: var(--font-size-xs); }
+.sort-select select { height: 29px; padding: 0 6px; border: 1px solid var(--border-color); border-radius: 5px; outline: 0; background: var(--bg-card); color: var(--text-primary); font-size: var(--font-size-xs); }
+.room-filter-wrap { display: flex; width: 205px; height: 30px; align-items: center; padding-right: 4px; border: 1px solid var(--border-color); border-radius: 5px; background: var(--bg-card); }
+.room-filter-wrap:focus-within { border-color: var(--accent-primary); }
+.room-filter { width: 100%; min-width: 0; padding: 0 8px; border: 0; outline: 0; background: transparent; color: var(--text-primary); font-size: var(--font-size-xs); }
+.room-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; transition: opacity 0.15s; }
+.room-grid.refreshing, .session-list.refreshing { opacity: 0.58; pointer-events: none; }
+.room-card { display: flex; min-width: 0; align-items: center; gap: 11px; padding: 12px; border: 1px solid var(--border-color); border-radius: var(--border-radius); background: var(--bg-card); cursor: pointer; text-align: left; transition: border-color 0.15s, background 0.15s, transform 0.15s; }
+.room-card:hover { transform: translateY(-1px); border-color: var(--accent-primary); background: var(--bg-hover); }
+.room-avatar { display: grid; width: 38px; height: 38px; flex: 0 0 38px; place-items: center; border: 1px solid rgba(92, 158, 255, 0.22); border-radius: var(--border-radius); background: rgba(92, 158, 255, 0.1); color: var(--accent-primary); font-weight: 600; }
 .room-avatar.large { width: 48px; height: 48px; flex-basis: 48px; font-size: 18px; }
 .room-info { min-width: 0; flex: 1; }
 .room-title-line { display: flex; align-items: baseline; gap: 7px; }
 .room-title-line strong { overflow: hidden; font-size: var(--font-size-sm); text-overflow: ellipsis; white-space: nowrap; }
 .room-title-line span, .room-info > p { color: var(--text-muted); font-size: var(--font-size-xs); }
-.room-info > p { margin-top: 3px; }
+.room-info > p { margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .room-metrics { display: flex; gap: 10px; margin-top: 7px; color: var(--text-secondary); font-size: 10px; }
 .room-metrics b { color: var(--text-primary); font-weight: 500; }
 .room-arrow { color: var(--text-muted); font-size: 22px; }
@@ -519,24 +731,32 @@ button { color: inherit; }
 .room-hero p, .session-hero p { margin-top: 3px; color: var(--text-muted); font-size: var(--font-size-xs); }
 .room-content-grid { display: grid; grid-template-columns: minmax(280px, 0.8fr) minmax(360px, 1.2fr); gap: 12px; align-items: start; }
 .session-panel, .activity-panel { min-width: 0; }
-.session-list { display: grid; gap: 6px; }
-.session-card { position: relative; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 9px; border: 1px solid transparent; border-radius: 7px; background: var(--bg-card); cursor: pointer; }
-.session-card:hover { border-color: var(--border-color); background: var(--bg-hover); }
+.session-list { display: grid; gap: 6px; transition: opacity 0.15s; }
+.session-card { position: relative; display: flex; min-width: 0; align-items: stretch; border: 1px solid transparent; border-radius: 7px; background: var(--bg-card); transition: border-color 0.15s, background 0.15s; }
+.session-card:hover, .session-card:focus-within { border-color: var(--border-color); background: var(--bg-hover); }
+.session-open { display: flex; min-width: 0; flex: 1; align-items: center; gap: 10px; padding: 9px 35px 9px 9px; border: 0; border-radius: inherit; background: transparent; cursor: pointer; text-align: left; }
 .session-date { width: 58px; flex: 0 0 58px; padding-right: 9px; border-right: 1px solid var(--border-color); text-align: center; }
 .session-date strong { display: block; font-size: var(--font-size-sm); }
 .session-date span { color: var(--text-muted); font-size: 10px; }
-.session-info { min-width: 0; flex: 1; padding-right: 22px; }
-.session-info > strong { display: block; overflow: hidden; font-size: var(--font-size-sm); text-overflow: ellipsis; white-space: nowrap; }
+.session-info { min-width: 0; flex: 1; }
+.session-title-line { display: flex; min-width: 0; align-items: center; gap: 6px; }
+.session-title-line > strong { overflow: hidden; font-size: var(--font-size-sm); text-overflow: ellipsis; white-space: nowrap; }
+.live-badge { flex: 0 0 auto; padding: 1px 5px; border-radius: 8px; background: rgba(53, 190, 110, 0.15); color: #65d795; font-size: 9px; }
 .session-info p { margin: 2px 0 5px; color: var(--text-muted); font-size: 10px; }
-.session-info div { display: flex; gap: 8px; color: var(--text-secondary); font-size: 10px; }
-.session-info div b { color: var(--accent-gold); }
-.delete-button { position: absolute; top: 7px; right: 7px; min-width: 20px; height: 20px; padding: 0 4px; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); cursor: pointer; opacity: 0; }
-.session-card:hover .delete-button, .delete-button.confirming { opacity: 1; }
-.delete-button:hover, .delete-button.confirming { background: rgba(220, 60, 60, 0.2); color: #ef7373; }
-
+.session-info > div:last-child { display: flex; gap: 8px; color: var(--text-secondary); font-size: 10px; }
+.session-info > div:last-child b { color: var(--accent-gold); }
+.delete-button { position: absolute; z-index: 1; top: 7px; right: 7px; display: grid; width: 23px; height: 23px; padding: 4px; place-items: center; border: 0; border-radius: 4px; background: transparent; color: var(--text-muted); cursor: pointer; opacity: 0; }
+.delete-button svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.session-card:hover .delete-button, .delete-button:focus-visible { opacity: 1; }
+.delete-button:hover { background: rgba(220, 60, 60, 0.2); color: #ef7373; }
+.session-skeleton { display: grid; gap: 6px; }
+.session-skeleton i { height: 68px; border-radius: 7px; background: var(--bg-card); animation: skeletonPulse 1.3s ease-in-out infinite; }
 .pagination { display: flex; align-items: center; justify-content: center; gap: 10px; padding-top: 11px; color: var(--text-secondary); font-size: var(--font-size-xs); }
-.pagination button:disabled { opacity: 0.35; cursor: default; }
-.empty-panel { display: grid; min-height: 100px; place-items: center; color: var(--text-muted); font-size: var(--font-size-sm); }
+.empty-panel { display: flex; min-height: 118px; align-items: center; justify-content: center; flex-direction: column; gap: 5px; color: var(--text-muted); text-align: center; }
+.empty-panel.small { min-height: 100px; }
+.empty-panel strong { color: var(--text-secondary); font-size: var(--font-size-sm); font-weight: 500; }
+.empty-panel span { font-size: var(--font-size-xs); }
+.empty-panel button { margin-top: 4px; padding: 5px 9px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-card); color: var(--accent-primary); cursor: pointer; }
 
 .session-hero { align-items: flex-end; justify-content: space-between; padding: 6px 2px; }
 .eyebrow { color: var(--accent-primary); font-size: var(--font-size-xs); }
@@ -546,25 +766,44 @@ button { color: inherit; }
 .session-summary b.gold { color: var(--accent-gold); }
 .session-events { margin-top: 4px; }
 
-@media (max-width: 760px) {
+.notice-enter-active, .notice-leave-active { transition: opacity 0.15s, transform 0.15s; }
+.notice-enter-from, .notice-leave-to { opacity: 0; transform: translate(-50%, -5px); }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes progressMove { from { transform: translateX(-110%); } to { transform: translateX(360%); } }
+@keyframes skeletonPulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 0.9; } }
+
+@media (max-width: 820px) {
   .page-toolbar { align-items: flex-start; flex-direction: column; }
-  .date-filter { width: 100%; flex-wrap: wrap; }
-  .room-grid { grid-template-columns: 1fr; }
+  .filter-toolbar { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
+  .top-progress { top: 72px; }
   .room-content-grid { grid-template-columns: 1fr; }
+  .rooms-heading { align-items: flex-start; }
+  .rooms-actions { align-items: flex-end; flex-wrap: wrap; }
+}
+
+@media (max-width: 680px) {
+  .room-grid { grid-template-columns: 1fr; }
   .session-hero { align-items: flex-start; flex-direction: column; }
   .session-summary { width: 100%; flex-wrap: wrap; }
   .session-summary span { flex: 1; }
+  .delete-button { opacity: 1; }
 }
 
 @media (max-width: 590px) {
   .archive-body { padding-right: 10px; padding-left: 10px; }
   .page-toolbar { margin-right: -10px; margin-left: -10px; padding-right: 10px; padding-left: 10px; }
-  .quick-ranges { order: 3; }
+  .top-progress { margin-right: -10px; margin-left: -10px; }
+  .quick-ranges { order: 1; }
+  .refresh-button { order: 1; margin-left: auto; }
+  .date-filter { order: 2; width: 100%; flex-wrap: wrap; }
+  .date-filter label { min-width: 0; flex: 1; }
+  .date-filter input { width: auto; min-width: 0; flex: 1; }
   .search-row { align-items: stretch; flex-direction: column; }
   .type-tabs { align-self: flex-start; }
   .section-heading { align-items: flex-start; }
-  .rooms-actions { align-items: flex-end; flex-direction: column-reverse; }
-  .prune-notice { display: none; }
-  .room-filter { width: 150px; }
+  .rooms-heading { flex-direction: column; }
+  .rooms-actions { width: 100%; align-items: center; justify-content: flex-start; }
+  .room-filter-wrap { min-width: 150px; flex: 1; }
+  .sort-select > span { display: none; }
 }
 </style>

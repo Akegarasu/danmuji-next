@@ -49,18 +49,20 @@ const emptySearch = (page = 1, pageSize = 40): PagedResult<ArchiveSearchItem> =>
   page_size: pageSize,
 })
 
+const emptySessions = (page = 1, pageSize = 20): PagedResult<ArchiveSession> => ({
+  items: [],
+  total: 0,
+  page,
+  page_size: pageSize,
+})
+
 export const useArchiveStore = defineStore('archive', () => {
   const view = ref<ArchiveView>('overview')
   const overview = ref<ArchiveOverview>({ summary: emptySummary(), rooms: [] })
   const statistics = ref<ArchiveStatistics>({ summary: emptySummary(), daily: [] })
   const selectedRoom = ref<ArchiveRoomSummary | null>(null)
   const selectedSession = ref<ArchiveSession | null>(null)
-  const roomSessions = ref<PagedResult<ArchiveSession>>({
-    items: [],
-    total: 0,
-    page: 1,
-    page_size: 20,
-  })
+  const roomSessions = ref<PagedResult<ArchiveSession>>(emptySessions())
   const searchResult = ref<PagedResult<ArchiveSearchItem>>(emptySearch())
 
   const fromTime = ref<number | undefined>()
@@ -68,9 +70,18 @@ export const useArchiveStore = defineStore('archive', () => {
   const roomQuery = ref('')
   const searchQuery = ref('')
   const contentType = ref<ArchiveContentType>('all')
+
+  const initialized = ref(false)
   const loadingPage = ref(false)
+  const loadingSessions = ref(false)
   const loadingSearch = ref(false)
+  const deletingSessionId = ref<number | null>(null)
+  const pruning = ref(false)
   const error = ref('')
+  const searchError = ref('')
+
+  let pageGeneration = 0
+  let sessionsGeneration = 0
   let searchGeneration = 0
 
   const dateFilter = computed<ArchiveDateFilter>(() => ({
@@ -87,83 +98,148 @@ export const useArchiveStore = defineStore('archive', () => {
     Math.max(1, Math.ceil(roomSessions.value.total / roomSessions.value.page_size))
   )
 
-  function captureError(context: string, cause: unknown) {
-    error.value = cause instanceof Error ? cause.message : String(cause)
+  const errorMessage = (cause: unknown) => cause instanceof Error ? cause.message : String(cause)
+
+  function captureError(context: string, cause: unknown, target: 'page' | 'search' = 'page') {
+    const message = errorMessage(cause)
+    if (target === 'search') searchError.value = message
+    else error.value = message
     logger.error(context, cause)
   }
 
+  function dismissError() {
+    error.value = ''
+  }
+
+  function clearSearchError() {
+    searchError.value = ''
+  }
+
+  function invalidateSearch(clearResult = false) {
+    searchGeneration += 1
+    loadingSearch.value = false
+    searchError.value = ''
+    if (clearResult) searchResult.value = emptySearch(1, searchResult.value.page_size)
+  }
+
   async function loadOverview(query = roomQuery.value) {
-    roomQuery.value = query
+    if (view.value !== 'overview') return
+    roomQuery.value = query.trim()
+    const generation = ++pageGeneration
     loadingPage.value = true
     error.value = ''
     try {
       const [nextOverview, nextStatistics] = await Promise.all([
-        getArchiveOverview(dateFilter.value, query),
+        getArchiveOverview(dateFilter.value, roomQuery.value),
         getArchiveStatistics(undefined, dateFilter.value),
       ])
+      if (generation !== pageGeneration || view.value !== 'overview') return
       overview.value = nextOverview
       statistics.value = nextStatistics
+      initialized.value = true
     } catch (cause) {
-      captureError('加载存档总览失败', cause)
+      if (generation === pageGeneration) captureError('加载存档总览失败', cause)
     } finally {
-      loadingPage.value = false
+      if (generation === pageGeneration) loadingPage.value = false
+    }
+  }
+
+  async function refreshRoom(page = roomSessions.value.page) {
+    const room = selectedRoom.value
+    if (!room) return
+
+    const generation = ++pageGeneration
+    sessionsGeneration += 1
+    loadingPage.value = true
+    loadingSessions.value = true
+    error.value = ''
+    try {
+      const [sessions, nextStatistics] = await Promise.all([
+        getArchiveRoomSessions(room.room_id, dateFilter.value, page, roomSessions.value.page_size),
+        getArchiveStatistics(room.room_id, dateFilter.value),
+      ])
+      if (
+        generation !== pageGeneration
+        || view.value !== 'room'
+        || selectedRoom.value?.room_id !== room.room_id
+      ) return
+      roomSessions.value = sessions
+      statistics.value = nextStatistics
+    } catch (cause) {
+      if (generation === pageGeneration) captureError('加载直播间归档失败', cause)
+    } finally {
+      if (generation === pageGeneration) {
+        loadingPage.value = false
+        loadingSessions.value = false
+      }
     }
   }
 
   async function loadRoomSessions(page = 1) {
-    if (!selectedRoom.value) return
+    const room = selectedRoom.value
+    if (!room) return
+
+    const generation = ++sessionsGeneration
+    loadingSessions.value = true
+    error.value = ''
     try {
-      roomSessions.value = await getArchiveRoomSessions(
-        selectedRoom.value.room_id,
+      const sessions = await getArchiveRoomSessions(
+        room.room_id,
         dateFilter.value,
         page,
         roomSessions.value.page_size
       )
+      if (
+        generation !== sessionsGeneration
+        || view.value !== 'room'
+        || selectedRoom.value?.room_id !== room.room_id
+      ) return
+      roomSessions.value = sessions
     } catch (cause) {
-      captureError('加载直播场次失败', cause)
+      if (generation === sessionsGeneration) captureError('加载直播场次失败', cause)
+    } finally {
+      if (generation === sessionsGeneration) loadingSessions.value = false
     }
   }
 
   async function openRoom(room: ArchiveRoomSummary) {
+    pageGeneration += 1
+    sessionsGeneration += 1
     view.value = 'room'
     selectedRoom.value = room
     selectedSession.value = null
+    roomSessions.value = emptySessions(1, roomSessions.value.page_size)
+    statistics.value = { summary: emptySummary(), daily: [] }
     searchQuery.value = ''
     contentType.value = 'all'
-    searchResult.value = emptySearch()
-    loadingPage.value = true
-    error.value = ''
-    try {
-      const [sessions, nextStatistics] = await Promise.all([
-        getArchiveRoomSessions(room.room_id, dateFilter.value, 1, roomSessions.value.page_size),
-        getArchiveStatistics(room.room_id, dateFilter.value),
-      ])
-      roomSessions.value = sessions
-      statistics.value = nextStatistics
-      await runSearch('', 1)
-    } catch (cause) {
-      captureError('加载直播间归档失败', cause)
-    } finally {
-      loadingPage.value = false
-    }
+    invalidateSearch(true)
+    await Promise.all([refreshRoom(1), runSearch('', 1)])
   }
 
   async function openSession(session: ArchiveSession) {
+    pageGeneration += 1
+    sessionsGeneration += 1
+    loadingPage.value = false
+    loadingSessions.value = false
     view.value = 'session'
     selectedSession.value = session
     searchQuery.value = ''
     contentType.value = 'all'
-    searchResult.value = emptySearch()
+    invalidateSearch(true)
     await runSearch('', 1)
   }
 
   async function goOverview() {
+    pageGeneration += 1
+    sessionsGeneration += 1
+    loadingSessions.value = false
     view.value = 'overview'
     selectedRoom.value = null
     selectedSession.value = null
     roomQuery.value = ''
     searchQuery.value = ''
-    searchResult.value = emptySearch()
+    contentType.value = 'all'
+    invalidateSearch(true)
     await loadOverview('')
   }
 
@@ -172,52 +248,65 @@ export const useArchiveStore = defineStore('archive', () => {
       await goOverview()
       return
     }
+    pageGeneration += 1
     view.value = 'room'
     selectedSession.value = null
     searchQuery.value = ''
     contentType.value = 'all'
+    invalidateSearch(true)
     await runSearch('', 1)
   }
 
   async function applyDateFilter(filter: ArchiveDateFilter) {
     fromTime.value = filter.fromTime
     toTime.value = filter.toTime
+
     if (view.value === 'overview') {
-      await loadOverview()
-      if (searchQuery.value) await runSearch(searchQuery.value, 1)
+      await Promise.all([
+        loadOverview(roomQuery.value),
+        searchQuery.value ? runSearch(searchQuery.value, 1) : Promise.resolve(invalidateSearch(true)),
+      ])
       return
     }
 
-    const roomId = selectedRoom.value?.room_id
-    if (!roomId) return
-    loadingPage.value = true
-    error.value = ''
-    try {
-      const jobs: Promise<unknown>[] = [
-        getArchiveStatistics(roomId, dateFilter.value).then(value => {
-          statistics.value = value
-        }),
-        runSearch(searchQuery.value, 1),
-      ]
-      if (view.value === 'room') jobs.push(loadRoomSessions(1))
-      await Promise.all(jobs)
-    } catch (cause) {
-      captureError('应用归档时间筛选失败', cause)
-    } finally {
-      loadingPage.value = false
+    if (view.value === 'room') {
+      await Promise.all([refreshRoom(1), runSearch(searchQuery.value, 1)])
+      return
     }
+
+    await runSearch(searchQuery.value, 1)
+  }
+
+  async function refreshCurrentView() {
+    if (view.value === 'overview') {
+      await Promise.all([
+        loadOverview(roomQuery.value),
+        searchQuery.value ? runSearch(searchQuery.value, searchResult.value.page) : Promise.resolve(),
+      ])
+      return
+    }
+    if (view.value === 'room') {
+      await Promise.all([
+        refreshRoom(roomSessions.value.page),
+        runSearch(searchQuery.value, searchResult.value.page),
+      ])
+      return
+    }
+    await runSearch(searchQuery.value, searchResult.value.page)
   }
 
   async function runSearch(query = searchQuery.value, page = 1) {
     searchQuery.value = query.trim()
+    const generation = ++searchGeneration
+    searchError.value = ''
+
     if (view.value === 'overview' && !searchQuery.value) {
-      searchResult.value = emptySearch()
+      loadingSearch.value = false
+      searchResult.value = emptySearch(1, searchResult.value.page_size)
       return
     }
 
-    const generation = ++searchGeneration
     loadingSearch.value = true
-    error.value = ''
     try {
       const result = await searchArchive({
         roomId: view.value === 'overview' ? undefined : selectedRoom.value?.room_id,
@@ -231,48 +320,64 @@ export const useArchiveStore = defineStore('archive', () => {
       })
       if (generation === searchGeneration) searchResult.value = result
     } catch (cause) {
-      if (generation === searchGeneration) captureError('搜索归档失败', cause)
+      if (generation === searchGeneration) captureError('搜索归档失败', cause, 'search')
     } finally {
       if (generation === searchGeneration) loadingSearch.value = false
     }
   }
 
-  async function setContentType(type: ArchiveContentType) {
+  async function setContentType(type: ArchiveContentType, query = searchQuery.value) {
     contentType.value = type
-    await runSearch(searchQuery.value, 1)
+    await runSearch(query, 1)
   }
 
   async function removeSession(id: number) {
+    if (deletingSessionId.value !== null) return
+    deletingSessionId.value = id
+    error.value = ''
     try {
       await deleteArchiveSession(id)
       if (selectedSession.value?.id === id) {
         selectedSession.value = null
         view.value = 'room'
       }
+
+      if (!selectedRoom.value) {
+        await loadOverview(roomQuery.value)
+        return
+      }
+
       await Promise.all([
-        loadRoomSessions(1),
-        selectedRoom.value
-          ? getArchiveStatistics(selectedRoom.value.room_id, dateFilter.value).then(value => {
-              statistics.value = value
-            })
-          : Promise.resolve(),
+        refreshRoom(roomSessions.value.page),
         runSearch(searchQuery.value, 1),
       ])
+
+      if (roomSessions.value.total === 0) {
+        await goOverview()
+      } else if (roomSessions.value.items.length === 0 && roomSessions.value.page > 1) {
+        await loadRoomSessions(roomSessions.value.page - 1)
+      }
     } catch (cause) {
       captureError('删除归档场次失败', cause)
       throw cause
+    } finally {
+      deletingSessionId.value = null
     }
   }
 
   async function pruneEmptySessions() {
+    if (pruning.value) return 0
+    pruning.value = true
     error.value = ''
     try {
       const deleted = await pruneEmptyArchiveSessions()
-      await loadOverview(roomQuery.value)
+      if (view.value === 'overview') await loadOverview(roomQuery.value)
       return deleted
     } catch (cause) {
       captureError('清理空归档场次失败', cause)
       throw cause
+    } finally {
+      pruning.value = false
     }
   }
 
@@ -287,9 +392,14 @@ export const useArchiveStore = defineStore('archive', () => {
     roomQuery,
     searchQuery,
     contentType,
+    initialized,
     loadingPage,
+    loadingSessions,
     loadingSearch,
+    deletingSessionId,
+    pruning,
     error,
+    searchError,
     dateFilter,
     currentSummary,
     searchPages,
@@ -301,9 +411,12 @@ export const useArchiveStore = defineStore('archive', () => {
     goOverview,
     goRoom,
     applyDateFilter,
+    refreshCurrentView,
     runSearch,
     setContentType,
     removeSession,
     pruneEmptySessions,
+    dismissError,
+    clearSearchError,
   }
 })
