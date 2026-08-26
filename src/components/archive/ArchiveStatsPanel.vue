@@ -22,17 +22,17 @@ const formatDuration = (seconds: number) => {
   return `${minutes}分钟`
 }
 
-const averageDuration = computed(() =>
-  props.summary.session_count > 0
-    ? formatDuration(Math.floor(props.summary.live_duration / props.summary.session_count))
-    : '0分钟'
-)
+const formatPriceOrZero = (value: number) => formatPrice(value) || '¥0'
+const averageDuration = computed(() => {
+  if (props.summary.session_count === 0) return '0分钟'
+  return formatDuration(Math.floor(props.summary.live_duration / props.summary.session_count))
+})
 
 const cards = computed(() => [
   {
     label: '累计收益',
-    value: formatPrice(props.summary.total_revenue) || '¥0',
-    detail: `礼物 ${formatPrice(props.summary.gift_revenue) || '¥0'} · SC ${formatPrice(props.summary.sc_revenue) || '¥0'} · 大航海 ${formatPrice(props.summary.guard_revenue) || '¥0'}`,
+    value: formatPriceOrZero(props.summary.total_revenue),
+    detail: `礼物 ${formatPriceOrZero(props.summary.gift_revenue)} · SC ${formatPriceOrZero(props.summary.sc_revenue)} · 大航海 ${formatPriceOrZero(props.summary.guard_revenue)}`,
     tone: 'gold',
   },
   {
@@ -63,7 +63,7 @@ const chartWidth = 720
 const chartHeight = 170
 const inset = { left: 12, right: 12, top: 14, bottom: 24 }
 const maxRevenue = computed(() => Math.max(1, ...props.daily.map(point => point.total_revenue)))
-const dayValues = computed(() => props.daily.map(point => new Date(`${point.date}T00:00:00`).getTime()))
+const dayTimestamps = computed(() => props.daily.map(point => new Date(`${point.date}T00:00:00`).getTime()))
 type RevenueKey = 'total_revenue' | 'gift_revenue' | 'sc_revenue'
 const hoveredIndex = ref<number | null>(null)
 
@@ -71,12 +71,12 @@ const chartPoint = (index: number, key: RevenueKey) => {
   const values = props.daily
   const width = chartWidth - inset.left - inset.right
   const height = chartHeight - inset.top - inset.bottom
-  const firstDay = dayValues.value[0] ?? 0
-  const lastDay = dayValues.value[dayValues.value.length - 1] ?? firstDay
+  const firstDay = dayTimestamps.value[0] ?? 0
+  const lastDay = dayTimestamps.value[dayTimestamps.value.length - 1] ?? firstDay
   const daySpan = lastDay - firstDay
   const x = values.length <= 1 || daySpan <= 0
     ? inset.left + width / 2
-    : inset.left + ((dayValues.value[index] - firstDay) / daySpan) * width
+    : inset.left + ((dayTimestamps.value[index] - firstDay) / daySpan) * width
   const y = inset.top + height - ((values[index]?.[key] ?? 0) / maxRevenue.value) * height
   return { x, y }
 }
@@ -142,7 +142,7 @@ const dateLabels = computed(() => {
 <template>
   <section class="stats-panel" :class="{ refreshing: loading, skeleton: showSkeleton }" :aria-busy="loading">
     <template v-if="showSkeleton">
-      <div class="metric-grid skeleton-grid" aria-label="正在加载统计数据">
+      <div class="metric-grid" aria-label="正在加载统计数据">
         <div v-for="index in 4" :key="index" class="metric-card skeleton-card">
           <i />
           <b />

@@ -15,13 +15,17 @@ const roomFilterInput = ref('')
 const startDate = ref('')
 const endDate = ref('')
 const dateError = ref('')
+type DateRangePreset = '7' | '30' | 'all' | 'custom'
+type RoomSort = 'recent' | 'revenue' | 'sessions' | 'danmaku'
+type NoticeType = 'success' | 'error'
+
 const dateDirty = ref(false)
-const activeRange = ref<'7' | '30' | 'all' | 'custom'>('all')
-const roomSort = ref<'recent' | 'revenue' | 'sessions' | 'danmaku'>('recent')
+const activeRange = ref<DateRangePreset>('all')
+const roomSort = ref<RoomSort>('recent')
 const deleteTarget = ref<ArchiveSession | null>(null)
 const deleteDialogVisible = ref(false)
 const pruneDialogVisible = ref(false)
-const operationNotice = ref<{ message: string; type: 'success' | 'error' } | null>(null)
+const operationNotice = ref<{ message: string; type: NoticeType } | null>(null)
 let activityTimer: ReturnType<typeof setTimeout> | undefined
 let roomTimer: ReturnType<typeof setTimeout> | undefined
 let noticeTimer: ReturnType<typeof setTimeout> | undefined
@@ -41,13 +45,16 @@ const pageTitle = computed(() => {
 
 const sortedRooms = computed(() => {
   const rooms = [...archiveStore.overview.rooms]
-  const sorters = {
-    recent: (a: typeof rooms[number], b: typeof rooms[number]) => b.last_live_time - a.last_live_time,
-    revenue: (a: typeof rooms[number], b: typeof rooms[number]) => b.total_revenue - a.total_revenue,
-    sessions: (a: typeof rooms[number], b: typeof rooms[number]) => b.session_count - a.session_count,
-    danmaku: (a: typeof rooms[number], b: typeof rooms[number]) => b.danmaku_count - a.danmaku_count,
+  switch (roomSort.value) {
+    case 'revenue':
+      return rooms.sort((a, b) => b.total_revenue - a.total_revenue)
+    case 'sessions':
+      return rooms.sort((a, b) => b.session_count - a.session_count)
+    case 'danmaku':
+      return rooms.sort((a, b) => b.danmaku_count - a.danmaku_count)
+    default:
+      return rooms.sort((a, b) => b.last_live_time - a.last_live_time)
   }
-  return rooms.sort(sorters[roomSort.value])
 })
 
 const roomCountText = computed(() => {
@@ -67,7 +74,14 @@ const rangeLabel = computed(() => {
 const searchEmptyText = computed(() => {
   if (archiveStore.searchQuery) return '没有匹配当前关键词的归档记录'
   if (hasDateFilter.value) return '所选时间范围内没有归档记录'
-  return archiveStore.view === 'session' ? '本场直播没有可展示的互动记录' : '该直播间还没有互动记录'
+  if (archiveStore.view === 'session') return '本场直播没有可展示的互动记录'
+  return '该直播间还没有互动记录'
+})
+
+const roomsEmptyText = computed(() => {
+  if (roomFilterInput.value) return '没有匹配的直播间'
+  if (hasDateFilter.value) return '所选时间内没有直播间归档'
+  return '还没有直播间归档'
 })
 
 const deleteMessage = computed(() => {
@@ -75,6 +89,7 @@ const deleteMessage = computed(() => {
   const title = deleteTarget.value.room_title || archiveStore.selectedRoom?.room_title || '当前直播间'
   return `${title}\n${formatDateTime(deleteTarget.value.start_time)}\n\n将永久删除本场弹幕、礼物和醒目留言，且无法恢复。`
 })
+const pruneMessage = '将删除没有弹幕、礼物或醒目留言的历史场次。\n\n该操作不会影响包含任何互动记录的存档。'
 
 const formatDateTime = (timestamp: number) => {
   const date = new Date(timestamp * 1000)
@@ -88,14 +103,19 @@ const formatShortDate = (timestamp: number) =>
   new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
     .format(new Date(timestamp * 1000))
 
-const formatMonthDay = (timestamp: number) =>
-  new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit' })
-    .format(new Date(timestamp * 1000))
+const monthDayFormatter = new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit' })
+const formatMonthDay = (timestamp: number) => monthDayFormatter.format(new Date(timestamp * 1000))
 
+const MINUTES_PER_HOUR = 60
+const MINUTES_PER_DAY = 1440
 const formatSecondsDuration = (seconds: number) => {
   const minutes = Math.max(0, Math.floor(seconds / 60))
-  if (minutes >= 1440) return `${Math.floor(minutes / 1440)}天 ${Math.floor((minutes % 1440) / 60)}小时`
-  if (minutes >= 60) return `${Math.floor(minutes / 60)}小时 ${minutes % 60}分`
+  if (minutes >= MINUTES_PER_DAY) {
+    return `${Math.floor(minutes / MINUTES_PER_DAY)}天 ${Math.floor((minutes % MINUTES_PER_DAY) / MINUTES_PER_HOUR)}小时`
+  }
+  if (minutes >= MINUTES_PER_HOUR) {
+    return `${Math.floor(minutes / MINUTES_PER_HOUR)}小时 ${minutes % MINUTES_PER_HOUR}分`
+  }
   return `${minutes}分钟`
 }
 
@@ -122,7 +142,7 @@ const markDateDirty = () => {
   dateError.value = ''
 }
 
-const applyDateRange = async (range: typeof activeRange.value = 'custom') => {
+const applyDateRange = async (range: DateRangePreset = 'custom') => {
   const fromTime = toTimestamp(startDate.value)
   const toTime = toTimestamp(endDate.value, true)
   if (fromTime !== undefined && toTime !== undefined && fromTime >= toTime) {
@@ -147,7 +167,7 @@ const setRecentDays = async (days?: 7 | 30) => {
   start.setDate(start.getDate() - days + 1)
   startDate.value = localDateValue(start)
   endDate.value = localDateValue(end)
-  await applyDateRange(String(days) as '7' | '30')
+  await applyDateRange(days === 7 ? '7' : '30')
 }
 
 const onActivityInput = () => {
@@ -166,6 +186,8 @@ const clearActivitySearch = async () => {
   await archiveStore.runSearch('', 1)
 }
 
+const retrySearch = () => archiveStore.runSearch(activityInput.value, archiveStore.searchResult.page)
+
 const setContentType = async (type: ArchiveContentType) => {
   if (activityTimer) clearTimeout(activityTimer)
   await archiveStore.setContentType(type, activityInput.value)
@@ -182,40 +204,42 @@ const clearRoomFilter = async () => {
   await archiveStore.loadOverview('')
 }
 
-const clearPendingInputs = () => {
+const clearPendingTimers = () => {
   if (activityTimer) clearTimeout(activityTimer)
   if (roomTimer) clearTimeout(roomTimer)
 }
 
 const openRoom = async (room: Parameters<typeof archiveStore.openRoom>[0]) => {
-  clearPendingInputs()
+  clearPendingTimers()
   activityInput.value = ''
   await archiveStore.openRoom(room)
 }
 
 const openSession = async (session: ArchiveSession) => {
-  clearPendingInputs()
+  clearPendingTimers()
   activityInput.value = ''
   await archiveStore.openSession(session)
 }
 
 const goOverview = async () => {
-  clearPendingInputs()
+  clearPendingTimers()
   activityInput.value = ''
   roomFilterInput.value = ''
   await archiveStore.goOverview()
 }
 
 const goRoom = async () => {
-  clearPendingInputs()
+  clearPendingTimers()
   activityInput.value = ''
   await archiveStore.goRoom()
 }
 
-const showOperationNotice = (message: string, type: 'success' | 'error' = 'success') => {
+const showOperationNotice = (message: string, type: NoticeType = 'success') => {
   operationNotice.value = { message, type }
   if (noticeTimer) clearTimeout(noticeTimer)
-  noticeTimer = setTimeout(() => { operationNotice.value = null }, 4000)
+  noticeTimer = setTimeout(() => {
+    operationNotice.value = null
+  }, 4000)
 }
 
 const requestDelete = (session: ArchiveSession) => {
@@ -228,23 +252,23 @@ const confirmDeleteSession = async () => {
   if (!target) return
   try {
     await archiveStore.removeSession(target.id)
-    deleteDialogVisible.value = false
     deleteTarget.value = null
     showOperationNotice('场次归档已删除')
   } catch {
-    deleteDialogVisible.value = false
     showOperationNotice('删除失败，请根据错误提示重试', 'error')
+  } finally {
+    deleteDialogVisible.value = false
   }
 }
 
 const confirmPrune = async () => {
   try {
     const deleted = await archiveStore.pruneEmptySessions()
-    pruneDialogVisible.value = false
     showOperationNotice(deleted > 0 ? `已清理 ${deleted} 个空场次` : '没有需要清理的空场次')
   } catch {
-    pruneDialogVisible.value = false
     showOperationNotice('清理失败，请根据错误提示重试', 'error')
+  } finally {
+    pruneDialogVisible.value = false
   }
 }
 
@@ -366,7 +390,7 @@ onUnmounted(async () => {
             empty-text="没有匹配当前关键词的归档记录"
             show-room
             @page="page => archiveStore.runSearch(activityInput, page)"
-            @retry="archiveStore.runSearch(activityInput, archiveStore.searchResult.page)"
+            @retry="retrySearch"
           />
         </section>
 
@@ -429,7 +453,7 @@ onUnmounted(async () => {
             </button>
           </div>
           <div v-else class="empty-panel">
-            <strong>{{ roomFilterInput ? '没有匹配的直播间' : hasDateFilter ? '所选时间内没有直播间归档' : '还没有直播间归档' }}</strong>
+            <strong>{{ roomsEmptyText }}</strong>
             <span v-if="roomFilterInput">请尝试其他标题、房间 ID 或主播 UID</span>
             <button v-if="roomFilterInput" @click="clearRoomFilter">清空筛选</button>
           </div>
@@ -529,7 +553,7 @@ onUnmounted(async () => {
               :error="archiveStore.searchError"
               :empty-text="searchEmptyText"
               @page="page => archiveStore.runSearch(activityInput, page)"
-              @retry="archiveStore.runSearch(activityInput, archiveStore.searchResult.page)"
+              @retry="retrySearch"
             />
           </section>
         </div>
@@ -574,7 +598,7 @@ onUnmounted(async () => {
             :error="archiveStore.searchError"
             :empty-text="searchEmptyText"
             @page="page => archiveStore.runSearch(activityInput, page)"
-            @retry="archiveStore.runSearch(activityInput, archiveStore.searchResult.page)"
+            @retry="retrySearch"
           />
         </section>
       </template>
@@ -595,7 +619,7 @@ onUnmounted(async () => {
     <ConfirmDialog
       v-model:visible="pruneDialogVisible"
       title="清理空场次"
-      :message="'将删除没有弹幕、礼物或醒目留言的历史场次。\n\n该操作不会影响包含任何互动记录的存档。'"
+      :message="pruneMessage"
       confirm-text="开始清理"
       loading-text="正在清理…"
       danger

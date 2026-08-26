@@ -20,46 +20,53 @@ const emit = defineEmits<{
   retry: []
 }>()
 
+type ArchiveDateGroup = {
+  key: string
+  label: string
+  items: ArchiveSearchItem[]
+}
+
 const shell = ref<HTMLElement | null>(null)
 const labels = { danmaku: '弹幕', gift: '礼物', superchat: 'SC' } as const
+const dayFormatter = new Intl.DateTimeFormat('zh-CN', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+  weekday: 'short',
+})
+const timeFormatter = new Intl.DateTimeFormat('zh-CN', {
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+})
+
+const hasResults = computed(() => props.result.items.length > 0)
 const totalPages = computed(() =>
   Math.max(1, Math.ceil(props.result.total / props.result.page_size))
 )
 
 const toDate = (timestamp: number) =>
   new Date(timestamp < 1_000_000_000_000 ? timestamp * 1000 : timestamp)
+const padTwoDigits = (value: number) => String(value).padStart(2, '0')
 
 const dayKey = (timestamp: number) => {
   const date = toDate(timestamp)
-  const pad = (value: number) => String(value).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+  return `${date.getFullYear()}-${padTwoDigits(date.getMonth() + 1)}-${padTwoDigits(date.getDate())}`
 }
 
-const formatDay = (timestamp: number) =>
-  new Intl.DateTimeFormat('zh-CN', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    weekday: 'short',
-  }).format(toDate(timestamp))
+const formatDay = (timestamp: number) => dayFormatter.format(toDate(timestamp))
+const formatFullTime = (timestamp: number) => timeFormatter.format(toDate(timestamp))
 
-const formatFullTime = (timestamp: number) =>
-  new Intl.DateTimeFormat('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).format(toDate(timestamp))
-
-const groups = computed(() => {
-  const result: { key: string; label: string; items: ArchiveSearchItem[] }[] = []
+const dateGroups = computed<ArchiveDateGroup[]>(() => {
+  const groupedItems: ArchiveDateGroup[] = []
   for (const item of props.result.items) {
     const key = dayKey(item.timestamp)
-    const latest = result[result.length - 1]
-    if (latest?.key === key) latest.items.push(item)
-    else result.push({ key, label: formatDay(item.timestamp), items: [item] })
+    const currentGroup = groupedItems[groupedItems.length - 1]
+    if (currentGroup?.key === key) currentGroup.items.push(item)
+    else groupedItems.push({ key, label: formatDay(item.timestamp), items: [item] })
   }
-  return result
+  return groupedItems
 })
 
 const goPage = (page: number) => {
@@ -70,18 +77,18 @@ const goPage = (page: number) => {
 
 <template>
   <div ref="shell" class="result-shell" :aria-busy="loading">
-    <div v-if="error && result.items.length === 0" class="result-state error-state">
+    <div v-if="error && !hasResults" class="result-state error-state">
       <span>归档检索失败</span>
       <small>{{ error }}</small>
       <button @click="$emit('retry')">重新检索</button>
     </div>
 
-    <div v-else-if="loading && result.items.length === 0" class="result-state loading-state">
+    <div v-else-if="loading && !hasResults" class="result-state loading-state">
       <i class="result-spinner" aria-hidden="true" />
       <span>正在检索归档…</span>
     </div>
 
-    <div v-else-if="result.items.length === 0" class="result-state">
+    <div v-else-if="!hasResults" class="result-state">
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path d="M4 5h16v14H4zM8 3v4M16 3v4M4 9h16" />
       </svg>
@@ -95,7 +102,7 @@ const goPage = (page: number) => {
         <button @click="$emit('retry')">重试</button>
       </div>
 
-      <section v-for="group in groups" :key="group.key" class="date-group">
+      <section v-for="group in dateGroups" :key="group.key" class="date-group">
         <header class="date-heading">
           <strong>{{ group.label }}</strong>
           <span>{{ group.items.length }} 条</span>

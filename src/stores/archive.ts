@@ -98,10 +98,8 @@ export const useArchiveStore = defineStore('archive', () => {
     Math.max(1, Math.ceil(roomSessions.value.total / roomSessions.value.page_size))
   )
 
-  const errorMessage = (cause: unknown) => cause instanceof Error ? cause.message : String(cause)
-
   function captureError(context: string, cause: unknown, target: 'page' | 'search' = 'page') {
-    const message = errorMessage(cause)
+    const message = cause instanceof Error ? cause.message : String(cause)
     if (target === 'search') searchError.value = message
     else error.value = message
     logger.error(context, cause)
@@ -113,6 +111,10 @@ export const useArchiveStore = defineStore('archive', () => {
 
   function clearSearchError() {
     searchError.value = ''
+  }
+
+  function isCurrentRoom(roomId: number) {
+    return view.value === 'room' && selectedRoom.value?.room_id === roomId
   }
 
   function invalidateSearch(clearResult = false) {
@@ -158,11 +160,7 @@ export const useArchiveStore = defineStore('archive', () => {
         getArchiveRoomSessions(room.room_id, dateFilter.value, page, roomSessions.value.page_size),
         getArchiveStatistics(room.room_id, dateFilter.value),
       ])
-      if (
-        generation !== pageGeneration
-        || view.value !== 'room'
-        || selectedRoom.value?.room_id !== room.room_id
-      ) return
+      if (generation !== pageGeneration || !isCurrentRoom(room.room_id)) return
       roomSessions.value = sessions
       statistics.value = nextStatistics
     } catch (cause) {
@@ -189,11 +187,7 @@ export const useArchiveStore = defineStore('archive', () => {
         page,
         roomSessions.value.page_size
       )
-      if (
-        generation !== sessionsGeneration
-        || view.value !== 'room'
-        || selectedRoom.value?.room_id !== room.room_id
-      ) return
+      if (generation !== sessionsGeneration || !isCurrentRoom(room.room_id)) return
       roomSessions.value = sessions
     } catch (cause) {
       if (generation === sessionsGeneration) captureError('加载直播场次失败', cause)
@@ -203,8 +197,6 @@ export const useArchiveStore = defineStore('archive', () => {
   }
 
   async function openRoom(room: ArchiveRoomSummary) {
-    pageGeneration += 1
-    sessionsGeneration += 1
     view.value = 'room'
     selectedRoom.value = room
     selectedSession.value = null
@@ -230,7 +222,6 @@ export const useArchiveStore = defineStore('archive', () => {
   }
 
   async function goOverview() {
-    pageGeneration += 1
     sessionsGeneration += 1
     loadingSessions.value = false
     view.value = 'overview'
@@ -264,7 +255,7 @@ export const useArchiveStore = defineStore('archive', () => {
     if (view.value === 'overview') {
       await Promise.all([
         loadOverview(roomQuery.value),
-        searchQuery.value ? runSearch(searchQuery.value, 1) : Promise.resolve(invalidateSearch(true)),
+        searchQuery.value ? runSearch(searchQuery.value, 1) : invalidateSearch(true),
       ])
       return
     }
@@ -281,7 +272,7 @@ export const useArchiveStore = defineStore('archive', () => {
     if (view.value === 'overview') {
       await Promise.all([
         loadOverview(roomQuery.value),
-        searchQuery.value ? runSearch(searchQuery.value, searchResult.value.page) : Promise.resolve(),
+        searchQuery.value ? runSearch(searchQuery.value, searchResult.value.page) : undefined,
       ])
       return
     }
