@@ -140,6 +140,34 @@ export interface DisplaySettings {
   entryTimeColor: string
 }
 
+/** 语音播报设置 */
+export interface SpeechSettings {
+  enabled: boolean
+  /** SAPI voice token ID；为空时自动优先选择中文语音 */
+  voiceId: string | null
+  /** SAPI 语速，范围 -10 ~ 10 */
+  rate: number
+  speakDanmaku: boolean
+  speakGift: boolean
+  speakSuperChat: boolean
+}
+
+/** 系统语音 */
+export interface SpeechVoice {
+  id: string
+  name: string
+  language: string
+}
+
+/** 语音服务状态 */
+export interface SpeechStatus {
+  available: boolean
+  speaking: boolean
+  danmaku_suspended: boolean
+  queue_depth: number
+  error: string | null
+}
+
 /** 用户登录信息 */
 export interface UserLoginInfo {
   uid: number
@@ -155,6 +183,7 @@ export interface AppSettings {
   user: UserLoginInfo | null
   windows: Record<string, WindowSettings>
   display: DisplaySettings
+  speech: SpeechSettings
   tabOrder: TabType[]
   /** 特别关注的 UID 列表 */
   specialFollowUids: number[]
@@ -208,6 +237,16 @@ export const DEFAULT_DISPLAY_SETTINGS: DisplaySettings = {
   entryPanelHeight: 150,
   entryFontColor: '#9b9b9b',
   entryTimeColor: '#6b6b6b'
+}
+
+/** 默认语音设置 */
+export const DEFAULT_SPEECH_SETTINGS: SpeechSettings = {
+  enabled: false,
+  voiceId: null,
+  rate: 0,
+  speakDanmaku: true,
+  speakGift: true,
+  speakSuperChat: true
 }
 
 /** 默认窗口设置 */

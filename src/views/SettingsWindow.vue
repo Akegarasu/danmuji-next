@@ -20,9 +20,16 @@ import {
 } from '@/services/blive-client'
 import { lookupArchiveUserNames } from '@/services/archive'
 import { checkForUpdate, getAppVersion, isPortable, type UpdateInfo } from '@/services/updater'
+import { getSpeechStatus, getSpeechVoices, previewSpeech } from '@/services/speech'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import type { AudienceSortType, ContentFontWeight, DisplaySettings } from '@/types'
+import type {
+  AudienceSortType,
+  ContentFontWeight,
+  DisplaySettings,
+  SpeechStatus,
+  SpeechVoice
+} from '@/types'
 import type { UserInfo } from '@/services/auth'
 import { createLogger } from '@/services/logger'
 
@@ -217,7 +224,8 @@ onMounted(async () => {
   // 应用设置到 UI
   applyCurrentSettings()
 
-  // 加载关于信息
+  // 加载语音引擎及关于信息
+  await initSpeechInfo()
   initAboutInfo()
 })
 
@@ -226,6 +234,10 @@ onUnmounted(async () => {
   if (statusUnlisten) {
     statusUnlisten()
     statusUnlisten = null
+  }
+  if (speechStatusTimer) {
+    clearInterval(speechStatusTimer)
+    speechStatusTimer = null
   }
 
   await cleanupWindowManager('settings')
@@ -238,6 +250,7 @@ const activeSection = ref('connection')
 const sections = [
   { id: 'connection', label: '连接' },
   { id: 'general', label: '通用' },
+  { id: 'speech', label: '语音' },
   { id: 'font', label: '字体' },
   { id: 'danmaku', label: '弹幕' },
   { id: 'gift', label: '礼物' },
@@ -406,6 +419,113 @@ const autoHideUi = computed({
   get: () => settings.value.windows.main?.autoHideUi ?? false,
   set: (v) => settingsStore.updateWindowSettings('main', { autoHideUi: v })
 })
+
+// 语音播报
+const createUnavailableSpeechStatus = (error: string | null = null): SpeechStatus => ({
+  available: false,
+  speaking: false,
+  danmaku_suspended: false,
+  queue_depth: 0,
+  error
+})
+
+const getErrorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : String(error)
+
+const speechVoices = ref<SpeechVoice[]>([])
+const speechVoicesLoading = ref(false)
+const speechPreviewing = ref(false)
+const speechLoadError = ref('')
+const speechStatus = ref<SpeechStatus>(createUnavailableSpeechStatus())
+const speechVoiceControlsDisabled = computed(() =>
+  speechVoicesLoading.value || speechVoices.value.length === 0
+)
+let speechStatusTimer: ReturnType<typeof setInterval> | null = null
+
+const speechEnabled = computed({
+  get: () => settings.value.speech.enabled,
+  set: (v) => settingsStore.updateSpeechSettings({ enabled: v })
+})
+
+const speechVoiceId = computed({
+  get: () => settings.value.speech.voiceId ?? '',
+  set: (v: string) => settingsStore.updateSpeechSettings({ voiceId: v || null })
+})
+
+const speechRate = computed({
+  get: () => settings.value.speech.rate,
+  set: (v: number) => settingsStore.updateSpeechSettings({ rate: Math.min(10, Math.max(-10, v)) })
+})
+
+const speechSpeakDanmaku = computed({
+  get: () => settings.value.speech.speakDanmaku,
+  set: (v) => settingsStore.updateSpeechSettings({ speakDanmaku: v })
+})
+
+const speechSpeakGift = computed({
+  get: () => settings.value.speech.speakGift,
+  set: (v) => settingsStore.updateSpeechSettings({ speakGift: v })
+})
+
+const speechSpeakSuperChat = computed({
+  get: () => settings.value.speech.speakSuperChat,
+  set: (v) => settingsStore.updateSpeechSettings({ speakSuperChat: v })
+})
+
+const speechRateLabel = computed(() => {
+  if (speechRate.value === 0) return '正常'
+  return speechRate.value > 0 ? `加快 +${speechRate.value}` : `减慢 ${speechRate.value}`
+})
+
+const speechStatusText = computed(() => {
+  const status = speechStatus.value
+  if (!status.available) return status.error || '语音引擎不可用'
+  if (status.error) return status.error
+  if (!speechEnabled.value) return '语音播报未启用'
+  if (status.danmaku_suspended) return '弹幕过多，已临时暂停弹幕播报'
+  if (status.speaking) return `正在播报（队列 ${status.queue_depth}）`
+  if (status.queue_depth > 0) return `等待播报（队列 ${status.queue_depth}）`
+  return '语音播报正常'
+})
+
+const refreshSpeechStatus = async () => {
+  try {
+    speechStatus.value = await getSpeechStatus()
+  } catch (error) {
+    speechStatus.value = createUnavailableSpeechStatus(getErrorMessage(error))
+  }
+}
+
+const loadSpeechVoices = async () => {
+  speechVoicesLoading.value = true
+  speechLoadError.value = ''
+  try {
+    speechVoices.value = await getSpeechVoices()
+  } catch (error) {
+    speechVoices.value = []
+    speechLoadError.value = getErrorMessage(error)
+  } finally {
+    speechVoicesLoading.value = false
+  }
+}
+
+const initSpeechInfo = async () => {
+  await Promise.all([loadSpeechVoices(), refreshSpeechStatus()])
+  speechStatusTimer = setInterval(refreshSpeechStatus, 1000)
+}
+
+const handleSpeechPreview = async () => {
+  if (speechPreviewing.value) return
+  speechPreviewing.value = true
+  speechLoadError.value = ''
+  try {
+    await previewSpeech(settings.value.speech.voiceId, settings.value.speech.rate)
+  } catch (error) {
+    speechLoadError.value = getErrorMessage(error)
+  } finally {
+    speechPreviewing.value = false
+  }
+}
 
 // 显示设置 - 弹幕
 const danmakuShowMedal = computed({
@@ -1006,6 +1126,98 @@ const openProjectUrl = async () => {
           </div>
         </div>
 
+        <!-- 语音播报 -->
+        <div v-show="activeSection === 'speech'" class="section">
+          <h3 class="section-title">语音播报</h3>
+
+          <div
+            class="speech-status-card"
+            :class="{
+              active: speechEnabled && speechStatus.available,
+              suspended: speechStatus.danmaku_suspended,
+              error: !speechStatus.available || !!speechStatus.error
+            }"
+          >
+            <span class="speech-status-dot">●</span>
+            <span>{{ speechStatusText }}</span>
+          </div>
+
+          <div class="setting-group toggle">
+            <label class="setting-label">启用语音播报</label>
+            <input
+              v-model="speechEnabled"
+              type="checkbox"
+              class="toggle-checkbox"
+              :disabled="!speechStatus.available"
+            />
+          </div>
+
+          <div class="setting-group">
+            <label class="setting-label">语音</label>
+            <div class="speech-voice-row">
+              <select
+                v-model="speechVoiceId"
+                class="setting-select"
+                :disabled="speechVoiceControlsDisabled"
+              >
+                <option value="">自动选择（优先中文）</option>
+                <option v-for="voice in speechVoices" :key="voice.id" :value="voice.id">
+                  {{ voice.name }}{{ voice.language ? `（${voice.language}）` : '' }}
+                </option>
+              </select>
+              <button
+                type="button"
+                class="speech-preview-btn"
+                :disabled="speechVoiceControlsDisabled || speechPreviewing"
+                @click="handleSpeechPreview"
+              >
+                {{ speechPreviewing ? '试听中...' : '试听' }}
+              </button>
+            </div>
+            <div v-if="speechLoadError" class="speech-error">{{ speechLoadError }}</div>
+            <div v-else-if="speechVoices.length === 0 && !speechVoicesLoading" class="setting-hint">
+              未找到系统语音，请先在 Windows 语言或语音设置中安装语音包。
+            </div>
+          </div>
+
+          <div class="setting-group">
+            <label class="setting-label">
+              语速 <span class="value">{{ speechRateLabel }}</span>
+            </label>
+            <input
+              v-model.number="speechRate"
+              type="range"
+              min="-10"
+              max="10"
+              step="1"
+              class="setting-slider"
+            />
+            <div class="setting-hint">不同系统语音对语速的表现可能略有差异。</div>
+          </div>
+
+          <h3 class="section-title section-subtitle">播报内容</h3>
+          <div class="setting-group toggle">
+            <label class="setting-label">弹幕</label>
+            <input v-model="speechSpeakDanmaku" type="checkbox" class="toggle-checkbox" />
+          </div>
+          <div class="setting-group toggle">
+            <label class="setting-label">礼物</label>
+            <input v-model="speechSpeakGift" type="checkbox" class="toggle-checkbox" />
+          </div>
+          <div class="setting-group toggle">
+            <label class="setting-label">醒目留言（SC）</label>
+            <input v-model="speechSpeakSuperChat" type="checkbox" class="toggle-checkbox" />
+          </div>
+
+          <div class="info-box">
+            <span class="info-icon">🔊</span>
+            <span class="info-text">
+              弹幕过多或待播队列堆积时会自动暂停弹幕播报，礼物和 SC 不受影响；流量下降后自动恢复。
+              礼物播报沿用“显示免费礼物”和“最低显示价格”设置，真实连击礼物只播报最终累计数量。
+            </span>
+          </div>
+        </div>
+
         <!-- 字体设置 -->
         <div v-show="activeSection === 'font'" class="section">
           <h3 class="section-title">字体设置</h3>
@@ -1554,6 +1766,7 @@ const openProjectUrl = async () => {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  overflow-y: auto;
 }
 
 .nav-item {
@@ -1618,6 +1831,88 @@ const openProjectUrl = async () => {
     color: var(--text-secondary);
     line-height: 1.5;
   }
+}
+
+.speech-status-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  margin-bottom: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+
+  .speech-status-dot {
+    color: var(--text-muted);
+    font-size: 9px;
+  }
+
+  &.active {
+    border-color: rgba(34, 197, 94, 0.35);
+    background: rgba(34, 197, 94, 0.08);
+
+    .speech-status-dot {
+      color: #22c55e;
+    }
+  }
+
+  &.suspended {
+    border-color: rgba(245, 200, 66, 0.35);
+    background: rgba(245, 200, 66, 0.08);
+
+    .speech-status-dot {
+      color: var(--accent-gold);
+    }
+  }
+
+  &.error {
+    border-color: rgba(239, 68, 68, 0.3);
+    background: rgba(239, 68, 68, 0.08);
+
+    .speech-status-dot {
+      color: #ef4444;
+    }
+  }
+}
+
+.speech-voice-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  .setting-select {
+    flex: 1;
+  }
+}
+
+.speech-preview-btn {
+  flex-shrink: 0;
+  min-width: 68px;
+  padding: 8px 12px;
+  background: var(--bg-active);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    background: var(--bg-hover);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.speech-error {
+  margin-top: 6px;
+  color: #ef4444;
+  font-size: var(--font-size-xs);
 }
 
 .setting-group {

@@ -23,6 +23,7 @@ mod live_data;
 mod live_types;
 mod lock_state;
 mod raw_event_dump;
+mod speech;
 mod video_info;
 mod video_request;
 mod voting;
@@ -37,6 +38,7 @@ use config::{get_archive_db_path, get_video_request_kv_path, get_voting_kv_path,
 use kv_store::{KVStore, VideoRequestStore, VotingStore};
 use lock_state::LockStateManager;
 use archive::ArchiveManager;
+use speech::{SpeechRuntimeConfig, SpeechService};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
@@ -87,10 +89,15 @@ pub fn run() {
         ArchiveManager::new(get_archive_db_path()).expect("初始化存档数据库失败"),
     );
 
-    // 初始化弹幕服务（扩展持久化存储内聚在 LiveData 中）
+    // 初始化语音播报与弹幕服务（语音服务必须是全局单例，避免多窗口重复播报）
+    let speech_service = Arc::new(SpeechService::new(SpeechRuntimeConfig::load_from_config()));
     let video_request_store = VideoRequestStore::new(get_video_request_kv_path());
     let voting_store = VotingStore::new(get_voting_kv_path());
-    let blive_service = Arc::new(BliveService::new(video_request_store, voting_store));
+    let blive_service = Arc::new(BliveService::new(
+        video_request_store,
+        voting_store,
+        speech_service.clone(),
+    ));
 
     // 初始化窗口锁定状态管理器，并从 KV 存储加载保存的状态
     let lock_manager = LockStateManager::new();
@@ -103,6 +110,7 @@ pub fn run() {
         .manage(window_kv_store)
         .manage(archive_manager)
         .manage(blive_service)
+        .manage(speech_service)
         .manage(lock_manager)
         .setup(|app| {
             // 恢复上次异常退出未关闭的存档会话
@@ -191,6 +199,11 @@ pub fn run() {
             commands::disconnect_room,
             commands::get_connection_status,
             commands::get_current_room_info,
+            // 语音播报
+            commands::get_speech_voices,
+            commands::update_speech_settings,
+            commands::preview_speech,
+            commands::get_speech_status,
             // 事件订阅
             commands::subscribe_events,
             commands::unsubscribe_events,
@@ -255,6 +268,7 @@ pub fn run() {
                 // 应用退出时，确保存档会话正常关闭
                 let service = app_handle.state::<Arc<BliveService>>().inner().clone();
                 let archive = app_handle.state::<Arc<ArchiveManager>>().inner().clone();
+                let speech = app_handle.state::<Arc<SpeechService>>().inner().clone();
                 tauri::async_runtime::block_on(async move {
                     // 断开连接（会触发 archive end_session）
                     service.disconnect().await;
@@ -263,6 +277,7 @@ pub fn run() {
                         log::error!("Failed to recover sessions on exit: {}", e);
                     }
                 });
+                speech.shutdown();
             }
         });
 }

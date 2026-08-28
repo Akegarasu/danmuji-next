@@ -5,10 +5,15 @@ import type {
   AppSettings, 
   WindowSettings, 
   DisplaySettings,
+  SpeechSettings,
   AudienceSortType,
   UserLoginInfo
 } from '@/types'
-import { DEFAULT_DISPLAY_SETTINGS, DEFAULT_WINDOW_SETTINGS } from '@/types'
+import {
+  DEFAULT_DISPLAY_SETTINGS,
+  DEFAULT_SPEECH_SETTINGS,
+  DEFAULT_WINDOW_SETTINGS
+} from '@/types'
 import { createLogger } from '@/services/logger'
 
 const logger = createLogger('SettingsStore')
@@ -21,6 +26,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     main: { ...DEFAULT_WINDOW_SETTINGS }
   },
   display: { ...DEFAULT_DISPLAY_SETTINGS },
+  speech: { ...DEFAULT_SPEECH_SETTINGS },
   tabOrder: ['interaction', 'danmaku', 'gift', 'superchat', 'audience'],
   specialFollowUids: [],
   danmakuFilterUids: []
@@ -34,6 +40,7 @@ export const useSettingsStore = defineStore('settings', () => {
   // ==================== 响应式计算属性 ====================
   
   const displaySettings = computed(() => settings.value.display)
+  const speechSettings = computed(() => settings.value.speech)
   const mainWindowSettings = computed(() => settings.value.windows.main || DEFAULT_WINDOW_SETTINGS)
 
   // 粉丝勋章通用设置
@@ -90,6 +97,21 @@ export const useSettingsStore = defineStore('settings', () => {
   const entryFontColor = computed(() => settings.value.display.entryFontColor)
   const entryTimeColor = computed(() => settings.value.display.entryTimeColor)
 
+  // ==================== 语音运行时同步 ====================
+
+  const syncSpeechRuntime = async (): Promise<void> => {
+    try {
+      await invoke('update_speech_settings', {
+        settings: settings.value.speech,
+        ignoredUids: settings.value.danmakuFilterUids,
+        giftShowFree: settings.value.display.giftShowFree,
+        giftMinPrice: settings.value.display.giftMinPrice
+      })
+    } catch (error) {
+      logger.warn('Speech settings sync failed:', error)
+    }
+  }
+
   // ==================== 加载/保存 ====================
 
   /**
@@ -123,6 +145,10 @@ export const useSettingsStore = defineStore('settings', () => {
           ...saved,
           user: saved.user || null,
           display,
+          speech: {
+            ...DEFAULT_SPEECH_SETTINGS,
+            ...(saved.speech ?? {})
+          },
           windows: {
             main: { ...DEFAULT_WINDOW_SETTINGS, ...(saved.windows?.main || {}) },
             ...saved.windows
@@ -132,6 +158,7 @@ export const useSettingsStore = defineStore('settings', () => {
         }
       }
       isLoaded.value = true
+      await syncSpeechRuntime()
       logger.debug('Loaded', force ? '(forced)' : '')
       return true
     } catch (e) {
@@ -199,6 +226,15 @@ export const useSettingsStore = defineStore('settings', () => {
 
   const updateDisplaySettings = (updates: Partial<DisplaySettings>) => {
     settings.value.display = { ...settings.value.display, ...updates }
+    if ('giftShowFree' in updates || 'giftMinPrice' in updates) {
+      void syncSpeechRuntime()
+    }
+    autoSave()
+  }
+
+  const updateSpeechSettings = (updates: Partial<SpeechSettings>) => {
+    settings.value.speech = { ...settings.value.speech, ...updates }
+    void syncSpeechRuntime()
     autoSave()
   }
 
@@ -240,6 +276,7 @@ export const useSettingsStore = defineStore('settings', () => {
     if (!Number.isSafeInteger(uid) || uid <= 0) return
     if (!settings.value.danmakuFilterUids.includes(uid)) {
       settings.value.danmakuFilterUids.push(uid)
+      void syncSpeechRuntime()
       autoSave()
     }
   }
@@ -248,6 +285,7 @@ export const useSettingsStore = defineStore('settings', () => {
     const idx = settings.value.danmakuFilterUids.indexOf(uid)
     if (idx !== -1) {
       settings.value.danmakuFilterUids.splice(idx, 1)
+      void syncSpeechRuntime()
       autoSave()
     }
   }
@@ -275,6 +313,7 @@ export const useSettingsStore = defineStore('settings', () => {
     isSaving,
     // 计算属性
     displaySettings,
+    speechSettings,
     mainWindowSettings,
     medalShowUnlit,
     medalShowOtherRoom,
@@ -328,6 +367,8 @@ export const useSettingsStore = defineStore('settings', () => {
     getWindowSettings,
     updateWindowSettings,
     updateDisplaySettings,
+    updateSpeechSettings,
+    syncSpeechRuntime,
     setAudienceSortType,
     // 特别关注
     specialFollowUids,

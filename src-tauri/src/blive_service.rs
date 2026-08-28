@@ -24,6 +24,7 @@ use blivedm::{BliveDmClient, Error as BliveError, Event};
 use crate::kv_store::{VideoRequestStore, VotingStore};
 use crate::live_data::{LiveData, WindowSubscription};
 use crate::live_types::*;
+use crate::speech::SpeechService;
 use crate::video_info;
 use crate::voting::{Poll, VoteKeyType, Voter};
 
@@ -54,15 +55,21 @@ impl Default for ServiceState {
 pub struct BliveService {
     state: RwLock<ServiceState>,
     live_data: Arc<Mutex<LiveData>>,
+    speech: Arc<SpeechService>,
     /// 窗口订阅: window_label -> subscription
     subscriptions: RwLock<HashMap<String, WindowSubscription>>,
 }
 
 impl BliveService {
-    pub fn new(vr_store: VideoRequestStore, voting_store: VotingStore) -> Self {
+    pub fn new(
+        vr_store: VideoRequestStore,
+        voting_store: VotingStore,
+        speech: Arc<SpeechService>,
+    ) -> Self {
         Self {
             state: RwLock::new(ServiceState::default()),
             live_data: Arc::new(Mutex::new(LiveData::new(vr_store, voting_store))),
+            speech,
             subscriptions: RwLock::new(HashMap::new()),
         }
     }
@@ -480,6 +487,7 @@ impl BliveService {
 
             push_task.abort();
             service.push_updates(&app_clone).await;
+            service.speech.reset_session();
 
             // 结束存档会话：先 drop archive_tx 以让 writer flush，再 end_session
             {
@@ -516,6 +524,9 @@ impl BliveService {
     }
 
     pub async fn disconnect(&self) {
+        // 切换房间或断开连接时立即停止并清空旧房间的播报。
+        self.speech.reset_session();
+
         let (stop_tx, task_handle) = {
             let mut state = self.state.write().await;
             state.status = ConnectionStatus::Disconnected;
@@ -602,6 +613,9 @@ impl BliveService {
         if updates.is_empty() {
             return;
         }
+
+        // 在按窗口订阅分发前只投递一次，避免多窗口造成重复播报。
+        self.speech.enqueue_updates(&updates);
 
         let subs = self.subscriptions.read().await;
 

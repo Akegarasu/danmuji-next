@@ -28,6 +28,9 @@ use crate::config::get_config_path;
 use crate::crypto;
 use crate::kv_store::KVStore;
 use crate::lock_state::LockStateManager;
+use crate::speech::{
+    SpeechRuntimeConfig, SpeechService, SpeechSettings, SpeechStatus, SpeechVoice,
+};
 use crate::video_info::{self, VideoInfo};
 use crate::window_state::{WindowConfig, WindowState};
 
@@ -108,6 +111,48 @@ pub fn load_config() -> Result<String, String> {
     }
 
     serde_json::to_string_pretty(&value).map_err(|e| e.to_string())
+}
+
+// ==================== 语音播报 ====================
+
+/// 获取 Windows SAPI 已安装的语音。
+#[tauri::command]
+pub fn get_speech_voices(
+    speech: State<'_, Arc<SpeechService>>,
+) -> Result<Vec<SpeechVoice>, String> {
+    speech.list_voices()
+}
+
+/// 立即更新语音运行时设置；持久化仍由 save_config 负责。
+#[tauri::command]
+pub fn update_speech_settings(
+    speech: State<'_, Arc<SpeechService>>,
+    settings: SpeechSettings,
+    ignored_uids: Vec<u64>,
+    gift_show_free: bool,
+    gift_min_price: u64,
+) -> Result<(), String> {
+    speech.update_config(SpeechRuntimeConfig::new(
+        settings,
+        ignored_uids,
+        gift_show_free,
+        gift_min_price,
+    ))
+}
+
+/// 使用独立 SAPI voice 试听，不影响直播播报队列。
+#[tauri::command]
+pub fn preview_speech(
+    speech: State<'_, Arc<SpeechService>>,
+    voice_id: Option<String>,
+    rate: i32,
+) -> Result<(), String> {
+    speech.preview(voice_id, rate)
+}
+
+#[tauri::command]
+pub fn get_speech_status(speech: State<'_, Arc<SpeechService>>) -> SpeechStatus {
+    speech.status()
 }
 
 // ==================== KV 存储操作 ====================
