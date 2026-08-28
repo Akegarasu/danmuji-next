@@ -6,6 +6,7 @@
 //! - 数据快照：新窗口可获取当前完整数据
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -54,6 +55,8 @@ impl Default for ServiceState {
 
 pub struct BliveService {
     state: RwLock<ServiceState>,
+    /// 当前房主 UID 的无锁快照；仅在连接状态切换时更新。
+    streamer_uid: AtomicU64,
     live_data: Arc<Mutex<LiveData>>,
     speech: Arc<SpeechService>,
     /// 窗口订阅: window_label -> subscription
@@ -68,6 +71,7 @@ impl BliveService {
     ) -> Self {
         Self {
             state: RwLock::new(ServiceState::default()),
+            streamer_uid: AtomicU64::new(0),
             live_data: Arc::new(Mutex::new(LiveData::new(vr_store, voting_store))),
             speech,
             subscriptions: RwLock::new(HashMap::new()),
@@ -355,6 +359,7 @@ impl BliveService {
             let mut state = self.state.write().await;
             state.room_info = Some(room_info.clone());
         }
+        self.streamer_uid.store(room_info.uid, Ordering::Relaxed);
 
         let (stop_tx, mut stop_rx) = mpsc::channel::<()>(1);
 
@@ -541,6 +546,7 @@ impl BliveService {
             let _ = handle.await;
         }
 
+        self.streamer_uid.store(0, Ordering::Relaxed);
         self.live_data.lock().await.clear();
     }
 
@@ -614,8 +620,12 @@ impl BliveService {
             return;
         }
 
-        // 在按窗口订阅分发前只投递一次，避免多窗口造成重复播报。
-        self.speech.enqueue_updates(&updates);
+        // 在按窗口订阅分发前只投递一次，避免多窗口重复播报；
+        // 语音未启用时跳过事件克隆和通道提交。
+        if self.speech.accepts_events() {
+            let streamer_uid = self.streamer_uid.load(Ordering::Relaxed);
+            self.speech.enqueue_updates(&updates, streamer_uid);
+        }
 
         let subs = self.subscriptions.read().await;
 

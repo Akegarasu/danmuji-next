@@ -38,11 +38,12 @@ const isMedalVisible = (medal: ProcessedMedal | undefined): boolean =>
   )
 
 const filteredDanmakuList = computed(() => {
-  if (settingsStore.danmakuFilterUids.length === 0) {
-    return danmakuStore.danmakuList
-  }
+  if (!settingsStore.hasDanmakuFilter) return danmakuStore.danmakuList
 
-  return danmakuStore.danmakuList.filter(msg => !settingsStore.isDanmakuFiltered(msg.user.uid))
+  const streamerUid = danmakuStore.roomInfo.streamerUid
+  return danmakuStore.danmakuList.filter(message =>
+    !settingsStore.isDanmakuFiltered(message, streamerUid)
+  )
 })
 
 const danmakuItemKey = (msg: ProcessedDanmaku) => msg.id
@@ -62,7 +63,9 @@ const danmakuLayoutVersion = computed(() => [
   settingsStore.medalShowUnlit,
   settingsStore.medalShowOtherRoom,
   danmakuStore.roomInfo.streamerUid,
-  settingsStore.danmakuFilterUids.join(',')
+  settingsStore.danmakuFilterUids.join(','),
+  settingsStore.danmakuFilterMinMedalLevel,
+  settingsStore.danmakuFilterMinWealthLevel
 ].join('|'))
 
 const scrollToBottom = () => {

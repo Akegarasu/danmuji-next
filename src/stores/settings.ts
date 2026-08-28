@@ -7,7 +7,8 @@ import type {
   DisplaySettings,
   SpeechSettings,
   AudienceSortType,
-  UserLoginInfo
+  UserLoginInfo,
+  ProcessedDanmaku
 } from '@/types'
 import {
   DEFAULT_DISPLAY_SETTINGS,
@@ -17,6 +18,14 @@ import {
 import { createLogger } from '@/services/logger'
 
 const logger = createLogger('SettingsStore')
+
+const MAX_MEDAL_FILTER_LEVEL = 50
+const MAX_WEALTH_FILTER_LEVEL = 100
+
+const normalizeFilterLevel = (value: unknown, max: number): number => {
+  const level = typeof value === 'number' && Number.isFinite(value) ? Math.trunc(value) : 0
+  return Math.min(max, Math.max(0, level))
+}
 
 const DEFAULT_SETTINGS: AppSettings = {
   roomId: '',
@@ -29,7 +38,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   speech: { ...DEFAULT_SPEECH_SETTINGS },
   tabOrder: ['interaction', 'danmaku', 'gift', 'superchat', 'audience'],
   specialFollowUids: [],
-  danmakuFilterUids: []
+  danmakuFilterUids: [],
+  danmakuFilterMinMedalLevel: 0,
+  danmakuFilterMinWealthLevel: 0
 }
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -105,6 +116,8 @@ export const useSettingsStore = defineStore('settings', () => {
       await invoke('update_speech_settings', {
         settings: settings.value.speech,
         ignoredUids: settings.value.danmakuFilterUids,
+        minMedalLevel: settings.value.danmakuFilterMinMedalLevel,
+        minWealthLevel: settings.value.danmakuFilterMinWealthLevel,
         giftShowFree: settings.value.display.giftShowFree,
         giftMinPrice: settings.value.display.giftMinPrice
       })
@@ -155,7 +168,15 @@ export const useSettingsStore = defineStore('settings', () => {
             ...saved.windows
           },
           specialFollowUids: saved.specialFollowUids ?? [],
-          danmakuFilterUids: saved.danmakuFilterUids ?? []
+          danmakuFilterUids: saved.danmakuFilterUids ?? [],
+          danmakuFilterMinMedalLevel: normalizeFilterLevel(
+            saved.danmakuFilterMinMedalLevel,
+            MAX_MEDAL_FILTER_LEVEL
+          ),
+          danmakuFilterMinWealthLevel: normalizeFilterLevel(
+            saved.danmakuFilterMinWealthLevel,
+            MAX_WEALTH_FILTER_LEVEL
+          )
         }
       }
       isLoaded.value = true
@@ -270,8 +291,46 @@ export const useSettingsStore = defineStore('settings', () => {
 
   const danmakuFilterUids = computed(() => settings.value.danmakuFilterUids)
   const danmakuFilterSet = computed(() => new Set(settings.value.danmakuFilterUids))
+  const danmakuFilterMinMedalLevel = computed(() => settings.value.danmakuFilterMinMedalLevel)
+  const danmakuFilterMinWealthLevel = computed(() => settings.value.danmakuFilterMinWealthLevel)
+  const hasDanmakuFilter = computed(() =>
+    danmakuFilterUids.value.length > 0
+    || danmakuFilterMinMedalLevel.value > 0
+    || danmakuFilterMinWealthLevel.value > 0
+  )
 
-  const isDanmakuFiltered = (uid: number) => danmakuFilterSet.value.has(uid)
+  const isDanmakuFiltered = (danmaku: ProcessedDanmaku, streamerUid: number): boolean => {
+    const { user } = danmaku
+    if (danmakuFilterSet.value.has(user.uid)) return true
+    if ((user.wealth_level ?? 0) < danmakuFilterMinWealthLevel.value) return true
+
+    const minMedalLevel = danmakuFilterMinMedalLevel.value
+    if (minMedalLevel === 0) return false
+
+    const medal = user.medal
+    const localMedalLevel = streamerUid > 0 && medal?.anchor_uid === streamerUid
+      ? medal.level
+      : 0
+    return localMedalLevel < minMedalLevel
+  }
+
+  const setDanmakuFilterMinMedalLevel = (level: number) => {
+    settings.value.danmakuFilterMinMedalLevel = normalizeFilterLevel(
+      level,
+      MAX_MEDAL_FILTER_LEVEL
+    )
+    void syncSpeechRuntime()
+    autoSave()
+  }
+
+  const setDanmakuFilterMinWealthLevel = (level: number) => {
+    settings.value.danmakuFilterMinWealthLevel = normalizeFilterLevel(
+      level,
+      MAX_WEALTH_FILTER_LEVEL
+    )
+    void syncSpeechRuntime()
+    autoSave()
+  }
 
   const addDanmakuFilter = (uid: number) => {
     if (!Number.isSafeInteger(uid) || uid <= 0) return
@@ -381,9 +440,14 @@ export const useSettingsStore = defineStore('settings', () => {
     // 弹幕过滤
     danmakuFilterUids,
     danmakuFilterSet,
+    danmakuFilterMinMedalLevel,
+    danmakuFilterMinWealthLevel,
+    hasDanmakuFilter,
     isDanmakuFiltered,
     addDanmakuFilter,
     removeDanmakuFilter,
+    setDanmakuFilterMinMedalLevel,
+    setDanmakuFilterMinWealthLevel,
     // 用户登录
     isLoggedIn,
     userInfo,

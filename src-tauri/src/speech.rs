@@ -5,6 +5,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::{self, JoinHandle};
@@ -34,6 +35,11 @@ const COMBO_DEDUP_TTL: Duration = Duration::from_secs(120);
 const EVENT_DEDUP_TTL: Duration = Duration::from_secs(600);
 const MAX_PENDING_COMBOS: usize = 256;
 const MAX_SEEN_EVENTS: usize = 4096;
+const SPEECH_EVENT_DANMAKU: u8 = 1 << 0;
+const SPEECH_EVENT_GIFT: u8 = 1 << 1;
+const SPEECH_EVENT_SUPER_CHAT: u8 = 1 << 2;
+const MAX_MEDAL_FILTER_LEVEL: u32 = 50;
+const MAX_WEALTH_FILTER_LEVEL: u32 = 100;
 
 /// 用户可持久化的语音设置。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,6 +67,24 @@ impl Default for SpeechSettings {
 }
 
 impl SpeechSettings {
+    fn event_mask(&self) -> u8 {
+        if !self.enabled {
+            return 0;
+        }
+
+        let mut mask = 0;
+        if self.speak_danmaku {
+            mask |= SPEECH_EVENT_DANMAKU;
+        }
+        if self.speak_gift {
+            mask |= SPEECH_EVENT_GIFT;
+        }
+        if self.speak_super_chat {
+            mask |= SPEECH_EVENT_SUPER_CHAT;
+        }
+        mask
+    }
+
     fn normalize(mut self) -> Self {
         self.rate = self.rate.clamp(-10, 10);
         self.voice_id = self
@@ -77,6 +101,8 @@ impl SpeechSettings {
 pub struct SpeechRuntimeConfig {
     pub settings: SpeechSettings,
     pub ignored_uids: HashSet<u64>,
+    pub min_medal_level: u32,
+    pub min_wealth_level: u32,
     pub gift_show_free: bool,
     pub gift_min_price: u64,
 }
@@ -86,6 +112,8 @@ impl Default for SpeechRuntimeConfig {
         Self {
             settings: SpeechSettings::default(),
             ignored_uids: HashSet::new(),
+            min_medal_level: 0,
+            min_wealth_level: 0,
             gift_show_free: true,
             gift_min_price: 0,
         }
@@ -96,12 +124,16 @@ impl SpeechRuntimeConfig {
     pub fn new(
         settings: SpeechSettings,
         ignored_uids: Vec<u64>,
+        min_medal_level: u32,
+        min_wealth_level: u32,
         gift_show_free: bool,
         gift_min_price: u64,
     ) -> Self {
         Self {
             settings: settings.normalize(),
             ignored_uids: ignored_uids.into_iter().filter(|uid| *uid > 0).collect(),
+            min_medal_level: min_medal_level.min(MAX_MEDAL_FILTER_LEVEL),
+            min_wealth_level: min_wealth_level.min(MAX_WEALTH_FILTER_LEVEL),
             gift_show_free,
             gift_min_price,
         }
@@ -125,6 +157,15 @@ impl SpeechRuntimeConfig {
             .get("danmakuFilterUids")
             .and_then(|uids| serde_json::from_value::<Vec<u64>>(uids.clone()).ok())
             .unwrap_or_default();
+        let filter_level = |key: &str| {
+            value
+                .get(key)
+                .and_then(|level| level.as_u64())
+                .and_then(|level| u32::try_from(level).ok())
+                .unwrap_or_default()
+        };
+        let min_medal_level = filter_level("danmakuFilterMinMedalLevel");
+        let min_wealth_level = filter_level("danmakuFilterMinWealthLevel");
         let display = value.get("display");
         let gift_show_free = display
             .and_then(|item| item.get("giftShowFree"))
@@ -135,7 +176,14 @@ impl SpeechRuntimeConfig {
             .and_then(|item| item.as_u64())
             .unwrap_or(0);
 
-        Self::new(settings, ignored_uids, gift_show_free, gift_min_price)
+        Self::new(
+            settings,
+            ignored_uids,
+            min_medal_level,
+            min_wealth_level,
+            gift_show_free,
+            gift_min_price,
+        )
     }
 }
 
@@ -163,7 +211,10 @@ enum SpeechInput {
 }
 
 enum WorkerCommand {
-    Events(Vec<SpeechInput>),
+    Events {
+        inputs: Vec<SpeechInput>,
+        streamer_uid: u64,
+    },
     UpdateConfig(SpeechRuntimeConfig),
     ListVoices(SyncSender<Result<Vec<SpeechVoice>, String>>),
     Preview {
@@ -178,12 +229,15 @@ enum WorkerCommand {
 /// 全局语音服务。公开方法不会执行 COM 或音频操作。
 pub struct SpeechService {
     command_tx: SyncSender<WorkerCommand>,
+    /// 生产侧需要的事件类型；为 0 时完全跳过实时事件提交。
+    event_mask: AtomicU8,
     status: Arc<RwLock<SpeechStatus>>,
     worker: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl SpeechService {
     pub fn new(config: SpeechRuntimeConfig) -> Self {
+        let event_mask = config.settings.event_mask();
         let (command_tx, command_rx) = mpsc::sync_channel(COMMAND_CHANNEL_CAPACITY);
         let status = Arc::new(RwLock::new(SpeechStatus::default()));
         let worker_status = status.clone();
@@ -194,13 +248,24 @@ impl SpeechService {
 
         Self {
             command_tx,
+            event_mask: AtomicU8::new(event_mask),
             status,
             worker: Mutex::new(Some(worker)),
         }
     }
 
+    /// 是否接收实时事件，用于让调用方跳过整段语音热路径。
+    pub fn accepts_events(&self) -> bool {
+        self.event_mask.load(Ordering::Acquire) != 0
+    }
+
     /// 从本次实时更新中提取可播报事件。快照不会经过这里。
-    pub fn enqueue_updates(&self, updates: &[DataUpdate]) {
+    pub fn enqueue_updates(&self, updates: &[DataUpdate], streamer_uid: u64) {
+        let event_mask = self.event_mask.load(Ordering::Acquire);
+        if event_mask == 0 {
+            return;
+        }
+
         if updates
             .iter()
             .any(|update| matches!(update, DataUpdate::LiveStop))
@@ -212,10 +277,10 @@ impl SpeechService {
         let mut inputs = Vec::new();
         for update in updates {
             match update {
-                DataUpdate::DanmakuAppend(items) => {
+                DataUpdate::DanmakuAppend(items) if event_mask & SPEECH_EVENT_DANMAKU != 0 => {
                     inputs.extend(items.iter().cloned().map(SpeechInput::Danmaku));
                 }
-                DataUpdate::GiftUpsert(items) => {
+                DataUpdate::GiftUpsert(items) if event_mask & SPEECH_EVENT_GIFT != 0 => {
                     inputs.extend(
                         items
                             .iter()
@@ -223,7 +288,7 @@ impl SpeechService {
                             .map(|item| SpeechInput::Gift(Box::new(item))),
                     );
                 }
-                DataUpdate::SuperChatAppend(item) => {
+                DataUpdate::SuperChatAppend(item) if event_mask & SPEECH_EVENT_SUPER_CHAT != 0 => {
                     inputs.push(SpeechInput::SuperChat(item.clone()));
                 }
                 _ => {}
@@ -237,7 +302,10 @@ impl SpeechService {
         let has_priority_event = inputs
             .iter()
             .any(|input| !matches!(input, SpeechInput::Danmaku(_)));
-        match self.command_tx.try_send(WorkerCommand::Events(inputs)) {
+        match self.command_tx.try_send(WorkerCommand::Events {
+            inputs,
+            streamer_uid,
+        }) {
             Ok(()) => {}
             Err(TrySendError::Full(command)) if has_priority_event => {
                 // 推送任务独立于 WebSocket 处理循环。通道拥塞时允许它短暂等待，
@@ -256,9 +324,15 @@ impl SpeechService {
     }
 
     pub fn update_config(&self, config: SpeechRuntimeConfig) -> Result<(), String> {
+        let new_event_mask = config.settings.event_mask();
+
+        // 配置切换期间先停止生产，保证成功提交配置后才按新类型接收事件。
+        self.event_mask.store(0, Ordering::Release);
         self.command_tx
             .send(WorkerCommand::UpdateConfig(config))
-            .map_err(|_| "语音服务不可用".to_owned())
+            .map_err(|_| "语音服务不可用".to_owned())?;
+        self.event_mask.store(new_event_mask, Ordering::Release);
+        Ok(())
     }
 
     pub fn list_voices(&self) -> Result<Vec<SpeechVoice>, String> {
@@ -378,7 +452,10 @@ impl SpeechWorker {
 
     fn handle_command(&mut self, command: WorkerCommand) -> bool {
         match command {
-            WorkerCommand::Events(events) => self.handle_events(events),
+            WorkerCommand::Events {
+                inputs,
+                streamer_uid,
+            } => self.handle_inputs(inputs, streamer_uid),
             WorkerCommand::UpdateConfig(config) => self.apply_config(config),
             WorkerCommand::ListVoices(response) => {
                 let result = self
@@ -452,23 +529,23 @@ impl SpeechWorker {
         }
     }
 
-    fn handle_events(&mut self, events: Vec<SpeechInput>) {
+    fn handle_inputs(&mut self, inputs: Vec<SpeechInput>, streamer_uid: u64) {
         if !self.config.settings.enabled || self.engine.is_none() {
             return;
         }
 
-        for event in events {
-            match event {
-                SpeechInput::Danmaku(item) => self.handle_danmaku(item),
+        for input in inputs {
+            match input {
+                SpeechInput::Danmaku(item) => self.handle_danmaku(item, streamer_uid),
                 SpeechInput::Gift(item) => self.handle_gift(*item),
                 SpeechInput::SuperChat(item) => self.handle_super_chat(item),
             }
         }
     }
 
-    fn handle_danmaku(&mut self, danmaku: ProcessedDanmaku) {
+    fn handle_danmaku(&mut self, danmaku: ProcessedDanmaku, streamer_uid: u64) {
         if !self.config.settings.speak_danmaku
-            || self.config.ignored_uids.contains(&danmaku.user.uid)
+            || is_danmaku_filtered(&self.config, &danmaku, streamer_uid)
         {
             return;
         }
@@ -761,7 +838,15 @@ fn run_worker(
 
     loop {
         worker.tick();
-        match command_rx.recv_timeout(WORKER_TICK) {
+        // 禁用时没有队列时序需要维护，阻塞等待控制命令，避免空闲轮询。
+        let command = if worker.config.settings.enabled {
+            command_rx.recv_timeout(WORKER_TICK)
+        } else {
+            command_rx
+                .recv()
+                .map_err(|_| mpsc::RecvTimeoutError::Disconnected)
+        };
+        match command {
             Ok(command) => {
                 if !worker.handle_command(command) {
                     break;
@@ -776,6 +861,31 @@ fn run_worker(
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
     }
+}
+
+fn is_danmaku_filtered(
+    config: &SpeechRuntimeConfig,
+    danmaku: &ProcessedDanmaku,
+    streamer_uid: u64,
+) -> bool {
+    if config.ignored_uids.contains(&danmaku.user.uid)
+        || danmaku.user.wealth_level < config.min_wealth_level
+    {
+        return true;
+    }
+
+    if config.min_medal_level == 0 {
+        return false;
+    }
+
+    let local_medal_level = danmaku
+        .user
+        .medal
+        .as_ref()
+        .filter(|medal| streamer_uid > 0 && medal.anchor_uid == streamer_uid)
+        .map_or(0, |medal| medal.level);
+
+    local_medal_level < config.min_medal_level
 }
 
 fn prune_instants(items: &mut VecDeque<Instant>, now: Instant, window: Duration) {
@@ -1136,7 +1246,9 @@ impl PlatformSpeechEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::live_types::{ProcessedBlindGift, ProcessedGiftCombo, ProcessedUser, UpsertAction};
+    use crate::live_types::{
+        ProcessedBlindGift, ProcessedGiftCombo, ProcessedMedal, ProcessedUser, UpsertAction,
+    };
 
     fn user(name: &str) -> ProcessedUser {
         ProcessedUser {
@@ -1148,6 +1260,24 @@ mod tests {
             wealth_level: 0,
             is_admin: false,
         }
+    }
+
+    #[test]
+    fn event_mask_respects_enabled_and_per_type_switches() {
+        let mut settings = SpeechSettings::default();
+        assert_eq!(settings.event_mask(), 0);
+
+        settings.enabled = true;
+        assert_eq!(
+            settings.event_mask(),
+            SPEECH_EVENT_DANMAKU | SPEECH_EVENT_GIFT | SPEECH_EVENT_SUPER_CHAT
+        );
+
+        settings.speak_danmaku = false;
+        assert_eq!(
+            settings.event_mask(),
+            SPEECH_EVENT_GIFT | SPEECH_EVENT_SUPER_CHAT
+        );
     }
 
     #[test]
@@ -1199,6 +1329,17 @@ mod tests {
             user: user("测试用户"),
             timestamp: 0,
             guard_level: None,
+        }
+    }
+
+    fn danmaku(user: ProcessedUser) -> ProcessedDanmaku {
+        ProcessedDanmaku {
+            id: "dm:1".to_owned(),
+            content: "测试弹幕".to_owned(),
+            user,
+            timestamp: 0,
+            is_emoticon: false,
+            emoticon_url: None,
         }
     }
 
@@ -1275,17 +1416,48 @@ mod tests {
     }
 
     #[test]
+    fn filters_danmaku_by_local_medal_and_wealth_levels() {
+        let mut config = SpeechRuntimeConfig::default();
+        config.min_medal_level = 10;
+        config.min_wealth_level = 20;
+
+        let mut matched_user = user("符合条件");
+        matched_user.wealth_level = 20;
+        matched_user.medal = Some(ProcessedMedal {
+            name: "本房牌".to_owned(),
+            level: 10,
+            color: String::new(),
+            is_light: true,
+            anchor_uid: 100,
+        });
+        assert!(!is_danmaku_filtered(
+            &config,
+            &danmaku(matched_user.clone()),
+            100
+        ));
+
+        let mut low_wealth_user = matched_user.clone();
+        low_wealth_user.wealth_level = 19;
+        assert!(is_danmaku_filtered(&config, &danmaku(low_wealth_user), 100));
+
+        assert!(is_danmaku_filtered(&config, &danmaku(matched_user), 200));
+    }
+
+    #[test]
     fn high_danmaku_rate_suspends_and_clears_queue() {
         let mut worker = test_worker();
         for index in 0..DANMAKU_SUSPEND_COUNT {
-            worker.handle_danmaku(ProcessedDanmaku {
-                id: index.to_string(),
-                content: "测试弹幕".to_owned(),
-                user: user("测试用户"),
-                timestamp: 0,
-                is_emoticon: false,
-                emoticon_url: None,
-            });
+            worker.handle_danmaku(
+                ProcessedDanmaku {
+                    id: index.to_string(),
+                    content: "测试弹幕".to_owned(),
+                    user: user("测试用户"),
+                    timestamp: 0,
+                    is_emoticon: false,
+                    emoticon_url: None,
+                },
+                0,
+            );
         }
 
         assert!(worker.danmaku_suspended);

@@ -60,11 +60,12 @@ const filteredGiftList = computed(() => {
 })
 
 const filteredDanmakuList = computed(() => {
-  if (settingsStore.danmakuFilterUids.length === 0) {
-    return danmakuStore.danmakuList
-  }
+  if (!settingsStore.hasDanmakuFilter) return danmakuStore.danmakuList
 
-  return danmakuStore.danmakuList.filter(msg => !settingsStore.isDanmakuFiltered(msg.user.uid))
+  const streamerUid = danmakuStore.roomInfo.streamerUid
+  return danmakuStore.danmakuList.filter(message =>
+    !settingsStore.isDanmakuFiltered(message, streamerUid)
+  )
 })
 
 // ==================== 合并时间线（三路归并）====================
@@ -132,7 +133,9 @@ const interactionLayoutVersion = computed(() => [
   settingsStore.medalShowUnlit,
   settingsStore.medalShowOtherRoom,
   danmakuStore.roomInfo.streamerUid,
-  settingsStore.danmakuFilterUids.join(',')
+  settingsStore.danmakuFilterUids.join(','),
+  settingsStore.danmakuFilterMinMedalLevel,
+  settingsStore.danmakuFilterMinWealthLevel
 ].join('|'))
 
 const scrollToBottom = () => {

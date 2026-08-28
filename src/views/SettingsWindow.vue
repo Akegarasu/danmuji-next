@@ -777,6 +777,24 @@ watch(
 
 // ==================== 弹幕过滤 ====================
 
+const danmakuFilterMinMedalLevel = computed({
+  get: () => settingsStore.danmakuFilterMinMedalLevel,
+  set: (level: number) => settingsStore.setDanmakuFilterMinMedalLevel(level)
+})
+
+const danmakuFilterMinWealthLevel = computed({
+  get: () => settingsStore.danmakuFilterMinWealthLevel,
+  set: (level: number) => settingsStore.setDanmakuFilterMinWealthLevel(level)
+})
+
+const formatFilterLevel = (level: number): string => level === 0 ? '关闭' : `${level} 级`
+const danmakuFilterMedalLevelLabel = computed(() =>
+  formatFilterLevel(danmakuFilterMinMedalLevel.value)
+)
+const danmakuFilterWealthLevelLabel = computed(() =>
+  formatFilterLevel(danmakuFilterMinWealthLevel.value)
+)
+
 const newDanmakuFilterUid = ref('')
 const danmakuFilterNames = ref<Record<number, string>>({})
 const danmakuFilterNamesLoading = ref(false)
@@ -1568,9 +1586,63 @@ const openProjectUrl = async () => {
           <div class="info-box">
             <span class="info-icon">🚫</span>
             <span class="info-text">
-              本地功能，只在本机隐藏指定 UID 的弹幕，不会提交到直播间屏蔽词，也不需要房管权限。<br>
-              添加 UID 后，该用户的弹幕不会出现在弹幕列表和互动列表中。
+              本地功能，只在本机隐藏弹幕，不会提交到直播间屏蔽词，也不需要房管权限。<br>
+              可设置本直播间粉丝牌、荣耀等级的最低门槛，或过滤指定 UID；启用多个等级门槛时需同时达到。
             </span>
+          </div>
+
+          <div class="setting-group">
+            <label class="setting-label">
+              最低本房粉丝牌等级
+              <span class="value">{{ danmakuFilterMedalLevelLabel }}</span>
+            </label>
+            <div class="range-input-row">
+              <input
+                v-model.number="danmakuFilterMinMedalLevel"
+                type="range"
+                min="0"
+                max="50"
+                step="1"
+                class="setting-slider"
+              />
+              <input
+                v-model.number="danmakuFilterMinMedalLevel"
+                type="number"
+                min="0"
+                max="50"
+                step="1"
+                class="setting-number-input"
+              />
+              <span class="interval-unit">级</span>
+            </div>
+            <div class="setting-hint">0 表示关闭；未佩戴或佩戴其他直播间粉丝牌时按 0 级处理。</div>
+          </div>
+
+          <div class="setting-group">
+            <label class="setting-label">
+              最低荣耀等级
+              <span class="value">{{ danmakuFilterWealthLevelLabel }}</span>
+            </label>
+            <div class="range-input-row">
+              <input
+                v-model.number="danmakuFilterMinWealthLevel"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                class="setting-slider"
+              />
+              <input
+                v-model.number="danmakuFilterMinWealthLevel"
+                type="number"
+                min="0"
+                max="100"
+                step="1"
+                class="setting-number-input"
+              />
+              <span class="interval-unit">级</span>
+            </div>
+            <div class="setting-hint">0 表示关闭；低于该荣耀等级的弹幕会被隐藏。</div>
           </div>
 
           <div class="setting-group">
@@ -1589,11 +1661,11 @@ const openProjectUrl = async () => {
 
           <div class="setting-group">
             <label class="setting-label">
-              已过滤列表
+              已过滤 UID
               <span v-if="danmakuFilterNamesLoading" class="value">查询中...</span>
             </label>
             <div v-if="settingsStore.danmakuFilterUids.length === 0" class="special-follow-empty">
-              暂无弹幕过滤
+              暂无 UID 过滤
             </div>
             <div v-else class="special-follow-list">
               <div

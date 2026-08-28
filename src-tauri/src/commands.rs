@@ -129,12 +129,16 @@ pub fn update_speech_settings(
     speech: State<'_, Arc<SpeechService>>,
     settings: SpeechSettings,
     ignored_uids: Vec<u64>,
+    min_medal_level: u32,
+    min_wealth_level: u32,
     gift_show_free: bool,
     gift_min_price: u64,
 ) -> Result<(), String> {
     speech.update_config(SpeechRuntimeConfig::new(
         settings,
         ignored_uids,
+        min_medal_level,
+        min_wealth_level,
         gift_show_free,
         gift_min_price,
     ))

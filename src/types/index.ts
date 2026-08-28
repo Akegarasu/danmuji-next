@@ -190,6 +190,10 @@ export interface AppSettings {
   specialFollowUids: number[]
   /** 本地弹幕过滤的 UID 列表 */
   danmakuFilterUids: number[]
+  /** 本直播间粉丝牌最低等级，0 表示关闭 */
+  danmakuFilterMinMedalLevel: number
+  /** 最低荣耀等级，0 表示关闭 */
+  danmakuFilterMinWealthLevel: number
 }
 
 /** 默认显示设置 */
