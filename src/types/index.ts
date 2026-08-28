@@ -83,6 +83,7 @@ export interface DisplaySettings {
 
   // 弹幕设置
   danmakuShowMedal: boolean
+  danmakuShowWealthLevel: boolean
   danmakuShowGuard: boolean
   danmakuShowAdmin: boolean
   danmakuShowTime: boolean
@@ -196,6 +197,7 @@ export const DEFAULT_DISPLAY_SETTINGS: DisplaySettings = {
   medalShowUnlit: false,
   medalShowOtherRoom: false,
   danmakuShowMedal: true,
+  danmakuShowWealthLevel: false,
   danmakuShowGuard: true,
   danmakuShowAdmin: true,
   danmakuShowTime: false,
@@ -329,6 +331,8 @@ export interface ProcessedUser {
   face?: string
   medal?: ProcessedMedal
   guard_level: number
+  /** 荣耀（财富）等级 */
+  wealth_level: number
   is_admin: boolean
 }
 

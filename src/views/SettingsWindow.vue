@@ -533,6 +533,11 @@ const danmakuShowMedal = computed({
   set: (v) => settingsStore.updateDisplaySettings({ danmakuShowMedal: v })
 })
 
+const danmakuShowWealthLevel = computed({
+  get: () => settings.value.display.danmakuShowWealthLevel,
+  set: (v) => settingsStore.updateDisplaySettings({ danmakuShowWealthLevel: v })
+})
+
 const medalShowUnlit = computed({
   get: () => settings.value.display.medalShowUnlit,
   set: (v) => settingsStore.updateDisplaySettings({ medalShowUnlit: v })
@@ -1328,6 +1333,11 @@ const openProjectUrl = async () => {
           <div class="setting-group toggle">
             <label class="setting-label">显示其他直播间的粉丝勋章</label>
             <input v-model="medalShowOtherRoom" type="checkbox" class="toggle-checkbox" />
+          </div>
+
+          <div class="setting-group toggle">
+            <label class="setting-label">显示荣耀等级</label>
+            <input v-model="danmakuShowWealthLevel" type="checkbox" class="toggle-checkbox" />
           </div>
 
           <div class="setting-group toggle">

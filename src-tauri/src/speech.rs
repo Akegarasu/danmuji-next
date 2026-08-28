@@ -1145,6 +1145,7 @@ mod tests {
             face: None,
             medal: None,
             guard_level: 0,
+            wealth_level: 0,
             is_admin: false,
         }
     }

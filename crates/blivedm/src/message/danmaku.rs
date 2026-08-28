@@ -68,6 +68,7 @@ impl Danmaku {
         // info[2]: 用户信息数组
         // info[3]: 勋章信息数组
         // info[7]: 舰队等级
+        // info[16]: 荣耀（财富）等级数组
 
         let meta = info.get(0)?;
         let content = info.get(1)?.as_str()?.to_string();
@@ -91,11 +92,28 @@ impl Danmaku {
             .and_then(Value::as_str)
             .filter(|face| !face.is_empty())
             .map(String::from);
-        let user_level = user_info
+        let user_level = info
+            .get(4)
+            .and_then(|v| v.get(0))
+            .and_then(Value::as_u64)
+            .and_then(|level| u32::try_from(level).ok())
+            .unwrap_or_default();
+
+        // 实测 DANMU_MSG 的荣耀等级位于 info[16][0]；meta.user.wealth
+        // 在同一弹幕包中通常为 null，仅作为兼容其他协议版本的兜底。
+        let wealth_level = info
             .get(16)
             .and_then(|v| v.get(0))
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u32;
+            .and_then(Value::as_u64)
+            .and_then(|level| u32::try_from(level).ok())
+            .or_else(|| {
+                nested_user
+                    .and_then(|user| user.get("wealth"))
+                    .and_then(|wealth| wealth.get("level"))
+                    .and_then(Value::as_u64)
+                    .and_then(|level| u32::try_from(level).ok())
+            })
+            .unwrap_or_default();
 
         // 解析舰队等级
         let guard_level = info
@@ -122,11 +140,9 @@ impl Danmaku {
                     .filter(|uid| *uid != 0)
                     .or_else(|| m.get(12).and_then(Value::as_u64))
                     .unwrap_or(0),
-                is_light: parse_bool_flag(
-                    nested_medal.and_then(|medal| medal.get("is_light")),
-                )
-                .or_else(|| parse_bool_flag(m.get(11)))
-                .unwrap_or(true),
+                is_light: parse_bool_flag(nested_medal.and_then(|medal| medal.get("is_light")))
+                    .or_else(|| parse_bool_flag(m.get(11)))
+                    .unwrap_or(true),
             })
         });
 
@@ -169,6 +185,7 @@ impl Danmaku {
                 medal,
                 guard_level,
                 user_level,
+                wealth_level,
                 is_admin,
             },
             timestamp,
@@ -200,14 +217,28 @@ mod tests {
                             "medal": {
                                 "is_light": is_light,
                                 "ruid": anchor_uid
-                            }
+                            },
+                            "wealth": null
                         }
                     }
                 ],
                 "测试弹幕",
                 [42, "测试用户", 0],
                 [12, "测试牌", "测试主播", 23_151_928, 9_272_486, "", 0, 0, 0, 0, 0, 1, 999],
-                [], [], 0, 0
+                [29, 0, 5_805_790, ">50000", 0],
+                ["", ""],
+                0,
+                0,
+                null,
+                { "ct": "TEST", "ts": 1_785_657_743 },
+                0,
+                0,
+                null,
+                null,
+                0,
+                1_170,
+                [41],
+                null
             ]
         })
     }
@@ -222,11 +253,22 @@ mod tests {
         );
         assert!(lit_medal.is_light);
         assert_eq!(lit_medal.anchor_uid, 398_629_298);
+        assert_eq!(lit.sender.user_level, 29);
+        assert_eq!(lit.sender.wealth_level, 41);
 
-        let unlit =
-            Danmaku::parse(&medal_message(0, 13_548_043)).expect("unlit medal danmaku");
+        let unlit = Danmaku::parse(&medal_message(0, 13_548_043)).expect("unlit medal danmaku");
         let unlit_medal = unlit.sender.medal.expect("unlit medal");
         assert!(!unlit_medal.is_light);
         assert_eq!(unlit_medal.anchor_uid, 13_548_043);
+    }
+
+    #[test]
+    fn falls_back_to_nested_wealth_level() {
+        let mut message = medal_message(1, 398_629_298);
+        message["info"][16] = Value::Null;
+        message["info"][0][15]["user"]["wealth"] = json!({ "level": 30 });
+
+        let danmaku = Danmaku::parse(&message).expect("nested wealth danmaku");
+        assert_eq!(danmaku.sender.wealth_level, 30);
     }
 }

@@ -18,8 +18,11 @@ pub struct User {
     pub medal: Option<Medal>,
     /// 舰队等级
     pub guard_level: GuardLevel,
-    /// 用户等级
+    /// 直播用户等级（UL）
     pub user_level: u32,
+    /// 荣耀（财富）等级
+    #[serde(default)]
+    pub wealth_level: u32,
     /// 是否为房管
     pub is_admin: bool,
 }

@@ -44,6 +44,15 @@ impl InteractWord {
             .map(GuardLevel::from)
             .unwrap_or(GuardLevel::None);
 
+        // 荣耀（财富）等级
+        let wealth_level = data
+            .get("uinfo")
+            .and_then(|u| u.get("wealth"))
+            .and_then(|w| w.get("level"))
+            .and_then(Value::as_u64)
+            .and_then(|level| u32::try_from(level).ok())
+            .unwrap_or_default();
+
         // 粉丝勋章
         let medal = data.get("fans_medal").and_then(|fm| {
             let level = fm.get("medal_level")?.as_u64()? as u32;
@@ -69,6 +78,7 @@ impl InteractWord {
                 medal,
                 guard_level,
                 user_level: 0,
+                wealth_level,
                 is_admin: false,
             },
             timestamp,
@@ -149,7 +159,8 @@ impl InteractWord {
                 face,
                 medal,
                 guard_level: GuardLevel::from(msg.guard_type as i64),
-                user_level: wealth.map(|w| w.level).unwrap_or_default(),
+                user_level: 0,
+                wealth_level: wealth.map(|w| w.level).unwrap_or_default(),
                 is_admin: false,
             },
             timestamp,
@@ -466,6 +477,28 @@ mod tests {
     }
 
     #[test]
+    fn parses_json_wealth_level() {
+        let value = serde_json::json!({
+            "cmd": "INTERACT_WORD",
+            "data": {
+                "uid": 12345,
+                "uname": "测试用户",
+                "timestamp": 1_700_000_000,
+                "msg_type": 1,
+                "uinfo": {
+                    "base": { "face": "https://example.com/avatar.jpg" },
+                    "guard": { "level": 0 },
+                    "wealth": { "dm_icon_key": "", "level": 22 }
+                }
+            }
+        });
+
+        let parsed = InteractWord::parse(&value).expect("parse json interact word");
+        assert_eq!(parsed.user.user_level, 0);
+        assert_eq!(parsed.user.wealth_level, 22);
+    }
+
+    #[test]
     fn parses_interact_word_v2_pb_payload() {
         let mut base = Vec::new();
         put_string(&mut base, 1, "fallback-name");
@@ -515,7 +548,7 @@ mod tests {
             Some("https://example.com/avatar.jpg")
         );
         assert_eq!(parsed.user.guard_level, GuardLevel::Captain);
-        assert_eq!(parsed.user.user_level, 7);
+        assert_eq!(parsed.user.wealth_level, 7);
         assert_eq!(parsed.msg_type, 1);
         assert_eq!(parsed.timestamp, 1_700_000_000_123);
 

@@ -49,6 +49,7 @@ export const useSettingsStore = defineStore('settings', () => {
   
   // 弹幕设置
   const danmakuShowMedal = computed(() => settings.value.display.danmakuShowMedal)
+  const danmakuShowWealthLevel = computed(() => settings.value.display.danmakuShowWealthLevel)
   const danmakuShowGuard = computed(() => settings.value.display.danmakuShowGuard)
   const danmakuShowAdmin = computed(() => settings.value.display.danmakuShowAdmin)
   const danmakuShowTime = computed(() => settings.value.display.danmakuShowTime)
@@ -318,6 +319,7 @@ export const useSettingsStore = defineStore('settings', () => {
     medalShowUnlit,
     medalShowOtherRoom,
     danmakuShowMedal,
+    danmakuShowWealthLevel,
     danmakuShowGuard,
     danmakuShowAdmin,
     danmakuShowTime,

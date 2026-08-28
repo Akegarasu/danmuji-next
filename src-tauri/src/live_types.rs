@@ -183,6 +183,9 @@ pub struct ProcessedUser {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub medal: Option<ProcessedMedal>,
     pub guard_level: u8,
+    /// 荣耀（财富）等级
+    #[serde(default)]
+    pub wealth_level: u32,
     pub is_admin: bool,
 }
 
@@ -374,6 +377,7 @@ pub fn convert_user(user: &User) -> ProcessedUser {
         face: user.face.clone(),
         medal: user.medal.as_ref().map(convert_medal),
         guard_level: guard_level_to_u8(&user.guard_level),
+        wealth_level: user.wealth_level,
         is_admin: user.is_admin,
     }
 }

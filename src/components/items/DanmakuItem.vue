@@ -7,6 +7,7 @@ import adminIcon from '@/assets/admin-icon.png'
 const props = withDefaults(defineProps<{
   message: ProcessedDanmaku
   showMedal?: boolean
+  showWealthLevel?: boolean
   showGuard?: boolean
   showAdmin?: boolean
   showTime?: boolean
@@ -19,6 +20,7 @@ const props = withDefaults(defineProps<{
   usernameColor?: string
 }>(), {
   showMedal: true,
+  showWealthLevel: false,
   showGuard: true,
   showAdmin: true,
   showTime: true,
@@ -69,6 +71,15 @@ const getUserColor = () => {
   >
     <span v-if="showTime && timeText" class="time">
       {{ timeText }}
+    </span>
+
+    <!-- 荣耀（财富）等级 -->
+    <span
+      v-if="showWealthLevel && message.user.wealth_level > 0"
+      class="wealth-level"
+      :title="`荣耀等级 ${message.user.wealth_level}`"
+    >
+      {{ message.user.wealth_level }}
     </span>
 
     <!-- 勋章 -->
@@ -178,6 +189,27 @@ const getUserColor = () => {
   font-size: 0.85em;
   margin-right: 0.45em;
   flex-shrink: 0;
+}
+
+.wealth-level {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.18em;
+  padding: 0.15em 0.35em;
+  margin-right: 0.35em;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.25em;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  font-size: 0.82em;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.wealth-label {
+  color: var(--text-muted);
 }
 
 .medal {

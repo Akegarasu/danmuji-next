@@ -113,6 +113,7 @@ const interactionItemKey = (item: InteractionItem) => `${item.kind}-${item.data.
 const interactionLayoutVersion = computed(() => [
   settingsStore.mainWindowSettings.fontSize,
   settingsStore.danmakuShowMedal,
+  settingsStore.danmakuShowWealthLevel,
   settingsStore.danmakuShowGuard,
   settingsStore.danmakuShowAdmin,
   settingsStore.danmakuShowTime,
@@ -291,6 +292,7 @@ onUnmounted(() => {
             v-if="item.kind === 'danmaku'"
             :message="item.data"
             :show-medal="settingsStore.danmakuShowMedal && isMedalVisible(item.data.user.medal)"
+            :show-wealth-level="settingsStore.danmakuShowWealthLevel"
             :show-guard="settingsStore.danmakuShowGuard"
             :show-admin="settingsStore.danmakuShowAdmin"
             :show-time="settingsStore.danmakuShowTime"

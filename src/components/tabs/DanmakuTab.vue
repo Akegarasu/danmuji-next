@@ -49,6 +49,7 @@ const danmakuItemKey = (msg: ProcessedDanmaku) => msg.id
 const danmakuLayoutVersion = computed(() => [
   settingsStore.mainWindowSettings.fontSize,
   settingsStore.danmakuShowMedal,
+  settingsStore.danmakuShowWealthLevel,
   settingsStore.danmakuShowGuard,
   settingsStore.danmakuShowAdmin,
   settingsStore.danmakuShowTime,
@@ -179,6 +180,7 @@ const getRandomTip = () => {
         <DanmakuItem
           :message="msg"
           :show-medal="settingsStore.danmakuShowMedal && isMedalVisible(msg.user.medal)"
+          :show-wealth-level="settingsStore.danmakuShowWealthLevel"
           :show-guard="settingsStore.danmakuShowGuard"
           :show-admin="settingsStore.danmakuShowAdmin"
           :show-time="settingsStore.danmakuShowTime"
