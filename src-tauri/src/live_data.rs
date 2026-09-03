@@ -43,9 +43,9 @@ pub struct LiveData {
     /// 交易 ID 插入顺序，用于限制去重缓存大小
     seen_gift_transaction_order: VecDeque<String>,
     /// 已处理的大航海支付流水号，用于合并同时下发的 V1/V2 Toast
-    seen_guard_transactions: HashSet<String>,
+    seen_guard_payflow_ids: HashSet<String>,
     /// 大航海支付流水号插入顺序，用于限制去重缓存大小
-    seen_guard_transaction_order: VecDeque<String>,
+    guard_payflow_id_order: VecDeque<String>,
     /// 普通礼物本地序号；没有上游交易 ID 时仍保证每条礼物独立
     next_gift_sequence: u64,
     /// SC 列表
@@ -91,8 +91,8 @@ impl Default for LiveData {
             gift_merge_index: HashMap::new(),
             seen_gift_transactions: HashSet::new(),
             seen_gift_transaction_order: VecDeque::new(),
-            seen_guard_transactions: HashSet::new(),
-            seen_guard_transaction_order: VecDeque::new(),
+            seen_guard_payflow_ids: HashSet::new(),
+            guard_payflow_id_order: VecDeque::new(),
             next_gift_sequence: 0,
             superchat_list: Vec::with_capacity(MAX_SUPERCHAT_LIST),
             interact_word_list: VecDeque::with_capacity(MAX_INTERACT_WORD_LIST),
@@ -455,49 +455,48 @@ impl LiveData {
     /// 处理大航海成交 Toast。
     ///
     /// Toast 的 price 是已经包含折扣和购买数量的订单总金额，不能再次乘以 num。
-    pub fn process_guard_toast(&mut self, guard: GuardToast) {
-        if let Some(payflow_id) = guard.payflow_id.as_deref() {
-            if !self.remember_guard_transaction(payflow_id) {
+    pub fn process_guard_toast(&mut self, toast: GuardToast) {
+        if let Some(payflow_id) = toast.payflow_id.as_deref() {
+            if !self.remember_guard_payflow_id(payflow_id) {
                 return;
             }
         }
 
-        let value = guard.price / 100;
-        let guard_level_u8 = guard_level_to_u8(&guard.guard_level);
-        let timestamp = guard.start_time;
-        let gift_name = guard.guard_name().to_string();
-        let (id, merge_key) = if let Some(payflow_id) = guard.payflow_id.as_deref() {
-            let key = format!("guard:payflow:{payflow_id}");
-            (key.clone(), key)
-        } else {
-            let sequence = self.take_next_gift_sequence();
-            let key = format!("guard:{}:{}:{}", timestamp, guard.uid, sequence);
-            (key.clone(), key)
+        let total_value = toast.price / 100;
+        let is_paid = total_value > 0;
+        let guard_level = guard_level_to_u8(&toast.guard_level);
+        let gift_name = toast.guard_name().to_string();
+        let merge_key = match toast.payflow_id.as_deref() {
+            Some(payflow_id) => format!("guard:payflow:{payflow_id}"),
+            None => {
+                let sequence = self.take_next_gift_sequence();
+                format!("guard:{}:{}:{}", toast.start_time, toast.uid, sequence)
+            }
         };
 
         let processed = ProcessedGift {
-            id,
+            id: merge_key.clone(),
             merge_key: merge_key.clone(),
-            gift_id: guard.gift_id,
+            gift_id: toast.gift_id,
             gift_name,
             gift_icon: "".to_string(),
-            num: guard.num,
-            total_value: value,
-            revenue_value: value,
-            is_paid: value > 0,
+            num: toast.num,
+            total_value,
+            revenue_value: total_value,
+            is_paid,
             combo: None,
             blind_gift: None,
             user: ProcessedUser {
-                uid: guard.uid,
-                name: guard.username.clone(),
-                face: guard.face.clone(),
+                uid: toast.uid,
+                name: toast.username.clone(),
+                face: toast.face.clone(),
                 medal: None,
-                guard_level: guard_level_u8,
+                guard_level,
                 wealth_level: 0,
                 is_admin: false,
             },
-            timestamp,
-            guard_level: Some(guard_level_u8),
+            timestamp: toast.start_time,
+            guard_level: Some(guard_level),
         };
 
         if let Some(tx) = &self.archive_tx {
@@ -519,17 +518,17 @@ impl LiveData {
             action: UpsertAction::Insert,
         });
 
-        if value > 0 {
-            self.stats.guard_revenue += value;
-            self.stats.total_revenue += value;
+        if is_paid {
+            self.stats.guard_revenue += total_value;
+            self.stats.total_revenue += total_value;
             self.stats_dirty = true;
 
             self.update_user_contribution(
-                guard.uid,
-                &guard.username,
-                guard.face.as_deref(),
-                value,
-                &guard.guard_level,
+                toast.uid,
+                &toast.username,
+                toast.face.as_deref(),
+                total_value,
+                &toast.guard_level,
             );
         }
     }
@@ -640,19 +639,15 @@ impl LiveData {
     }
 
     /// 记录大航海支付流水号。返回 `false` 表示对应的 V1/V2 Toast 已处理。
-    fn remember_guard_transaction(&mut self, transaction_id: &str) -> bool {
-        if !self
-            .seen_guard_transactions
-            .insert(transaction_id.to_owned())
-        {
+    fn remember_guard_payflow_id(&mut self, payflow_id: &str) -> bool {
+        if !self.seen_guard_payflow_ids.insert(payflow_id.to_owned()) {
             return false;
         }
 
-        self.seen_guard_transaction_order
-            .push_back(transaction_id.to_owned());
-        while self.seen_guard_transaction_order.len() > MAX_SEEN_GIFT_TRANSACTIONS {
-            if let Some(expired) = self.seen_guard_transaction_order.pop_front() {
-                self.seen_guard_transactions.remove(&expired);
+        self.guard_payflow_id_order.push_back(payflow_id.to_owned());
+        while self.guard_payflow_id_order.len() > MAX_SEEN_GIFT_TRANSACTIONS {
+            if let Some(expired) = self.guard_payflow_id_order.pop_front() {
+                self.seen_guard_payflow_ids.remove(&expired);
             }
         }
         true
@@ -880,7 +875,7 @@ mod tests {
     }
 
     #[test]
-    fn guard_toast_uses_discounted_order_total_and_deduplicates_v1_v2() {
+    fn guard_toast_uses_order_total_and_deduplicates_payflow_id() {
         let mut data = LiveData::default();
         let toast = GuardToast {
             uid: 42,

@@ -122,8 +122,8 @@ pub struct GuardToast {
 impl GuardToast {
     /// 解析 `USER_TOAST_MSG` 或 `USER_TOAST_MSG_V2`。
     pub fn parse(value: &Value) -> Option<Self> {
-        let cmd = value.get("cmd")?.as_str()?;
-        match cmd.split(':').next().unwrap_or(cmd) {
+        let cmd = value.get("cmd")?.as_str()?.split(':').next()?;
+        match cmd {
             "USER_TOAST_MSG" => Self::parse_v1(value),
             "USER_TOAST_MSG_V2" => Self::parse_v2(value),
             _ => None,
@@ -132,34 +132,19 @@ impl GuardToast {
 
     fn parse_v1(value: &Value) -> Option<Self> {
         let data = value.get("data")?;
-        let guard_level = GuardLevel::from(data.get("guard_level")?.as_i64()?);
-        if guard_level == GuardLevel::None {
-            return None;
-        }
-
+        let guard_level = valid_guard_level(data.get("guard_level"))?;
         let start_time = data.get("start_time")?.as_i64()?;
+
         Some(Self {
             uid: data.get("uid")?.as_u64()?,
-            username: data
-                .get("username")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
+            username: non_empty_string(data.get("username")).unwrap_or_default(),
             face: None,
             guard_level,
             num: u32::try_from(data.get("num")?.as_u64()?).ok()?,
             price: data.get("price")?.as_u64()?,
             gift_id: data.get("gift_id")?.as_u64()?,
-            role_name: data
-                .get("role_name")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
-            unit: data
-                .get("unit")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
+            role_name: non_empty_string(data.get("role_name")).unwrap_or_default(),
+            unit: non_empty_string(data.get("unit")).unwrap_or_default(),
             payflow_id: non_empty_string(data.get("payflow_id")),
             source: data
                 .get("source")
@@ -182,34 +167,20 @@ impl GuardToast {
         let pay_info = data.get("pay_info")?;
         let gift_info = data.get("gift_info")?;
 
-        let guard_level = GuardLevel::from(guard_info.get("guard_level")?.as_i64()?);
-        if guard_level == GuardLevel::None {
-            return None;
-        }
-
+        let guard_level = valid_guard_level(guard_info.get("guard_level"))?;
         let start_time = guard_info.get("start_time")?.as_i64()?;
+
         Some(Self {
             uid: sender.get("uid")?.as_u64()?,
-            username: sender_base
-                .and_then(|base| base.get("name"))
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
+            username: non_empty_string(sender_base.and_then(|base| base.get("name")))
+                .unwrap_or_default(),
             face: non_empty_string(sender_base.and_then(|base| base.get("face"))),
             guard_level,
             num: u32::try_from(pay_info.get("num")?.as_u64()?).ok()?,
             price: pay_info.get("price")?.as_u64()?,
             gift_id: gift_info.get("gift_id")?.as_u64()?,
-            role_name: guard_info
-                .get("role_name")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
-            unit: pay_info
-                .get("unit")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
+            role_name: non_empty_string(guard_info.get("role_name")).unwrap_or_default(),
+            unit: non_empty_string(pay_info.get("unit")).unwrap_or_default(),
             payflow_id: non_empty_string(pay_info.get("payflow_id")),
             source: data
                 .get("option")
@@ -242,6 +213,11 @@ impl GuardToast {
     pub fn value_cny_fen(&self) -> u64 {
         self.price / 10
     }
+}
+
+fn valid_guard_level(value: Option<&Value>) -> Option<GuardLevel> {
+    let guard_level = GuardLevel::from(value?.as_i64()?);
+    (guard_level != GuardLevel::None).then_some(guard_level)
 }
 
 fn non_empty_string(value: Option<&Value>) -> Option<String> {

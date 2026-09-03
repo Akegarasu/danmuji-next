@@ -130,24 +130,26 @@ fn print_event(event: &Event) {
             println!("   ================================");
         }
         Event::GuardBuy(guard) => {
+            let price_fen = guard.value_cny_fen();
             println!(
                 "⚓ {} 开通了 {} ({}个月，标准标价 ¥{}.{:02})",
                 guard.username,
                 guard.guard_name(),
                 guard.num,
-                guard.value_cny_fen() / 100,
-                guard.value_cny_fen() % 100
+                price_fen / 100,
+                price_fen % 100
             );
         }
         Event::GuardToast(toast) => {
+            let price_fen = toast.value_cny_fen();
             println!(
                 "⚓ {} 开通了 {} ({}{}，成交价 ¥{}.{:02})",
                 toast.username,
                 toast.guard_name(),
                 toast.num,
                 toast.unit,
-                toast.value_cny_fen() / 100,
-                toast.value_cny_fen() % 100
+                price_fen / 100,
+                price_fen % 100
             );
         }
         Event::LiveStart(_) => {

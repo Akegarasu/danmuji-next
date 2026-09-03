@@ -205,7 +205,9 @@ event 的原始记录；如果原始通道已满，则可能只有 typed event�
 
 `Gift::transaction_id` 保留上游 `SEND_GIFT.data.tid`，未提供时为 `None`，可用作礼物交易级幂等键。`batch_combo_id` 只表示连击批次，不是交易唯一 ID。
 
-`SuperChat::price` 的上游单位是人民币元，因此 `value_cny_fen()` 按 `price * 100` 返回人民币分；礼物和大航海仍依上游金瓜子单位换算。`GuardBuy::price` 是 `GUARD_BUY` 给出的标准标价，不一定等于成交金额；实际订单总金额应使用 `GuardToast::price`（来自 `USER_TOAST_MSG` / `USER_TOAST_MSG_V2`），且该值已经包含购买数量，不应再乘 `num`。
+`SuperChat::price` 的上游单位是人民币元，因此 `value_cny_fen()` 按 `price * 100` 返回人民币分；礼物和大航海仍依上游金瓜子单位换算。
+
+`GuardBuy::price` 是 `GUARD_BUY` 给出的标准标价，不一定等于成交金额。实际订单总金额应使用 `GuardToast::price`（来自 `USER_TOAST_MSG` / `USER_TOAST_MSG_V2`）；该值已经包含购买数量，不应再乘 `num`。
 
 ## 发布状态
 
