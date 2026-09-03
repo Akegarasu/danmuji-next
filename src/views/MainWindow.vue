@@ -8,6 +8,7 @@ import DanmakuTab from '@/components/tabs/DanmakuTab.vue'
 import GiftTab from '@/components/tabs/GiftTab.vue'
 import SuperChatTab from '@/components/tabs/SuperChatTab.vue'
 import AudienceTab from '@/components/tabs/AudienceTab.vue'
+import GiftEffectPlayer from '@/components/common/GiftEffectPlayer.vue'
 import UpdateToast from '@/components/common/UpdateToast.vue'
 import { createTabWindow } from '@/services/window-manager'
 import { useSettingsStore } from '@/stores/settings'
@@ -122,6 +123,9 @@ onUnmounted(() => {
         @close="showUpdateToast = false"
         @show-changelog="onShowChangelog"
       />
+
+      <!-- 全屏礼物特效覆盖层：直接复刻 Bilibili web_mp4 的 RGB/Alpha 合成 -->
+      <GiftEffectPlayer />
     </div>
 
     <!-- 更新日志弹窗 -->
@@ -145,6 +149,7 @@ onUnmounted(() => {
 
 <style scoped lang="scss">
 .main-window {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: 100%;

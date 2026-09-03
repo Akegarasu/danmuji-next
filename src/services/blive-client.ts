@@ -65,9 +65,37 @@ let dataUnlisten: UnlistenFn | null = null
 let currentWindowLabel: string | null = null
 const logger = createLogger('BliveClient')
 
-/** 礼物全屏特效配置缓存，key 为房间号。 */
-const giftEffectConfigCache = new Map<number, GiftEffectConfig>()
+interface GiftEffectConfigCacheEntry {
+  config: GiftEffectConfig
+  expiresAt: number
+}
+
+/** 礼物全屏特效配置缓存及并发请求去重。 */
+const giftEffectConfigCache = new Map<string, GiftEffectConfigCacheEntry>()
+const giftEffectConfigRequests = new Map<string, Promise<GiftEffectConfig>>()
 const giftEffectMapCache = new WeakMap<GiftEffectConfig, Map<number, GiftEffectResource>>()
+const giftEffectIdMapCache = new WeakMap<GiftEffectConfig, Map<number, GiftEffectResource>>()
+
+const giftEffectConfigKey = (
+  roomId: number,
+  areaParentId?: number,
+  areaId?: number,
+  baseVersion?: number
+) => `${roomId}:${areaParentId ?? 0}:${areaId ?? 0}:${baseVersion ?? 0}`
+
+const isPlayablePcEffect = (effect: GiftEffectResource): boolean =>
+  effect.plan_platform.includes(2)
+  && Boolean(effect.web_mp4)
+  && Boolean(effect.web_mp4_json)
+
+function giftEffectConfigExpiry(config: GiftEffectConfig): number {
+  const now = Date.now()
+  const ttl = Number(config.full_sc_resource.ttl)
+  // 当前接口返回绝对毫秒时间戳；兼容可能返回秒数时长的旧版本。
+  if (Number.isFinite(ttl) && ttl > now) return ttl
+  if (Number.isFinite(ttl) && ttl > 0 && ttl <= 31_536_000) return now + ttl * 1000
+  return now + 30 * 60_000
+}
 
 // ==================== 礼物特效 API ====================
 
@@ -90,29 +118,65 @@ export async function getGiftEffectConfig(
     throw new Error('无效的房间号')
   }
 
-  if (!options.force && options.baseVersion === undefined) {
-    const cached = giftEffectConfigCache.get(roomId)
-    if (cached) return cached
+  const key = giftEffectConfigKey(
+    roomId,
+    options.areaParentId,
+    options.areaId,
+    options.baseVersion
+  )
+  if (!options.force) {
+    const cached = giftEffectConfigCache.get(key)
+    if (cached && cached.expiresAt > Date.now()) return cached.config
+    if (cached) giftEffectConfigCache.delete(key)
+
+    const pending = giftEffectConfigRequests.get(key)
+    if (pending) return pending
   }
 
-  const config = await invoke<GiftEffectConfig>('get_gift_effect_config', {
+  const request = invoke<GiftEffectConfig>('get_gift_effect_config', {
     roomId,
     areaParentId: options.areaParentId ?? null,
     areaId: options.areaId ?? null,
     baseVersion: options.baseVersion ?? null
+  }).then(config => {
+    // `force` 请求会替换同 key 的旧请求；只有最新请求可以更新强引用缓存。
+    if (giftEffectConfigRequests.get(key) === request) {
+      giftEffectConfigCache.set(key, {
+        config,
+        expiresAt: giftEffectConfigExpiry(config)
+      })
+    }
+    giftEffectMapCache.set(config, buildGiftEffectMap(config))
+    giftEffectIdMapCache.set(config, buildGiftEffectIdMap(config))
+    return config
+  }).finally(() => {
+    if (giftEffectConfigRequests.get(key) === request) {
+      giftEffectConfigRequests.delete(key)
+    }
   })
-  giftEffectConfigCache.set(roomId, config)
-  giftEffectMapCache.set(config, buildGiftEffectMap(config))
-  return config
+
+  giftEffectConfigRequests.set(key, request)
+  return request
 }
 
 function buildGiftEffectMap(config: GiftEffectConfig): Map<number, GiftEffectResource> {
   const map = new Map<number, GiftEffectResource>()
   for (const effect of config.full_sc_resource.conf_list) {
+    if (!isPlayablePcEffect(effect)) continue
     for (const giftId of effect.bind_gift_ids) {
       if (giftId !== 0 && !map.has(giftId)) {
         map.set(giftId, effect)
       }
+    }
+  }
+  return map
+}
+
+function buildGiftEffectIdMap(config: GiftEffectConfig): Map<number, GiftEffectResource> {
+  const map = new Map<number, GiftEffectResource>()
+  for (const effect of config.full_sc_resource.conf_list) {
+    if (effect.id !== 0 && isPlayablePcEffect(effect) && !map.has(effect.id)) {
+      map.set(effect.id, effect)
     }
   }
   return map
@@ -130,36 +194,37 @@ export function getGiftEffectMap(
   return map
 }
 
-/** 按礼物 ID 查找绑定的全屏特效。 */
+/** 优先按消息携带的特效 ID 精确匹配，旧消息再按礼物 ID 回退。 */
 export function findGiftEffect(
   config: GiftEffectConfig,
-  giftId: number
+  giftId: number,
+  effectId?: number
 ): GiftEffectResource | undefined {
-  return getGiftEffectMap(config).get(giftId)
+  if (effectId === undefined) return getGiftEffectMap(config).get(giftId)
+  if (effectId === 0) return undefined
+
+  let effectMap = giftEffectIdMapCache.get(config)
+  if (!effectMap) {
+    effectMap = buildGiftEffectIdMap(config)
+    giftEffectIdMapCache.set(config, effectMap)
+  }
+  return effectMap.get(effectId)
 }
 
 /** 清理礼物特效配置缓存。 */
 export function clearGiftEffectConfigCache(): void {
   giftEffectConfigCache.clear()
+  giftEffectConfigRequests.clear()
   // WeakMap 不需要手动清理其配置对象对应的映射。
 }
 
 
 /** 连接到直播间 */
 export async function connectRoom(roomId: number, cookie?: string): Promise<ConnectResult> {
-  const result = await invoke<ConnectResult>('connect_room', {
+  return await invoke<ConnectResult>('connect_room', {
     roomId,
     cookie: cookie || null
   })
-
-  // 连接成功后预取官方礼物特效配置；失败不影响弹幕连接。
-  if (result.success && result.room_info) {
-    void getGiftEffectConfig(result.room_info.room_id).catch((error) => {
-      logger.warn('Failed to load Bilibili gift effect config:', error)
-    })
-  }
-
-  return result
 }
 
 /** 断开连接 */
@@ -181,6 +246,9 @@ function applyRoomInfo(
   store: ReturnType<typeof useDanmakuStore>,
   roomInfo: RoomInfoResponse
 ): void {
+  if (store.roomInfo.roomId && store.roomInfo.roomId !== roomInfo.room_id.toString()) {
+    store.resetGiftEffectTriggers()
+  }
   store.updateRoomInfo({
     roomId: roomInfo.room_id.toString(),
     title: roomInfo.title,
@@ -313,8 +381,9 @@ export async function initBliveClient(eventTypes?: EventType[]): Promise<void> {
     if (event.payload === 'connected') {
       danmakuStore.setConnected(true)
       void syncCurrentRoomInfo(danmakuStore)
-    } else if (event.payload === 'disconnected') {
+    } else if (event.payload === 'connecting' || event.payload === 'disconnected') {
       danmakuStore.setConnected(false)
+      danmakuStore.resetGiftEffectTriggers()
     } else if (typeof event.payload === 'object' && 'error' in event.payload) {
       danmakuStore.setConnected(false)
       logger.error('Connection error:', event.payload.error.message)
@@ -392,6 +461,10 @@ function processDataUpdate(update: DataUpdate, store: ReturnType<typeof useDanma
 
     case 'GiftUpsert':
       store.upsertGifts(update.data)
+      break
+
+    case 'GiftEffectAppend':
+      store.appendGiftEffectTriggers(update.data)
       break
 
     case 'SuperChatAppend':

@@ -82,6 +82,10 @@ export const useSettingsStore = defineStore('settings', () => {
   const giftFontColor = computed(() => settings.value.display.giftFontColor)
   const giftUsernameColor = computed(() => settings.value.display.giftUsernameColor)
   const giftPriceColor = computed(() => settings.value.display.giftPriceColor)
+  const giftEffectEnabled = computed(() => settings.value.display.giftEffectEnabled)
+  const giftEffectMinPrice = computed(() => settings.value.display.giftEffectMinPrice)
+  const giftEffectMaxConcurrent = computed(() => settings.value.display.giftEffectMaxConcurrent)
+  const giftEffectQueueLimit = computed(() => settings.value.display.giftEffectQueueLimit)
   const scMergeWithGift = computed(() => settings.value.display.scMergeWithGift)
   const superChatFontColor = computed(() => settings.value.display.superChatFontColor)
   
@@ -398,6 +402,10 @@ export const useSettingsStore = defineStore('settings', () => {
     giftFontColor,
     giftUsernameColor,
     giftPriceColor,
+    giftEffectEnabled,
+    giftEffectMinPrice,
+    giftEffectMaxConcurrent,
+    giftEffectQueueLimit,
     scMergeWithGift,
     superChatFontColor,
     audienceSortType,

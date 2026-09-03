@@ -74,6 +74,7 @@ struct GiftInfo {
     img_basic: String,
     webp: String,
     gif: String,
+    effect_id: Option<u64>,
 }
 
 fn normalize_gift(message: SendGiftV2) -> Option<Gift> {
@@ -104,14 +105,15 @@ fn normalize_gift(message: SendGiftV2) -> Option<Gift> {
     };
     let batch_combo_id = non_empty(item.batch_combo_id);
     let transaction_id = non_empty(item.tid);
-    let gift_icon = item
+    let (gift_icon, effect_id) = item
         .gift_info
         .map(|info| {
             // `img_basic` 是静态礼物图；动画资源只作为缺失时的兼容兜底。
-            non_empty(info.img_basic)
+            let icon = non_empty(info.img_basic)
                 .or_else(|| non_empty(info.webp))
                 .or_else(|| non_empty(info.gif))
-                .unwrap_or_default()
+                .unwrap_or_default();
+            (icon, info.effect_id)
         })
         .unwrap_or_default();
 
@@ -148,6 +150,7 @@ fn normalize_gift(message: SendGiftV2) -> Option<Gift> {
         gift_id: u64::from(item.gift_id),
         gift_name: item.gift_name,
         gift_icon,
+        effect_id,
         num: if item.num == 0 { 1 } else { item.num },
         price: item.price,
         total_coin: item.total_coin,
@@ -385,6 +388,7 @@ fn parse_gift_info(buf: &[u8]) -> PbResult<GiftInfo> {
         match (tag >> 3, tag & 7) {
             (1, 2) => out.img_basic = pb.string()?,
             (2, 2) => out.webp = pb.string()?,
+            (3, 0) => out.effect_id = Some(pb.varint()?),
             (5, 2) => out.gif = pb.string()?,
             (_, wire) => pb.skip(wire)?,
         }
@@ -469,6 +473,7 @@ mod tests {
 
         let mut info = field_bytes(1, b"https://example.invalid/basic.png");
         info.extend(field_bytes(2, b"https://example.invalid/gift.webp"));
+        info.extend(field_varint(3, 5300));
 
         let mut item = field_varint(1, 100);
         item.extend(field_bytes(2, "小花花".as_bytes()));
@@ -519,6 +524,7 @@ mod tests {
         assert_eq!(gift.combo_resources_id, Some(10));
         assert_eq!(gift.show_batch_combo_send, Some(true));
         assert_eq!(gift.gift_icon, "https://example.invalid/basic.png");
+        assert_eq!(gift.effect_id, Some(5300));
         assert_eq!(gift.revealed_total_coin(), 5_000);
         assert_eq!(blind.blind_gift_config_id, 139);
         assert_eq!(blind.original_gift_id, 200);

@@ -14,6 +14,7 @@ import type {
   UserContribution,
   LiveStats,
   GiftUpsert,
+  GiftEffectTrigger,
   ContributionRankUser
 } from '@/types'
 
@@ -31,6 +32,12 @@ export const useDanmakuStore = defineStore('danmaku', () => {
   
   /** 礼物列表 */
   const giftList = ref<ProcessedGift[]>([])
+
+  /** 礼物全屏特效触发队列；不从快照恢复，避免打开窗口时重播历史礼物 */
+  const giftEffectTriggers = ref<GiftEffectTrigger[]>([])
+
+  /** 特效队列会话版本，用于切换连接后清理前端去重状态 */
+  const giftEffectGeneration = ref(0)
   
   /** 礼物合并索引: merge_key -> list index */
   const giftMergeIndex = ref<Map<string, number>>(new Map())
@@ -139,6 +146,22 @@ export const useDanmakuStore = defineStore('danmaku', () => {
     })
   }
 
+  /** 追加礼物全屏特效触发事件 */
+  const appendGiftEffectTriggers = (items: GiftEffectTrigger[]) => {
+    giftEffectTriggers.value.push(...items)
+    // 保留少量历史，仅用于跨更新批次消费；真正的播放队列由播放器管理。
+    const max = 100
+    if (giftEffectTriggers.value.length > max) {
+      giftEffectTriggers.value.splice(0, giftEffectTriggers.value.length - max)
+    }
+  }
+
+  /** 清理特效触发事件，并通知播放器重置本地去重状态 */
+  const resetGiftEffectTriggers = () => {
+    giftEffectTriggers.value = []
+    giftEffectGeneration.value += 1
+  }
+
   /** 追加 SC */
   const appendSuperChat = (sc: ProcessedSuperChat) => {
     // 检查是否已存在相同 ID 的 SC，避免重复添加
@@ -198,6 +221,7 @@ export const useDanmakuStore = defineStore('danmaku', () => {
     danmakuList.value = []
     giftList.value = []
     giftMergeIndex.value.clear()
+    resetGiftEffectTriggers()
     superChatList.value = []
     interactWordList.value = []
     contributionRankLive.value = []
@@ -216,6 +240,8 @@ export const useDanmakuStore = defineStore('danmaku', () => {
     // 数据列表
     danmakuList,
     giftList,
+    giftEffectTriggers,
+    giftEffectGeneration,
     superChatList,
     interactWordList,
     contributionRankLive,
@@ -236,6 +262,8 @@ export const useDanmakuStore = defineStore('danmaku', () => {
     // 数据更新方法
     appendDanmaku,
     upsertGifts,
+    appendGiftEffectTriggers,
+    resetGiftEffectTriggers,
     appendSuperChat,
     appendInteractWords,
     updateContributionRankLive,

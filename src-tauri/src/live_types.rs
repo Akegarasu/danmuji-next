@@ -137,6 +137,22 @@ pub struct ProcessedGift {
     pub guard_level: Option<u8>,
 }
 
+/// 礼物全屏特效触发事件（资源由前端按礼物 ID 从官方配置匹配）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GiftEffectTrigger {
+    pub id: String,
+    pub gift_id: u64,
+    /// SEND_GIFT 携带的精确特效资源 ID；旧协议缺失时按礼物 ID 回退匹配
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effect_id: Option<u64>,
+    pub gift_name: String,
+    pub num: u32,
+    /// 礼物展示价值（电池）
+    pub total_value: u64,
+    pub is_paid: bool,
+    pub timestamp: i64,
+}
+
 /// 处理后的批量连击元数据
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessedGiftCombo {
@@ -284,6 +300,8 @@ pub enum VideoRequestSource {
 pub enum DataUpdate {
     DanmakuAppend(Vec<ProcessedDanmaku>),
     GiftUpsert(Vec<GiftUpsert>),
+    /// 礼物全屏特效触发事件；与礼物列表更新分离，避免合并礼物导致特效丢失
+    GiftEffectAppend(Vec<GiftEffectTrigger>),
     SuperChatAppend(ProcessedSuperChat),
     ContributionRankLive(Vec<ProcessedOnlineRankUser>),
     ContributionRankFull(Vec<ContributionRankUser>),
@@ -308,6 +326,7 @@ impl DataUpdate {
         match self {
             DataUpdate::DanmakuAppend(_) => EventType::Danmaku,
             DataUpdate::GiftUpsert(_) => EventType::Gift,
+            DataUpdate::GiftEffectAppend(_) => EventType::Gift,
             DataUpdate::SuperChatAppend(_) => EventType::SuperChat,
             DataUpdate::ContributionRankLive(_) => EventType::ContributionRank,
             DataUpdate::ContributionRankFull(_) => EventType::ContributionRank,

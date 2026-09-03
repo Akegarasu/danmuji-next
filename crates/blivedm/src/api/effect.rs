@@ -196,8 +196,10 @@ pub async fn get_gift_effect_config(
         .get(url.as_str())
         .header("User-Agent", USER_AGENT)
         .header("Referer", format!("https://live.bilibili.com/{room_id}"))
+        .timeout(std::time::Duration::from_secs(30))
         .send()
         .await?
+        .error_for_status()?
         .json()
         .await?;
 

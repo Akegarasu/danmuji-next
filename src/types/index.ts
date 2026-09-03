@@ -107,6 +107,14 @@ export interface DisplaySettings {
   giftFontColor: string
   giftUsernameColor: string
   giftPriceColor: string
+  /** 启用礼物全屏特效 */
+  giftEffectEnabled: boolean
+  /** 触发全屏特效的最低礼物价值（电池） */
+  giftEffectMinPrice: number
+  /** 同时播放的全屏特效数量 */
+  giftEffectMaxConcurrent: number
+  /** 等待播放的全屏特效队列上限 */
+  giftEffectQueueLimit: number
   
   // SC 设置
   scMergeWithGift: boolean
@@ -221,6 +229,10 @@ export const DEFAULT_DISPLAY_SETTINGS: DisplaySettings = {
   giftFontColor: '#ebebeb',
   giftUsernameColor: '#9b9b9b',
   giftPriceColor: '#f5c842',
+  giftEffectEnabled: true,
+  giftEffectMinPrice: 0,
+  giftEffectMaxConcurrent: 3,
+  giftEffectQueueLimit: 20,
   scMergeWithGift: false,
   superChatFontColor: '#ffffff',
   audienceSortType: 'enterTime',
@@ -445,6 +457,24 @@ export interface GiftEffectH265Config {
   vertical_mp4: GiftEffectVideoVariant | null
 }
 
+/** Bilibili MP4 特效 JSON 中的帧区域配置 */
+export interface GiftEffectAnimationInfo {
+  videoW?: number
+  videoH?: number
+  rgbFrame?: [number, number, number, number]
+  aFrame?: [number, number, number, number]
+  w?: number
+  h?: number
+  scale?: number
+  fps?: number
+  f?: number
+}
+
+/** Bilibili MP4 特效的透明通道布局描述 */
+export interface GiftEffectAnimationConfig {
+  info: GiftEffectAnimationInfo
+}
+
 /** Bilibili 礼物全屏特效资源 */
 export interface GiftEffectResource {
   type: number
@@ -497,6 +527,20 @@ export interface GiftUpsert {
   merge_key: string
   gift: ProcessedGift
   action: 'insert' | 'update'
+}
+
+/** 收到礼物后触发一次全屏特效播放 */
+export interface GiftEffectTrigger {
+  id: string
+  gift_id: number
+  /** SEND_GIFT 携带的精确特效资源 ID；缺失时按礼物 ID 回退匹配 */
+  effect_id?: number
+  gift_name: string
+  num: number
+  /** 礼物展示价值（电池） */
+  total_value: number
+  is_paid: boolean
+  timestamp: number
 }
 
 /** 视频信息（来自后端） */
@@ -568,6 +612,7 @@ export interface Poll {
 export type DataUpdate =
   | { type: 'DanmakuAppend'; data: ProcessedDanmaku[] }
   | { type: 'GiftUpsert'; data: GiftUpsert[] }
+  | { type: 'GiftEffectAppend'; data: GiftEffectTrigger[] }
   | { type: 'SuperChatAppend'; data: ProcessedSuperChat }
   | { type: 'ContributionRankLive'; data: ProcessedOnlineRankUser[] }
   | { type: 'ContributionRankFull'; data: ContributionRankUser[] }

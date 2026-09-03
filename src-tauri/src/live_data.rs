@@ -48,6 +48,8 @@ pub struct LiveData {
     guard_payflow_id_order: VecDeque<String>,
     /// 普通礼物本地序号；没有上游交易 ID 时仍保证每条礼物独立
     next_gift_sequence: u64,
+    /// 礼物全屏特效事件序号
+    next_gift_effect_sequence: u64,
     /// SC 列表
     pub(crate) superchat_list: Vec<ProcessedSuperChat>,
     /// 高能用户排行
@@ -73,6 +75,8 @@ pub struct LiveData {
     pending_danmaku: Vec<ProcessedDanmaku>,
     /// 待发送的礼物更新（批量）
     pending_gift_upserts: Vec<GiftUpsert>,
+    /// 待发送的礼物全屏特效触发事件（不随礼物合并）
+    pending_gift_effects: Vec<GiftEffectTrigger>,
     /// 待发送的入场通知（批量）
     pending_interact_words: Vec<ProcessedInteractWord>,
     /// 统计是否有变化
@@ -94,6 +98,7 @@ impl Default for LiveData {
             seen_guard_payflow_ids: HashSet::new(),
             guard_payflow_id_order: VecDeque::new(),
             next_gift_sequence: 0,
+            next_gift_effect_sequence: 0,
             superchat_list: Vec::with_capacity(MAX_SUPERCHAT_LIST),
             interact_word_list: VecDeque::with_capacity(MAX_INTERACT_WORD_LIST),
             online_rank: Vec::new(),
@@ -105,6 +110,7 @@ impl Default for LiveData {
             pending_updates: Vec::new(),
             pending_danmaku: Vec::new(),
             pending_gift_upserts: Vec::new(),
+            pending_gift_effects: Vec::new(),
             pending_interact_words: Vec::new(),
             stats_dirty: false,
             contributions_dirty: false,
@@ -280,6 +286,23 @@ impl LiveData {
             0
         };
         let revenue_value = if is_paid { gift.total_coin / 100 } else { 0 };
+        // 新协议显式返回 effect_id=0 时网页端不会播放；字段缺失的旧协议
+        // 仍发送触发事件，由前端按礼物 ID 兼容匹配。
+        if is_paid && gift.effect_id != Some(0) {
+            let effect_sequence = self.take_next_gift_effect_sequence();
+            self.pending_gift_effects.push(GiftEffectTrigger {
+                // 时间戳避免 LiveData 在切换连接后从 0 重新计数造成前端误去重。
+                id: format!("gift-effect:{}:{effect_sequence}", gift.timestamp),
+                gift_id: gift.gift_id,
+                effect_id: gift.effect_id,
+                gift_name: gift.gift_name.clone(),
+                num: gift.num,
+                total_value: display_value,
+                is_paid,
+                timestamp: gift.timestamp,
+            });
+        }
+
         let processed_combo = convert_gift_combo(&gift);
         let processed_blind_gift = gift
             .blind_gift
@@ -659,6 +682,12 @@ impl LiveData {
         sequence
     }
 
+    fn take_next_gift_effect_sequence(&mut self) -> u64 {
+        let sequence = self.next_gift_effect_sequence;
+        self.next_gift_effect_sequence = self.next_gift_effect_sequence.wrapping_add(1);
+        sequence
+    }
+
     /// 重建礼物合并索引
     fn rebuild_gift_index(&mut self) {
         self.gift_merge_index.clear();
@@ -718,6 +747,12 @@ impl LiveData {
             )));
         }
 
+        if !self.pending_gift_effects.is_empty() {
+            updates.push(DataUpdate::GiftEffectAppend(std::mem::take(
+                &mut self.pending_gift_effects,
+            )));
+        }
+
         if !self.pending_interact_words.is_empty() {
             updates.push(DataUpdate::InteractWordAppend(std::mem::take(
                 &mut self.pending_interact_words,
@@ -773,6 +808,7 @@ mod tests {
             gift_id,
             gift_name: gift_name.to_owned(),
             gift_icon: String::new(),
+            effect_id: Some(5300),
             num: 1,
             price: unit_coin,
             total_coin: paid_coin,
@@ -872,6 +908,24 @@ mod tests {
         );
         assert_eq!(data.stats.gift_revenue, 1_500);
         assert_eq!(data.stats.total_revenue, 1_500);
+
+        // 每个真实 SEND_GIFT 包都独立触发一次特效，不能随 combo 列表合并。
+        assert_eq!(data.pending_gift_effects.len(), 10);
+        assert_eq!(data.pending_gift_effects[0].effect_id, Some(5300));
+        assert_eq!(data.pending_gift_effects[0].gift_id, 32_000);
+        assert_eq!(data.pending_gift_effects[0].total_value, 90);
+    }
+
+    #[test]
+    fn skips_effect_trigger_when_protocol_explicitly_disables_it() {
+        let mut data = LiveData::default();
+        let mut gift = blind_combo_gift(32_000, "棉花糖", 9_000, 15_000, 9_000, 1);
+        gift.effect_id = Some(0);
+
+        data.process_gift(gift);
+
+        assert!(data.pending_gift_effects.is_empty());
+        assert_eq!(data.pending_gift_upserts.len(), 1);
     }
 
     #[test]

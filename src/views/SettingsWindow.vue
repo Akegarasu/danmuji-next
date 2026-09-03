@@ -619,6 +619,26 @@ const giftExpireMinutes = computed({
   set: (v) => settingsStore.updateDisplaySettings({ giftExpireMinutes: v })
 })
 
+const giftEffectEnabled = computed({
+  get: () => settings.value.display.giftEffectEnabled,
+  set: (v) => settingsStore.updateDisplaySettings({ giftEffectEnabled: v })
+})
+
+const giftEffectMinPrice = computed({
+  get: () => settings.value.display.giftEffectMinPrice,
+  set: (v) => settingsStore.updateDisplaySettings({ giftEffectMinPrice: Math.max(0, Math.round(v / 10) * 10) })
+})
+
+const giftEffectMaxConcurrent = computed({
+  get: () => settings.value.display.giftEffectMaxConcurrent,
+  set: (v) => settingsStore.updateDisplaySettings({ giftEffectMaxConcurrent: Math.min(3, Math.max(1, Math.round(v))) })
+})
+
+const giftEffectQueueLimit = computed({
+  get: () => settings.value.display.giftEffectQueueLimit,
+  set: (v) => settingsStore.updateDisplaySettings({ giftEffectQueueLimit: Math.min(100, Math.max(1, Math.round(v))) })
+})
+
 const scMergeWithGift = computed({
   get: () => settings.value.display.scMergeWithGift,
   set: (v) => settingsStore.updateDisplaySettings({ scMergeWithGift: v })
@@ -1435,6 +1455,37 @@ const openProjectUrl = async () => {
               <span class="value">{{ giftExpireMinutes }} 分钟</span>
             </label>
             <input v-model.number="giftExpireMinutes" type="range" min="1" max="30" step="1" class="setting-slider" />
+          </div>
+
+          <h3 class="section-title section-subtitle">全屏特效</h3>
+
+          <div class="setting-group toggle">
+            <label class="setting-label">启用礼物全屏特效</label>
+            <input v-model="giftEffectEnabled" type="checkbox" class="toggle-checkbox" />
+          </div>
+
+          <div v-if="giftEffectEnabled" class="setting-group">
+            <label class="setting-label">
+              最低触发价格
+              <span class="value">{{ giftEffectMinPrice }} 电池 (¥{{ (giftEffectMinPrice / 10).toFixed(1) }})</span>
+            </label>
+            <input v-model.number="giftEffectMinPrice" type="range" min="0" max="10000" step="10" class="setting-slider" />
+            <div class="setting-hint">仅匹配 Bilibili 官方全屏特效配置的礼物会播放。</div>
+          </div>
+
+          <div v-if="giftEffectEnabled" class="setting-group">
+            <label class="setting-label">
+              同时播放数量 <span class="value">{{ giftEffectMaxConcurrent }}</span>
+            </label>
+            <input v-model.number="giftEffectMaxConcurrent" type="range" min="1" max="3" step="1" class="setting-slider" />
+            <div class="setting-hint">视频采用 Bilibili 网页端的 RGB + Alpha 双区域合成方式。</div>
+          </div>
+
+          <div v-if="giftEffectEnabled" class="setting-group">
+            <label class="setting-label">
+              等待队列上限 <span class="value">{{ giftEffectQueueLimit }}</span>
+            </label>
+            <input v-model.number="giftEffectQueueLimit" type="range" min="1" max="100" step="1" class="setting-slider" />
           </div>
         </div>
 

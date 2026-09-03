@@ -14,6 +14,9 @@ pub struct Gift {
     pub gift_name: String,
     /// 礼物图片
     pub gift_icon: String,
+    /// Bilibili 全屏特效资源 ID
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effect_id: Option<u64>,
     /// 数量
     pub num: u32,
     /// 单价（金瓜子/银瓜子）
@@ -156,8 +159,8 @@ impl Gift {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();
-        let gift_icon = data
-            .get("gift_info")
+        let gift_info = data.get("gift_info").filter(|value| !value.is_null());
+        let gift_icon = gift_info
             .and_then(|info| {
                 // `img_basic` 是静态礼物图；`webp`/`gif` 可能包含动画，
                 // 仅在静态图缺失时用于兼容旧消息。
@@ -166,6 +169,11 @@ impl Gift {
                     .find_map(|key| non_empty_json_string(info.get(key)))
             })
             .unwrap_or_default();
+        // 保留显式的 0：它表示本次消息不应播放特效；字段完全缺失时才
+        // 允许前端为旧协议按礼物 ID 回退匹配。
+        let effect_id = gift_info
+            .and_then(|info| info.get("effect_id"))
+            .and_then(Value::as_u64);
         let num = u32::try_from(data.get("num")?.as_u64()?).ok()?;
         let price = data.get("price")?.as_u64()?;
         let total_coin = data.get("total_coin")?.as_u64()?;
@@ -269,6 +277,7 @@ impl Gift {
             gift_id,
             gift_name,
             gift_icon,
+            effect_id,
             num,
             price,
             total_coin,
@@ -330,7 +339,6 @@ impl Gift {
     pub fn is_combo(&self) -> bool {
         self.batch_combo_id.is_some()
     }
-
 }
 
 fn non_empty_json_string(value: Option<&Value>) -> Option<String> {
@@ -375,7 +383,10 @@ mod tests {
             "data": {
                 "giftId": 1,
                 "giftName": "辣条",
-                "gift_info": { "img_basic": "https://example.invalid/gift.png" },
+                "gift_info": {
+                    "img_basic": "https://example.invalid/gift.png",
+                    "effect_id": 5300
+                },
                 "num": 1,
                 "price": 100,
                 "total_coin": 100,
@@ -388,6 +399,7 @@ mod tests {
         });
         let gift = Gift::parse(&raw).expect("valid fixture");
         assert_eq!(gift.transaction_id.as_deref(), Some("txn-123"));
+        assert_eq!(gift.effect_id, Some(5300));
     }
 
     #[test]
@@ -445,6 +457,7 @@ mod tests {
         assert_eq!(gift.sender_name, "");
         assert_eq!(gift.action, "投喂");
         assert_eq!(gift.transaction_id, None);
+        assert_eq!(gift.effect_id, None);
         assert!(gift.blind_gift.is_none());
     }
 
