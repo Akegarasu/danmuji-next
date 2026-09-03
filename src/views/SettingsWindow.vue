@@ -280,7 +280,6 @@ const sendTestEvent = async () => {
 
 const sections = [
   { id: 'connection', label: '连接' },
-  { id: 'test', label: '测试' },
   { id: 'general', label: '通用' },
   { id: 'speech', label: '语音' },
   { id: 'font', label: '字体' },
@@ -290,7 +289,8 @@ const sections = [
   { id: 'special-follow', label: '特别关注' },
   { id: 'danmaku-filter', label: '弹幕过滤' },
   { id: 'shield-keyword', label: '屏蔽词' },
-  { id: 'about', label: '关于' }
+  { id: 'about', label: '关于' },
+  { id: 'test', label: '测试' },
 ]
 
 const fontFamilyOptions = [
@@ -1175,44 +1175,6 @@ const openProjectUrl = async () => {
           </div>
         </div>
 
-        <!-- 手动测试 -->
-        <div v-show="activeSection === 'test'" class="section">
-          <h3 class="section-title">手动测试</h3>
-
-          <div class="info-box">
-            <span class="info-icon">⚙</span>
-            <span class="info-text">输入包含 cmd 字段的 B 站原始事件 JSON，发送后会按实时事件流程处理。</span>
-          </div>
-
-          <div class="setting-group test-event-editor">
-            <label class="setting-label">事件 JSON</label>
-            <textarea
-              v-model="testEventJson"
-              class="test-event-textarea"
-              spellcheck="false"
-              placeholder='例如：{"cmd":"DANMU_MSG","info":[]}'
-            />
-            <div class="setting-hint">支持弹幕、礼物、醒目留言、进场和直播状态等已解析事件。</div>
-          </div>
-
-          <button
-            type="button"
-            class="test-event-send-btn"
-            :disabled="testEventSending || !testEventJson.trim()"
-            @click="sendTestEvent"
-          >
-            {{ testEventSending ? '处理中...' : '发送处理' }}
-          </button>
-
-          <div
-            v-if="testEventMessage"
-            class="test-event-result"
-            :class="{ success: testEventStatus === 'success', error: testEventStatus === 'error' }"
-          >
-            {{ testEventMessage }}
-          </div>
-        </div>
-
         <!-- 通用设置 -->
         <div v-show="activeSection === 'general'" class="section">
           <h3 class="section-title">窗口设置</h3>
@@ -1892,6 +1854,45 @@ const openProjectUrl = async () => {
             </div>
           </div>
         </div>
+
+        <!-- 手动测试 -->
+        <div v-show="activeSection === 'test'" class="section">
+          <h3 class="section-title">手动测试</h3>
+
+          <div class="info-box">
+            <span class="info-icon">⚙</span>
+            <span class="info-text">输入包含 cmd 字段的 B 站原始事件 JSON，发送后会按实时事件流程处理。仅供开发人员测试用</span>
+          </div>
+
+          <div class="setting-group test-event-editor">
+            <label class="setting-label">事件 JSON</label>
+            <textarea
+              v-model="testEventJson"
+              class="test-event-textarea"
+              spellcheck="false"
+              placeholder='例如：{"cmd":"DANMU_MSG","info":[]}'
+            />
+            <div class="setting-hint">支持弹幕、礼物、醒目留言、进场和直播状态等已解析事件。</div>
+          </div>
+
+          <button
+            type="button"
+            class="test-event-send-btn"
+            :disabled="testEventSending || !testEventJson.trim()"
+            @click="sendTestEvent"
+          >
+            {{ testEventSending ? '处理中...' : '发送处理' }}
+          </button>
+
+          <div
+            v-if="testEventMessage"
+            class="test-event-result"
+            :class="{ success: testEventStatus === 'success', error: testEventStatus === 'error' }"
+          >
+            {{ testEventMessage }}
+          </div>
+        </div>
+
       </div>
     </div>
 
