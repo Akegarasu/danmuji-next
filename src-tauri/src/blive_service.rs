@@ -21,7 +21,7 @@ use blivedm::api::{
     get_all_guard_top_list, get_contribution_rank, get_contribution_rank_by_type, get_danmu_info,
     get_room_init, ContributionRankResponse, ContributionRankType, GuardTopListResponse, RoomInfo,
 };
-use blivedm::{BliveDmClient, Error as BliveError, Event};
+use blivedm::{parse_notification, BliveDmClient, Error as BliveError, Event};
 use crate::kv_store::{VideoRequestStore, VotingStore};
 use crate::live_data::{LiveData, WindowSubscription};
 use crate::live_types::*;
@@ -84,6 +84,16 @@ impl BliveService {
 
     pub async fn get_room_info(&self) -> Option<RoomInfoResponse> {
         self.state.read().await.room_info.clone().map(Into::into)
+    }
+
+    /// 解析并处理手动输入的原始 B 站通知事件。
+    pub async fn process_test_event(&self, app: &AppHandle, event_json: &str) -> Result<(), String> {
+        let event = parse_notification(event_json.as_bytes(), None)
+            .map_err(|error| format!("解析事件失败: {error}"))?;
+
+        self.process_event(event).await;
+        self.push_updates(app).await;
+        Ok(())
     }
 
     /// 刷新贡献排行榜（手动调用 API 获取最新数据）

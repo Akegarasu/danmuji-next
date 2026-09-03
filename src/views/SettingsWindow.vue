@@ -247,8 +247,40 @@ onUnmounted(async () => {
 
 const activeSection = ref('connection')
 
+const testEventJson = ref(`{
+  "cmd": "DANMU_MSG",
+  "info": [
+    [0, 1, 0, 16777215, 1700000000000],
+    "测试弹幕",
+    [123456, "测试用户", 0],
+    null
+  ]
+}`)
+const testEventSending = ref(false)
+const testEventStatus = ref<'idle' | 'success' | 'error'>('idle')
+const testEventMessage = ref('')
+
+const sendTestEvent = async () => {
+  if (testEventSending.value) return
+
+  testEventSending.value = true
+  testEventStatus.value = 'idle'
+  testEventMessage.value = ''
+  try {
+    await invoke('process_test_event', { eventJson: testEventJson.value })
+    testEventStatus.value = 'success'
+    testEventMessage.value = '事件已处理并发送'
+  } catch (error) {
+    testEventStatus.value = 'error'
+    testEventMessage.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    testEventSending.value = false
+  }
+}
+
 const sections = [
   { id: 'connection', label: '连接' },
+  { id: 'test', label: '测试' },
   { id: 'general', label: '通用' },
   { id: 'speech', label: '语音' },
   { id: 'font', label: '字体' },
@@ -1140,6 +1172,44 @@ const openProjectUrl = async () => {
             }" @click="toggleConnection" :disabled="isConnecting">
               {{ connectBtnText }}
             </button>
+          </div>
+        </div>
+
+        <!-- 手动测试 -->
+        <div v-show="activeSection === 'test'" class="section">
+          <h3 class="section-title">手动测试</h3>
+
+          <div class="info-box">
+            <span class="info-icon">⚙</span>
+            <span class="info-text">输入包含 cmd 字段的 B 站原始事件 JSON，发送后会按实时事件流程处理。</span>
+          </div>
+
+          <div class="setting-group test-event-editor">
+            <label class="setting-label">事件 JSON</label>
+            <textarea
+              v-model="testEventJson"
+              class="test-event-textarea"
+              spellcheck="false"
+              placeholder='例如：{"cmd":"DANMU_MSG","info":[]}'
+            />
+            <div class="setting-hint">支持弹幕、礼物、醒目留言、进场和直播状态等已解析事件。</div>
+          </div>
+
+          <button
+            type="button"
+            class="test-event-send-btn"
+            :disabled="testEventSending || !testEventJson.trim()"
+            @click="sendTestEvent"
+          >
+            {{ testEventSending ? '处理中...' : '发送处理' }}
+          </button>
+
+          <div
+            v-if="testEventMessage"
+            class="test-event-result"
+            :class="{ success: testEventStatus === 'success', error: testEventStatus === 'error' }"
+          >
+            {{ testEventMessage }}
           </div>
         </div>
 
@@ -2112,6 +2182,73 @@ const openProjectUrl = async () => {
 
   &::placeholder {
     color: var(--text-muted);
+  }
+}
+
+.test-event-editor {
+  margin-bottom: 12px;
+}
+
+.test-event-textarea {
+  display: block;
+  width: 100%;
+  min-height: 280px;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  color: var(--text-primary);
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  outline: none;
+  resize: vertical;
+  transition: border-color 0.2s;
+
+  &:focus {
+    border-color: var(--accent-primary);
+  }
+
+  &::placeholder {
+    color: var(--text-muted);
+  }
+}
+
+.test-event-send-btn {
+  width: 100%;
+  padding: 9px 16px;
+  background: var(--accent-primary);
+  border: none;
+  border-radius: var(--border-radius-sm);
+  color: white;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s;
+
+  &:hover:not(:disabled) {
+    opacity: 0.9;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.test-event-result {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--border-radius-sm);
+  color: #ef4444;
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+  word-break: break-word;
+
+  &.success {
+    border-color: rgba(34, 197, 94, 0.3);
+    color: #22c55e;
   }
 }
 

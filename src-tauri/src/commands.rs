@@ -544,6 +544,16 @@ pub async fn refresh_guard_top_list(
     blive_service.refresh_guard_top_list(&cookie).await
 }
 
+/// 处理手动测试事件
+#[tauri::command]
+pub async fn process_test_event(
+    app: tauri::AppHandle,
+    blive_service: State<'_, Arc<BliveService>>,
+    event_json: String,
+) -> Result<(), String> {
+    blive_service.process_test_event(&app, &event_json).await
+}
+
 // ==================== 事件订阅操作 ====================
 
 /// 订阅事件（窗口注册感兴趣的事件类型）

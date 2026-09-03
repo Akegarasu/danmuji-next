@@ -61,7 +61,7 @@ pub enum Event {
 }
 
 /// 解析通知消息
-pub(crate) fn parse_notification(
+pub fn parse_notification(
     body: &[u8],
     raw_event_handler: Option<&RawEventHandler>,
 ) -> Result<Event> {

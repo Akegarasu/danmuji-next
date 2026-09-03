@@ -204,6 +204,8 @@ pub fn run() {
             commands::update_speech_settings,
             commands::preview_speech,
             commands::get_speech_status,
+            // 手动测试
+            commands::process_test_event,
             // 事件订阅
             commands::subscribe_events,
             commands::unsubscribe_events,
