@@ -40,8 +40,10 @@ pub enum Event {
     Gift(Box<Gift>),
     /// 醒目留言
     SuperChat(SuperChat),
-    /// 大航海（舰长/提督/总督）
+    /// 大航海原始购买通知；其中价格是标准标价
     GuardBuy(GuardBuy),
+    /// 大航海成交 Toast；其中价格是本次订单总金额
+    GuardToast(GuardToast),
     /// 开播
     LiveStart(LiveStartData),
     /// 下播
@@ -100,6 +102,10 @@ pub(crate) fn parse_notification(
         "GUARD_BUY" => {
             let guard = parse_required(cmd_base, GuardBuy::parse(&value))?;
             Ok(Event::GuardBuy(guard))
+        }
+        "USER_TOAST_MSG" | "USER_TOAST_MSG_V2" => {
+            let toast = parse_required(cmd_base, GuardToast::parse(&value))?;
+            Ok(Event::GuardToast(toast))
         }
         "LIVE" => {
             let data = parse_required(cmd_base, LiveStartData::parse(&value))?;
@@ -190,6 +196,27 @@ mod tests {
             .unwrap(),
             Event::Raw { cmd, payload }
                 if cmd == "ENTRY_EFFECT" && payload["data"]["uid"] == 42
+        ));
+    }
+
+    #[test]
+    fn parses_guard_toast_as_typed_event() {
+        let raw = r#"{
+            "cmd":"USER_TOAST_MSG_V2",
+            "data":{
+                "sender_uinfo":{"uid":42,"base":{"name":"tester","face":""}},
+                "guard_info":{"guard_level":3,"role_name":"舰长","start_time":1700000000,"end_time":1700000000},
+                "pay_info":{"num":1,"price":138000,"unit":"月","payflow_id":"guard-order"},
+                "gift_info":{"gift_id":10003},
+                "option":{"source":0}
+            }
+        }"#
+        .as_bytes();
+
+        assert!(matches!(
+            parse_notification(raw, None).unwrap(),
+            Event::GuardToast(toast)
+                if toast.price == 138_000 && toast.payflow_id.as_deref() == Some("guard-order")
         ));
     }
 }

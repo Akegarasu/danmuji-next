@@ -566,7 +566,10 @@ impl BliveService {
                 drop(data);
                 self.spawn_video_fetches(to_fetch).await;
             }
-            Event::GuardBuy(guard) => data.process_guard_buy(guard),
+            // GUARD_BUY 中是标准标价（例如舰长固定 198 元），不能用于实际营收。
+            // 同一订单随后下发的 Toast 才包含连续包月/续费后的成交总价。
+            Event::GuardBuy(_) => {}
+            Event::GuardToast(toast) => data.process_guard_toast(toast),
             Event::OnlineRankV2(rank) => data.process_online_rank(rank),
             Event::OnlineRankV3(rank) => data.process_online_rank_v3(rank),
             Event::OnlineRankCount(count) => data.process_online_count(count),
