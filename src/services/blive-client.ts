@@ -16,6 +16,8 @@ import type {
   DataUpdate,
   DataSnapshot,
   EventType,
+  GiftEffectConfig,
+  GiftEffectResource,
   GuardTopListResponse
 } from '@/types'
 import { createLogger } from '@/services/logger'
@@ -63,14 +65,101 @@ let dataUnlisten: UnlistenFn | null = null
 let currentWindowLabel: string | null = null
 const logger = createLogger('BliveClient')
 
-// ==================== 连接相关 API ====================
+/** 礼物全屏特效配置缓存，key 为房间号。 */
+const giftEffectConfigCache = new Map<number, GiftEffectConfig>()
+const giftEffectMapCache = new WeakMap<GiftEffectConfig, Map<number, GiftEffectResource>>()
+
+// ==================== 礼物特效 API ====================
+
+/**
+ * 从 Bilibili 官方接口获取房间礼物全屏特效配置。
+ *
+ * `effect_id`（礼物目录）通过配置项的 `id` 与 `bind_gift_ids` 建立映射；
+ * `web_mp4`/`web_mp4_json` 是网页端可直接使用的资源地址。
+ */
+export async function getGiftEffectConfig(
+  roomId: number,
+  options: {
+    areaParentId?: number
+    areaId?: number
+    baseVersion?: number
+    force?: boolean
+  } = {}
+): Promise<GiftEffectConfig> {
+  if (!Number.isInteger(roomId) || roomId <= 0) {
+    throw new Error('无效的房间号')
+  }
+
+  if (!options.force && options.baseVersion === undefined) {
+    const cached = giftEffectConfigCache.get(roomId)
+    if (cached) return cached
+  }
+
+  const config = await invoke<GiftEffectConfig>('get_gift_effect_config', {
+    roomId,
+    areaParentId: options.areaParentId ?? null,
+    areaId: options.areaId ?? null,
+    baseVersion: options.baseVersion ?? null
+  })
+  giftEffectConfigCache.set(roomId, config)
+  giftEffectMapCache.set(config, buildGiftEffectMap(config))
+  return config
+}
+
+function buildGiftEffectMap(config: GiftEffectConfig): Map<number, GiftEffectResource> {
+  const map = new Map<number, GiftEffectResource>()
+  for (const effect of config.full_sc_resource.conf_list) {
+    for (const giftId of effect.bind_gift_ids) {
+      if (giftId !== 0 && !map.has(giftId)) {
+        map.set(giftId, effect)
+      }
+    }
+  }
+  return map
+}
+
+/** 获取配置对应的礼物 ID → 特效资源映射。 */
+export function getGiftEffectMap(
+  config: GiftEffectConfig
+): ReadonlyMap<number, GiftEffectResource> {
+  let map = giftEffectMapCache.get(config)
+  if (!map) {
+    map = buildGiftEffectMap(config)
+    giftEffectMapCache.set(config, map)
+  }
+  return map
+}
+
+/** 按礼物 ID 查找绑定的全屏特效。 */
+export function findGiftEffect(
+  config: GiftEffectConfig,
+  giftId: number
+): GiftEffectResource | undefined {
+  return getGiftEffectMap(config).get(giftId)
+}
+
+/** 清理礼物特效配置缓存。 */
+export function clearGiftEffectConfigCache(): void {
+  giftEffectConfigCache.clear()
+  // WeakMap 不需要手动清理其配置对象对应的映射。
+}
+
 
 /** 连接到直播间 */
 export async function connectRoom(roomId: number, cookie?: string): Promise<ConnectResult> {
-  return await invoke<ConnectResult>('connect_room', {
+  const result = await invoke<ConnectResult>('connect_room', {
     roomId,
     cookie: cookie || null
   })
+
+  // 连接成功后预取官方礼物特效配置；失败不影响弹幕连接。
+  if (result.success && result.room_info) {
+    void getGiftEffectConfig(result.room_info.room_id).catch((error) => {
+      logger.warn('Failed to load Bilibili gift effect config:', error)
+    })
+  }
+
+  return result
 }
 
 /** 断开连接 */

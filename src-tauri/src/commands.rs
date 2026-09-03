@@ -22,7 +22,8 @@ use crate::live_types::{
 };
 use crate::voting::{Poll, VoteKeyType, Voter};
 use blivedm::api::{
-    ContributionRankResponse, ContributionRankType, GuardTopListResponse,
+    get_gift_effect_config as fetch_gift_effect_config, ContributionRankResponse,
+    ContributionRankType, GiftEffectConfig, GuardTopListResponse,
 };
 use crate::config::get_config_path;
 use crate::crypto;
@@ -498,6 +499,28 @@ pub async fn get_current_room_info(
     blive_service: State<'_, Arc<BliveService>>,
 ) -> Result<Option<RoomInfoResponse>, String> {
     Ok(blive_service.get_room_info().await)
+}
+
+/// 获取 Bilibili 礼物全屏特效配置。
+///
+/// 资源来自 Bilibili 官方 `fullScSpecialEffect` 接口，不依赖第三方服务。
+#[tauri::command]
+pub async fn get_gift_effect_config(
+    room_id: u64,
+    area_parent_id: Option<u64>,
+    area_id: Option<u64>,
+    base_version: Option<u64>,
+) -> Result<GiftEffectConfig, String> {
+    let client = reqwest::Client::new();
+    fetch_gift_effect_config(
+        &client,
+        room_id,
+        area_parent_id,
+        area_id,
+        base_version,
+    )
+    .await
+    .map_err(|error| format!("获取礼物特效配置失败: {error}"))
 }
 
 /// 刷新贡献排行榜

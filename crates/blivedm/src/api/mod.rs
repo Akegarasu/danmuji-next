@@ -2,6 +2,7 @@
 
 mod cookie;
 mod danmu;
+mod effect;
 mod guard;
 mod moderation;
 mod rank;
@@ -10,6 +11,10 @@ mod wbi;
 
 pub use cookie::{extract_buvid_from_cookie, extract_uid_from_cookie};
 pub use danmu::{get_danmu_info, DanmuHost, DanmuServerInfo};
+pub use effect::{
+    get_gift_effect_config, FloatScResource, GiftEffectConfig, GiftEffectH265Config,
+    GiftEffectResource, GiftEffectResourceSet, GiftEffectVideoVariant, GIFT_EFFECT_CONFIG_URL,
+};
 pub use guard::{
     get_all_guard_top_list, get_guard_top_list, GuardTopListResponse, GuardTopListUser,
 };

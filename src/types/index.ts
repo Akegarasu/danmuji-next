@@ -430,6 +430,68 @@ export interface GuardTopListResponse {
   list: GuardTopListUser[]
 }
 
+/** Bilibili 礼物全屏特效的 H.265 视频资源 */
+export interface GiftEffectVideoVariant {
+  mp4: string
+  mp4_md5: string
+  mp4_json: string
+  mp4_crc32: number
+  mp4_file_size: number
+}
+
+/** Bilibili 礼物全屏特效的 H.265 配置 */
+export interface GiftEffectH265Config {
+  horizontal_mp4: GiftEffectVideoVariant | null
+  vertical_mp4: GiftEffectVideoVariant | null
+}
+
+/** Bilibili 礼物全屏特效资源 */
+export interface GiftEffectResource {
+  type: number
+  web_mp4: string
+  web_mp4_json: string
+  horizontal_mp4: string
+  vertical_mp4: string
+  id: number
+  plan_platform: number[]
+  bind_gift_ids: number[]
+  web_mp4_md5: string
+  horizontal_mp4_md5: string
+  vertical_mp4_md5: string
+  web_mp4_crc32: number
+  horizontal_mp4_crc32: number
+  vertical_mp4_crc32: number
+  web_mp4_file_size: number
+  horizontal_mp4_file_size: number
+  vertical_mp4_file_size: number
+  h265_conf: GiftEffectH265Config | null
+  online_time: number
+}
+
+/** 礼物全屏特效资源集合 */
+export interface GiftEffectResourceSet {
+  conf_list: GiftEffectResource[]
+  base_version: number
+  ttl: number
+}
+
+/** 浮层 SC 资源（官方特效接口的附带返回值） */
+export interface FloatScResource {
+  title: string
+  type: number
+  left_color: string
+  right_color: string
+  face_background: string
+  tail_background: string
+  id: number
+}
+
+/** Bilibili 礼物全屏特效配置 */
+export interface GiftEffectConfig {
+  full_sc_resource: GiftEffectResourceSet
+  float_sc_resource: FloatScResource[]
+}
+
 /** 礼物更新操作 */
 export interface GiftUpsert {
   merge_key: string
