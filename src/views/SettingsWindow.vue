@@ -21,6 +21,7 @@ import {
 import { lookupArchiveUserNames } from '@/services/archive'
 import { checkForUpdate, getAppVersion, isPortable, type UpdateInfo } from '@/services/updater'
 import { getSpeechStatus, getSpeechVoices, previewSpeech } from '@/services/speech'
+import { previewGiftEffect } from '@/services/gift-effect-preview'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type {
@@ -230,6 +231,7 @@ onMounted(async () => {
 })
 
 onUnmounted(async () => {
+  giftEffectTestController?.abort()
   // 清理状态监听
   if (statusUnlisten) {
     statusUnlisten()
@@ -259,6 +261,38 @@ const testEventJson = ref(`{
 const testEventSending = ref(false)
 const testEventStatus = ref<'idle' | 'success' | 'error'>('idle')
 const testEventMessage = ref('')
+
+const giftEffectTesting = ref(false)
+const giftEffectTestStatus = ref<'idle' | 'success' | 'error'>('idle')
+const giftEffectTestMessage = ref('')
+let giftEffectTestController: AbortController | null = null
+
+const testGiftEffect = async () => {
+  if (giftEffectTesting.value) return
+  giftEffectTestStatus.value = 'idle'
+  giftEffectTestMessage.value = ''
+  const roomId = Number(isConnected.value ? danmakuStore.roomInfo.roomId : settings.value.roomId)
+  if (!Number.isSafeInteger(roomId) || roomId <= 0) {
+    giftEffectTestStatus.value = 'error'
+    giftEffectTestMessage.value = '请先在连接设置中填写有效的房间号'
+    return
+  }
+
+  giftEffectTesting.value = true
+  giftEffectTestController = new AbortController()
+  try {
+    giftEffectTestMessage.value = await previewGiftEffect(roomId, giftEffectTestController.signal, message => {
+      giftEffectTestMessage.value = message
+    })
+    giftEffectTestStatus.value = 'success'
+  } catch (error) {
+    giftEffectTestStatus.value = 'error'
+    giftEffectTestMessage.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    giftEffectTesting.value = false
+    giftEffectTestController = null
+  }
+}
 
 const sendTestEvent = async () => {
   if (testEventSending.value) return
@@ -1858,6 +1892,27 @@ const openProjectUrl = async () => {
         <!-- 手动测试 -->
         <div v-show="activeSection === 'test'" class="section">
           <h3 class="section-title">手动测试</h3>
+
+          <div class="setting-group">
+            <label class="setting-label">礼物全屏特效</label>
+            <div class="setting-hint">随机播放当前房间的一款官方礼物特效，请查看主窗口。只需填写房间号，无需连接直播间；测试忽略特效开关及价格门槛，不计入礼物统计。</div>
+            <button
+              type="button"
+              class="test-event-send-btn"
+              :disabled="giftEffectTesting"
+              @click="testGiftEffect"
+            >
+              {{ giftEffectTesting ? '测试播放中…' : '播放礼物特效' }}
+            </button>
+            <div
+              v-if="giftEffectTestMessage"
+              class="test-event-result"
+              :class="{ success: giftEffectTestStatus === 'success', error: giftEffectTestStatus === 'error' }"
+              role="status"
+            >
+              {{ giftEffectTestMessage }}
+            </div>
+          </div>
 
           <div class="info-box">
             <span class="info-icon">⚙</span>

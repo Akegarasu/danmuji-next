@@ -20,8 +20,16 @@ import { useDanmakuStore } from '@/stores/danmaku'
 import { useSettingsStore } from '@/stores/settings'
 import {
   findGiftEffect,
-  getGiftEffectConfig
+  getGiftEffectConfig,
+  getGiftEffectMap
 } from '@/services/blive-client'
+import { emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event'
+import {
+  GIFT_EFFECT_PREVIEW_REQUEST,
+  GIFT_EFFECT_PREVIEW_RESULT,
+  type GiftEffectPreviewRequest,
+  type GiftEffectPreviewResult
+} from '@/services/gift-effect-preview'
 import type {
   GiftEffectAnimationConfig,
   GiftEffectAnimationInfo,
@@ -29,6 +37,7 @@ import type {
   GiftEffectTrigger
 } from '@/types'
 import { createLogger } from '@/services/logger'
+import { getGiftEffectLayout } from '@/services/gift-effect-layout'
 
 const MAX_SLOTS = 3
 const CANPLAY_TIMEOUT_MS = 20_000
@@ -74,6 +83,8 @@ const slots = shallowReactive<PlaybackSlot[]>(
 )
 const canvasRefs = ref<(HTMLCanvasElement | null)[]>([])
 const videoRefs = ref<(HTMLVideoElement | null)[]>([])
+const layerRef = ref<HTMLDivElement | null>(null)
+let resizeObserver: ResizeObserver | null = null
 // 官方配置约 1 MB 且只读，使用 shallowRef 避免为数千条资源创建深层代理。
 const config = shallowRef<Awaited<ReturnType<typeof getGiftEffectConfig>> | null>(null)
 const waitingTriggers: GiftEffectTrigger[] = []
@@ -84,6 +95,9 @@ let seenTriggerGeneration = -1
 let configLoadToken = 0
 let configRefreshTimer: number | null = null
 let targetRoomId = 0
+let previewUnlisten: UnlistenFn | null = null
+let previewBusy = false
+let disposed = false
 
 const roomId = computed(() => {
   const value = Number.parseInt(danmakuStore.roomInfo.roomId, 10)
@@ -193,6 +207,17 @@ function normalizedFrame(
   return frame
 }
 
+function resizeCanvas(slot: PlaybackSlot): void {
+  const canvas = slot.canvas
+  const layer = layerRef.value
+  if (!canvas || !layer) return
+  const layout = getGiftEffectLayout(canvas.width, canvas.height, layer.clientWidth, layer.clientHeight)
+  // 只调整 CSS 显示尺寸，保持 WebGL 纹理和 RGB/Alpha 采样分辨率不变。
+  canvas.style.width = `${layout.width}px`
+  canvas.style.height = `${layout.height}px`
+  canvas.dataset.layout = layout.mode
+}
+
 function setupWebGl(
   slot: PlaybackSlot,
   info: GiftEffectAnimationInfo
@@ -223,6 +248,7 @@ function setupWebGl(
   // 与 Bilibili 网页端一致：canvas 的实际像素尺寸是 RGB 输出区域。
   canvas.width = Math.round(rgbWidth)
   canvas.height = Math.round(rgbHeight)
+  resizeCanvas(slot)
 
   const gl = canvas.getContext('webgl', {
     alpha: true,
@@ -316,7 +342,12 @@ function getAnimationConfig(url: string): Promise<GiftEffectAnimationConfig> {
 
   const controller = new AbortController()
   const timeout = window.setTimeout(() => controller.abort(), CANPLAY_TIMEOUT_MS)
-  const request = fetch(normalizedUrl, { mode: 'cors', signal: controller.signal })
+  // CDN 会拒绝 localhost / tauri.localhost 的 Referer，匿名请求需显式省略。
+  const request = fetch(normalizedUrl, {
+    mode: 'cors',
+    referrerPolicy: 'no-referrer',
+    signal: controller.signal
+  })
     .then(async response => {
       if (!response.ok) throw new Error(`获取特效 JSON 失败（HTTP ${response.status}）`)
       const value = await response.json() as GiftEffectAnimationConfig
@@ -521,6 +552,54 @@ function startNext(request: PlaybackRequest, slot: PlaybackSlot): void {
     .finally(() => finishSlot(slot, token))
 }
 
+async function handlePreview(request: GiftEffectPreviewRequest): Promise<void> {
+  const report = (status: GiftEffectPreviewResult['status'], message: string) =>
+    emitTo('settings', GIFT_EFFECT_PREVIEW_RESULT, { id: request.id, status, message } satisfies GiftEffectPreviewResult)
+      .catch(error => logger.warn('发送特效测试结果失败:', error))
+
+  if (previewBusy) {
+    await report('error', '已有特效测试正在进行，请稍后重试')
+    return
+  }
+  previewBusy = true
+  const generation = configLoadToken
+  let slot: PlaybackSlot | undefined
+  let token = 0
+  try {
+    await report('loading', '正在加载并播放官方礼物特效，请查看主窗口…')
+    const loaded = await getGiftEffectConfig(request.roomId)
+    if (disposed || generation !== configLoadToken) throw new Error('播放器状态已变化，请重新测试')
+    const entries = [...getGiftEffectMap(loaded).entries()]
+    if (!entries.length) throw new Error('该房间没有可用的官方礼物特效资源')
+    const [giftId, resource] = entries[Math.floor(Math.random() * entries.length)]
+    slot = slots.find(candidate => !candidate.busy)
+    if (!slot) throw new Error('特效播放通道已满，请稍后重试')
+    token = slot.token + 1
+    // 手动预览复用正式播放器，跳过连接、价格和开关过滤，不写入直播数据。
+    await playRequest({
+      resource,
+      trigger: {
+        id: request.id,
+        gift_id: giftId,
+        effect_id: resource.id,
+        gift_name: '测试礼物',
+        num: 1,
+        total_value: 0,
+        is_paid: true,
+        timestamp: Date.now()
+      }
+    }, slot)
+    if (disposed || slot.token !== token) throw new Error('特效测试播放已中断，请重新测试')
+    await report('success', `播放完成（礼物 ID：${giftId}，特效 ID：${resource.id}）`)
+  } catch (error) {
+    logger.warn('礼物特效测试失败:', error)
+    await report('error', error instanceof Error ? error.message : String(error))
+  } finally {
+    if (slot) finishSlot(slot, token)
+    previewBusy = false
+  }
+}
+
 function pump(): void {
   if (!settingsStore.giftEffectEnabled) return
   clampQueue()
@@ -704,10 +783,23 @@ watch(
 )
 
 onMounted(() => {
+  resizeObserver = new ResizeObserver(() => {
+    for (const slot of slots) resizeCanvas(slot)
+  })
+  if (layerRef.value) resizeObserver.observe(layerRef.value)
   consumeStoreTriggers()
+  void listen<GiftEffectPreviewRequest>(GIFT_EFFECT_PREVIEW_REQUEST, ({ payload }) => {
+    void handlePreview(payload)
+  }).then(unlisten => {
+    if (disposed) unlisten()
+    else previewUnlisten = unlisten
+  }).catch(error => logger.warn('注册礼物特效测试监听失败:', error))
 })
 
 onUnmounted(() => {
+  disposed = true
+  resizeObserver?.disconnect()
+  previewUnlisten?.()
   configLoadToken += 1
   clearConfigRefreshTimer()
   clearQueue()
@@ -718,7 +810,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="gift-effect-layer" aria-hidden="true">
+  <div ref="layerRef" class="gift-effect-layer" aria-hidden="true">
     <div v-for="(_, index) in slots" :key="index" class="gift-effect-slot">
       <!-- video 仅作为 WebGL 的纹理源，不直接显示打包后的双区域画面。 -->
       <video
@@ -766,9 +858,8 @@ onUnmounted(() => {
 
 .gift-effect-canvas {
   display: block;
-  width: auto;
-  height: auto;
-  max-width: 100%;
-  max-height: 100%;
+  flex-shrink: 0;
+  width: 0;
+  height: 0;
 }
 </style>
