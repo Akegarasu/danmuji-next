@@ -342,7 +342,7 @@ impl ArchiveManager {
             // 从 gifts 表计算收入
             let gift_revenue: i64 = db
                 .query_row(
-                    "SELECT COALESCE(SUM(COALESCE(revenue_value, blind_gift_total_value, total_value)), 0) FROM gifts WHERE session_id = ?1 AND is_paid = 1",
+                    "SELECT COALESCE(SUM(total_value), 0) FROM gifts WHERE session_id = ?1 AND is_paid = 1 AND guard_level IS NULL",
                     params![session_id],
                     |row| row.get(0),
                 )
@@ -361,8 +361,7 @@ impl ArchiveManager {
                     |row| row.get(0),
                 )
                 .unwrap_or(0);
-            // gift_revenue 已包含 guard_revenue，total = gift + sc
-            let total_revenue = gift_revenue + sc_revenue;
+            let total_revenue = gift_revenue + guard_revenue + sc_revenue;
 
             db.execute(
                 "UPDATE sessions SET end_time = ?1, total_revenue = ?2, gift_revenue = ?3, sc_revenue = ?4, guard_revenue = ?5, danmaku_count = ?6, gift_count = ?7, sc_count = ?8 WHERE id = ?9",
@@ -1643,6 +1642,41 @@ mod tests {
             )
             .expect("saved combo snapshot");
         assert_eq!((count, num, revenue), (1, 2, 2));
+    }
+
+    #[tokio::test]
+    async fn recovers_revenue_using_revealed_gift_value() {
+        let mut conn = Connection::open_in_memory().expect("in-memory database");
+        archive_migrations::initialize(&mut conn).expect("archive schema");
+        conn.execute_batch(
+            r#"
+INSERT INTO sessions (id, room_id, start_time) VALUES (1, 1, 1700000000);
+INSERT INTO gifts (
+    session_id, original_id, gift_id, gift_name, num, total_value,
+    revenue_value, blind_gift_total_value, is_paid, user_uid, user_name,
+    timestamp, guard_level
+) VALUES
+    (1, 'blind', 1, '浪漫城堡', 1, 22000, 150, 150, 1, 42, 'tester', 1700000001, NULL),
+    (1, 'regular', 2, '普通礼物', 1, 10, 10, NULL, 1, 42, 'tester', 1700000002, NULL),
+    (1, 'free', 3, '免费礼物', 1, 100, 0, NULL, 0, 42, 'tester', 1700000003, NULL),
+    (1, 'guard', 4, '舰长', 1, 1380, 1380, NULL, 1, 42, 'tester', 1700000004, 3);
+INSERT INTO super_chats (
+    session_id, original_id, content, price, user_uid, user_name, duration, start_time
+) VALUES (1, 'sc', '支持', 300, 42, 'tester', 60, 1700000005);
+"#,
+        )
+        .expect("seed unfinished session");
+        let archive = ArchiveManager {
+            db: Mutex::new(conn),
+            active_session_id: Mutex::new(None),
+        };
+
+        assert_eq!(archive.recover_orphaned_sessions().await.unwrap(), 1);
+        let session = archive.get_session_detail(1).await.unwrap();
+        assert_eq!(session.gift_revenue, 22_010);
+        assert_eq!(session.guard_revenue, 1_380);
+        assert_eq!(session.sc_revenue, 300);
+        assert_eq!(session.total_revenue, 23_690);
     }
 
     #[tokio::test]

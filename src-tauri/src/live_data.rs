@@ -285,7 +285,9 @@ impl LiveData {
         } else {
             0
         };
-        let revenue_value = if is_paid { gift.total_coin / 100 } else { 0 };
+        // 收入按收到的礼物价值统计，盲盒购买花费单独保留。
+        let revenue_value = display_value;
+        let blind_cost = if is_paid { gift.total_coin / 100 } else { 0 };
         // 新协议显式返回 effect_id=0 时网页端不会播放；字段缺失的旧协议
         // 仍发送触发事件，由前端按礼物 ID 兼容匹配。
         if is_paid && gift.effect_id != Some(0) {
@@ -310,7 +312,7 @@ impl LiveData {
             .map(|blind_gift| ProcessedBlindGift {
                 gift_id: blind_gift.original_gift_id,
                 gift_name: blind_gift.original_gift_name.clone(),
-                total_value: revenue_value,
+                total_value: blind_cost,
             });
 
         let sender_uid = gift.sender_uid;
@@ -333,9 +335,12 @@ impl LiveData {
             existing.revenue_value = existing.revenue_value.saturating_add(revenue_value);
             existing.timestamp = gift.timestamp;
             existing.combo = processed_combo;
-            existing.blind_gift = processed_blind_gift;
-            if let Some(blind_gift) = existing.blind_gift.as_mut() {
-                blind_gift.total_value = existing.revenue_value;
+            if let Some(mut blind_gift) = processed_blind_gift {
+                if let Some(previous) = existing.blind_gift.as_ref() {
+                    blind_gift.total_value =
+                        blind_gift.total_value.saturating_add(previous.total_value);
+                }
+                existing.blind_gift = Some(blind_gift);
             }
 
             (existing.clone(), UpsertAction::Update)
@@ -889,31 +894,84 @@ mod tests {
         assert_eq!(gifts[0].gift_name, "棉花糖");
         assert_eq!(gifts[0].num, 7);
         assert_eq!(gifts[0].total_value, 630);
-        assert_eq!(gifts[0].revenue_value, 1_050);
+        assert_eq!(gifts[0].revenue_value, 630);
         assert_eq!(gifts[0].blind_gift.as_ref().unwrap().total_value, 1_050);
 
         assert_eq!(gifts[1].gift_name, "绮彩权杖");
         assert_eq!(gifts[1].num, 1);
         assert_eq!(gifts[1].total_value, 400);
-        assert_eq!(gifts[1].revenue_value, 150);
+        assert_eq!(gifts[1].revenue_value, 400);
 
         assert_eq!(gifts[2].gift_name, "爱心抱枕");
         assert_eq!(gifts[2].num, 2);
         assert_eq!(gifts[2].total_value, 320);
-        assert_eq!(gifts[2].revenue_value, 300);
+        assert_eq!(gifts[2].revenue_value, 320);
+        assert_eq!(gifts[2].blind_gift.as_ref().unwrap().total_value, 300);
 
         assert_eq!(
             gifts[0].combo.as_ref().unwrap().super_batch_gift_num,
             Some(10)
         );
-        assert_eq!(data.stats.gift_revenue, 1_500);
-        assert_eq!(data.stats.total_revenue, 1_500);
+        assert_eq!(data.stats.gift_revenue, 1_350);
+        assert_eq!(data.stats.total_revenue, 1_350);
+        assert_eq!(data.user_contributions[&42].total_value, 1_350);
 
         // 每个真实 SEND_GIFT 包都独立触发一次特效，不能随 combo 列表合并。
         assert_eq!(data.pending_gift_effects.len(), 10);
         assert_eq!(data.pending_gift_effects[0].effect_id, Some(5300));
         assert_eq!(data.pending_gift_effects[0].gift_id, 32_000);
         assert_eq!(data.pending_gift_effects[0].total_value, 90);
+    }
+
+    #[test]
+    fn gift_revenue_counts_revealed_value_once_per_paid_transaction() {
+        let mut data = LiveData::default();
+        for (gift_id, name, unit_coin, num) in [
+            (32_000, "棉花糖", 9_000, 5),
+            (32_001, "爱心抱枕", 16_000, 4),
+            (32_002, "浪漫城堡", 2_200_000, 1),
+        ] {
+            let mut gift = blind_combo_gift(
+                gift_id,
+                name,
+                unit_coin,
+                15_000 * u64::from(num),
+                unit_coin * u64::from(num),
+                1,
+            );
+            gift.num = num;
+            data.process_gift(gift.clone());
+            data.process_gift(gift);
+        }
+
+        assert_eq!(data.gift_list.len(), 3);
+        assert_eq!(data.stats.gift_revenue, 23_090);
+        assert_eq!(data.stats.total_revenue, 23_090);
+        assert_eq!(
+            data.gift_list[0].blind_gift.as_ref().unwrap().total_value,
+            750
+        );
+        assert_eq!(
+            data.gift_list[1].blind_gift.as_ref().unwrap().total_value,
+            600
+        );
+        assert_eq!(
+            data.gift_list[2].blind_gift.as_ref().unwrap().total_value,
+            150
+        );
+
+        let mut regular = blind_combo_gift(32_003, "普通礼物", 1_000, 1_000, 1_000, 2);
+        regular.blind_gift = None;
+        regular.batch_combo_id = None;
+        data.process_gift(regular.clone());
+        regular.transaction_id = Some("free-gift".to_owned());
+        regular.coin_type = CoinType::Silver;
+        data.process_gift(regular);
+
+        assert_eq!(data.stats.gift_revenue, 23_100);
+        assert_eq!(data.stats.total_revenue, 23_100);
+        assert_eq!(data.user_contributions[&42].total_value, 23_100);
+        assert_eq!(data.gift_list.back().unwrap().revenue_value, 0);
     }
 
     #[test]

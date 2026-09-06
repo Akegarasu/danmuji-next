@@ -1355,7 +1355,7 @@ mod tests {
     }
 
     #[test]
-    fn formats_blind_gift_with_actual_revenue() {
+    fn formats_blind_gift_with_revealed_revenue() {
         let gift = ProcessedGift {
             id: "1".to_owned(),
             merge_key: "1".to_owned(),
@@ -1364,7 +1364,7 @@ mod tests {
             gift_icon: String::new(),
             num: 2,
             total_value: 100,
-            revenue_value: 50,
+            revenue_value: 100,
             is_paid: true,
             combo: None,
             blind_gift: Some(ProcessedBlindGift {
@@ -1378,7 +1378,7 @@ mod tests {
         };
         assert_eq!(
             format_gift(&gift).as_deref(),
-            Some("测试用户赠送了欢乐盲盒，开出了小电视，数量2，价值5元。")
+            Some("测试用户赠送了欢乐盲盒，开出了小电视，数量2，价值10元。")
         );
     }
 

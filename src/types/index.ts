@@ -308,7 +308,7 @@ export interface ProcessedGift {
   num: number
   /** 展示金额（电池）；盲盒为爆出礼物金额 */
   total_value: number
-  /** 实际营收（电池）；盲盒为盲盒消费金额 */
+  /** 收入统计金额（电池）；盲盒为爆出礼物金额 */
   revenue_value: number
   is_paid: boolean
   combo?: ProcessedGiftCombo

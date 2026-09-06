@@ -120,7 +120,7 @@ pub struct ProcessedGift {
     pub num: u32,
     /// 展示价值（电池）；盲盒使用爆出礼物价值
     pub total_value: u64,
-    /// 实际营收（电池）；盲盒使用盲盒消费金额
+    /// 收入统计金额（电池）；盲盒使用爆出礼物价值
     #[serde(default)]
     pub revenue_value: u64,
     pub is_paid: bool,
