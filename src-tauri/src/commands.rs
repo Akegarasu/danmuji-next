@@ -556,6 +556,34 @@ pub async fn process_test_event(
 
 // ==================== 事件订阅操作 ====================
 
+/// 查询用户手动保存原始事件的状态。
+#[tauri::command]
+pub async fn get_raw_dump_status() -> Result<crate::raw_event_dump::RawDumpStatus, String> {
+    tokio::task::spawn_blocking(crate::raw_event_dump::status).await.map_err(|e| e.to_string())
+}
+
+/// 开始保存原始事件；每次新建文件，避免覆盖已有诊断日志。
+#[tauri::command]
+pub async fn start_raw_dump() -> Result<crate::raw_event_dump::RawDumpStatus, String> {
+    tokio::task::spawn_blocking(crate::raw_event_dump::start).await.map_err(|e| e.to_string())?
+}
+
+/// 停止并等待已接收消息全部写入文件。
+#[tauri::command]
+pub async fn stop_raw_dump() -> Result<crate::raw_event_dump::RawDumpStatus, String> {
+    tokio::task::spawn_blocking(crate::raw_event_dump::stop).await.map_err(|e| e.to_string())
+}
+
+/// 打开固定的 dump 保存目录。
+#[tauri::command]
+pub async fn open_raw_dump_directory() -> Result<(), String> {
+    tokio::task::spawn_blocking(|| {
+        let directory = crate::raw_event_dump::directory();
+        std::fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
+        open::that(directory).map_err(|e| format!("打开日志目录失败: {e}"))
+    }).await.map_err(|e| e.to_string())?
+}
+
 /// 订阅事件（窗口注册感兴趣的事件类型）
 #[tauri::command]
 pub async fn subscribe_events(

@@ -9,16 +9,16 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use tokio::sync::mpsc;
 
 use crate::archive::ArchiveEvent;
-use blivedm::api::ContributionRankUser;
-use blivedm::{
-    CoinType, Danmaku, DanmakuType, Gift, GuardLevel, GuardToast, InteractWord, OnlineRankCount,
-    OnlineRankUser, OnlineRankV2, OnlineRankV3, SuperChat,
-};
 use crate::kv_store::{VideoRequestStore, VotingStore};
 use crate::live_types::*;
 use crate::video_info::VideoInfo;
 use crate::video_request::VideoRequestManager;
 use crate::voting::VotingManager;
+use blivedm::api::ContributionRankUser;
+use blivedm::{
+    CoinType, Danmaku, DanmakuType, Gift, GuardLevel, GuardToast, InteractWord, OnlineRankCount,
+    OnlineRankUser, OnlineRankV2, OnlineRankV3, SuperChat,
+};
 
 // ==================== 窗口订阅 ====================
 
@@ -38,7 +38,7 @@ pub struct LiveData {
     pub(crate) gift_list: VecDeque<ProcessedGift>,
     /// 礼物合并索引: merge_key -> list index
     gift_merge_index: HashMap<String, usize>,
-    /// 已处理的上游礼物交易 ID，用于断线重发和双协议重复包去重
+    /// 已处理的 (发送者、结果礼物、交易 ID)，用于重发和双协议去重
     seen_gift_transactions: HashSet<String>,
     /// 交易 ID 插入顺序，用于限制去重缓存大小
     seen_gift_transaction_order: VecDeque<String>,
@@ -257,8 +257,15 @@ impl LiveData {
 
     /// 处理礼物
     pub fn process_gift(&mut self, gift: Gift) {
-        if let Some(transaction_id) = gift.transaction_id.as_deref() {
-            if !self.remember_gift_transaction(transaction_id) {
+        // 一笔盲盒交易可以包含多种结果，不能仅按 tid 丢弃后续礼物。
+        let transaction_key = gift.transaction_id.as_deref().map(|transaction_id| {
+            format!(
+                "gift:tid:{}:{}:{}",
+                gift.sender_uid, gift.gift_id, transaction_id
+            )
+        });
+        if let Some(key) = transaction_key.as_deref() {
+            if !self.remember_gift_transaction(key) {
                 return;
             }
         }
@@ -270,8 +277,7 @@ impl LiveData {
                 gift.sender_uid, gift.gift_id, batch_combo_id
             );
             (format!("gift:{key}"), key)
-        } else if let Some(transaction_id) = gift.transaction_id.as_deref() {
-            let key = format!("gift:tid:{transaction_id}");
+        } else if let Some(key) = transaction_key {
             (key.clone(), key)
         } else {
             let sequence = self.take_next_gift_sequence();
@@ -647,17 +653,17 @@ impl LiveData {
         self.contributions_dirty = true;
     }
 
-    /// 记录礼物交易 ID。返回 `false` 表示该交易已经处理过。
-    fn remember_gift_transaction(&mut self, transaction_id: &str) -> bool {
+    /// 记录交易中的礼物结果。返回 `false` 表示该结果已经处理过。
+    fn remember_gift_transaction(&mut self, transaction_key: &str) -> bool {
         if !self
             .seen_gift_transactions
-            .insert(transaction_id.to_owned())
+            .insert(transaction_key.to_owned())
         {
             return false;
         }
 
         self.seen_gift_transaction_order
-            .push_back(transaction_id.to_owned());
+            .push_back(transaction_key.to_owned());
         while self.seen_gift_transaction_order.len() > MAX_SEEN_GIFT_TRANSACTIONS {
             if let Some(expired) = self.seen_gift_transaction_order.pop_front() {
                 self.seen_gift_transactions.remove(&expired);
@@ -800,6 +806,87 @@ fn convert_gift_combo(gift: &Gift) -> Option<ProcessedGiftCombo> {
 mod tests {
     use super::LiveData;
     use blivedm::{BatchComboSend, BlindGift, CoinType, Gift, GuardLevel, GuardToast};
+
+    fn ten_draw_gifts() -> Vec<Gift> {
+        let event = blivedm::parse_notification(
+            include_bytes!("../../crates/blivedm/tests/fixtures/ten_blind_gift_v2.json"),
+            None,
+        )
+        .unwrap();
+        let blivedm::Event::GiftBatch(gifts) = event else {
+            panic!("expected V2 gift batch");
+        };
+        gifts
+    }
+
+    #[test]
+    fn v2_ten_draw_keeps_all_results_in_updates_revenue_and_archive() {
+        let mut data = LiveData::default();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        data.archive_tx = Some(tx);
+        let gifts = ten_draw_gifts();
+        // 重发整个批次，每个结果只能计入一次。
+        for gift in gifts.iter().chain(gifts.iter()) {
+            data.process_gift(gift.clone());
+        }
+        assert_eq!(data.gift_list.len(), 3);
+        assert_eq!(data.gift_list.iter().map(|gift| gift.num).sum::<u32>(), 10);
+        assert_eq!(data.stats.gift_revenue, 1_110);
+        assert_eq!(data.stats.total_revenue, 1_110);
+        assert_eq!(data.user_contributions[&42].total_value, 1_110);
+        assert_eq!(data.pending_gift_upserts.len(), 3);
+        assert_eq!(data.pending_gift_effects.len(), 3);
+        let mut archived = Vec::new();
+        while let Ok(event) = rx.try_recv() {
+            if let crate::archive::ArchiveEvent::Gift(gift) = event {
+                archived.push(gift);
+            }
+        }
+        assert_eq!(
+            archived
+                .iter()
+                .map(|gift| (gift.gift_id, gift.num, gift.total_value))
+                .collect::<Vec<_>>(),
+            vec![(32128, 4, 640), (32125, 1, 20), (32126, 5, 450)]
+        );
+        assert_eq!(
+            archived
+                .iter()
+                .map(|gift| gift.blind_gift.as_ref().unwrap().total_value)
+                .sum::<u64>(),
+            1_500
+        );
+
+        // 后续真实交易继续累加同一轮 combo。
+        let mut next = gifts[0].clone();
+        next.transaction_id = Some("next-payment".to_owned());
+        next.num = 2;
+        next.total_coin = 30_000;
+        data.process_gift(next);
+        assert_eq!(data.gift_list.len(), 3);
+        assert_eq!(data.gift_list.back().unwrap().num, 6);
+        assert_eq!(data.stats.gift_revenue, 1_430);
+        assert!(
+            matches!(rx.try_recv(), Ok(crate::archive::ArchiveEvent::Gift(gift)) if gift.num == 6)
+        );
+    }
+
+    #[test]
+    fn shared_transaction_results_without_combo_have_distinct_ids() {
+        let mut data = LiveData::default();
+        let mut gifts = ten_draw_gifts();
+        for gift in &mut gifts {
+            gift.batch_combo_id = None;
+        }
+        for gift in gifts.iter().chain(gifts.iter()) {
+            data.process_gift(gift.clone());
+        }
+        assert_eq!(data.gift_list.len(), 3);
+        let ids: std::collections::HashSet<_> =
+            data.gift_list.iter().map(|gift| &gift.id).collect();
+        assert_eq!(ids.len(), 3);
+        assert_eq!(data.stats.gift_revenue, 1_110);
+    }
 
     fn blind_combo_gift(
         gift_id: u64,

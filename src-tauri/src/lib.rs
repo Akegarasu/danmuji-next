@@ -206,6 +206,10 @@ pub fn run() {
             commands::get_speech_status,
             // 手动测试
             commands::process_test_event,
+            commands::get_raw_dump_status,
+            commands::start_raw_dump,
+            commands::stop_raw_dump,
+            commands::open_raw_dump_directory,
             // 事件订阅
             commands::subscribe_events,
             commands::unsubscribe_events,
@@ -280,6 +284,7 @@ pub fn run() {
                         log::error!("Failed to recover sessions on exit: {}", e);
                     }
                 });
+                crate::raw_event_dump::stop();
                 speech.shutdown();
             }
         });

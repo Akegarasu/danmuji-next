@@ -30,6 +30,10 @@ let guards = get_all_guard_top_list(client, 12962, 777964, None).await?;
 
 Cargo 包名是 `blivedm-rs`，Rust 库名是 `blivedm`。
 
+单项礼物通知返回 `Event::Gift`；包含多种结果的 `SEND_GIFT_V2`（例如十连盲盒）
+返回 `Event::GiftBatch`，调用方需要处理其中每一项。`Gift::parse_v2` 返回完整的
+礼物结果列表。对重复包去重时需要保留同笔交易的不同礼物结果。
+
 ## 在当前仓库中使用
 
 ```toml

@@ -8,16 +8,23 @@ use serde_json::Value;
 use super::{BlindGift, CoinType, Gift, GuardLevel, Medal};
 
 impl Gift {
-    /// 从 `SEND_GIFT_V2.data.pb` 解析并归一化礼物。
+    /// 从 `SEND_GIFT_V2.data.pb` 解析并归一化全部礼物结果。
     ///
-    /// 与 Bilibili 当前网页端一致，只消费 `gift_item[0]`。
-    pub fn parse_v2(value: &Value) -> Option<Self> {
+    /// 十连盲盒可能包含多种结果，不能只消费 `gift_item[0]`。
+    pub fn parse_v2(value: &Value) -> Option<Vec<Self>> {
         let encoded = value.get("data")?.get("pb")?.as_str()?;
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(encoded)
             .ok()?;
-        let message = parse_send_gift_v2(&bytes).ok()?;
-        normalize_gift(message)
+        let mut message = parse_send_gift_v2(&bytes).ok()?;
+        let items = std::mem::take(&mut message.gift_items);
+        if items.is_empty() {
+            return None;
+        }
+        items
+            .into_iter()
+            .map(|item| normalize_gift(&message, item))
+            .collect()
     }
 }
 
@@ -77,21 +84,20 @@ struct GiftInfo {
     effect_id: Option<u64>,
 }
 
-fn normalize_gift(message: SendGiftV2) -> Option<Gift> {
-    let item = message.gift_items.into_iter().next()?;
-    let sender = message.sender_uinfo.unwrap_or_default();
-
-    let sender_uid = if sender.uid != 0 {
-        sender.uid
-    } else {
-        message.uid
-    };
-    let sender_name = if sender.name.is_empty() {
-        message.uname
-    } else {
-        sender.name
-    };
-    let sender_face = non_empty(sender.face).or_else(|| non_empty(message.face));
+fn normalize_gift(message: &SendGiftV2, item: GiftItem) -> Option<Gift> {
+    let sender = message.sender_uinfo.as_ref();
+    let sender_uid = sender
+        .map(|sender| sender.uid)
+        .filter(|uid| *uid != 0)
+        .unwrap_or(message.uid);
+    let sender_name = sender
+        .map(|sender| &sender.name)
+        .filter(|name| !name.is_empty())
+        .unwrap_or(&message.uname)
+        .clone();
+    let sender_face = sender
+        .and_then(|sender| non_empty(sender.face.clone()))
+        .or_else(|| non_empty(message.face.clone()));
 
     let coin_type = match item.coin_type.as_str() {
         "" | "gold" => CoinType::Gold,
@@ -117,7 +123,7 @@ fn normalize_gift(message: SendGiftV2) -> Option<Gift> {
         })
         .unwrap_or_default();
 
-    let mut blind_gift = message.blind_gift.filter(|blind_gift| {
+    let mut blind_gift = message.blind_gift.clone().filter(|blind_gift| {
         blind_gift.blind_gift_config_id != 0
             || blind_gift.original_gift_id != 0
             || !blind_gift.original_gift_name.is_empty()
@@ -130,9 +136,9 @@ fn normalize_gift(message: SendGiftV2) -> Option<Gift> {
         };
     }
 
-    let medal = message.medal_info.and_then(|medal| {
+    let medal = message.medal_info.as_ref().and_then(|medal| {
         (medal.level > 0).then_some(Medal {
-            name: medal.name,
+            name: medal.name.clone(),
             level: medal.level,
             color: 0,
             room_id: 0,
@@ -465,7 +471,27 @@ mod tests {
     }
 
     #[test]
-    fn parses_first_v2_gift_and_prefers_nested_sender() {
+    fn single_v2_result_still_dispatches_as_a_gift() {
+        let item = field_varint(1, 100);
+        let encoded = base64::engine::general_purpose::STANDARD.encode(field_bytes(10, &item));
+        let event = crate::parse_notification(
+            &serde_json::to_vec(&json!({ "cmd": "SEND_GIFT_V2", "data": { "pb": encoded } }))
+                .unwrap(),
+            None,
+        )
+        .unwrap();
+        assert!(matches!(event, crate::Event::Gift(gift) if gift.gift_id == 100 && gift.num == 1));
+    }
+
+    #[test]
+    fn rejects_empty_or_invalid_v2_payloads() {
+        let encoded = base64::engine::general_purpose::STANDARD.encode(field_varint(1, 42));
+        assert!(Gift::parse_v2(&json!({ "data": { "pb": encoded } })).is_none());
+        assert!(Gift::parse_v2(&json!({ "data": { "pb": "not base64!" } })).is_none());
+    }
+
+    #[test]
+    fn parses_all_v2_gifts_and_prefers_nested_sender() {
         let mut base = field_bytes(1, "嵌套用户".as_bytes());
         base.extend(field_bytes(2, b"https://example.invalid/avatar.webp"));
         let mut sender = field_varint(1, 42);
@@ -509,8 +535,12 @@ mod tests {
         message.extend(field_bytes(15, &sender));
 
         let encoded = base64::engine::general_purpose::STANDARD.encode(message);
-        let gift =
+        let gifts =
             Gift::parse_v2(&json!({ "data": { "pb": encoded } })).expect("valid SEND_GIFT_V2");
+        assert_eq!(gifts.len(), 2);
+        assert_eq!(gifts[1].gift_id, 999);
+        assert_eq!(gifts[1].sender_uid, 42);
+        let gift = &gifts[0];
         let blind = gift.blind_gift.as_ref().expect("blind gift metadata");
 
         assert_eq!(gift.gift_id, 100);

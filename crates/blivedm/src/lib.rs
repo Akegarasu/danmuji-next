@@ -19,6 +19,11 @@
 //!     match event {
 //!         Ok(Event::Danmaku(dm)) => println!("{}: {}", dm.sender.name, dm.content),
 //!         Ok(Event::Gift(gift)) => println!("礼物: {}", gift.gift_name),
+//!         Ok(Event::GiftBatch(gifts)) => {
+//!             for gift in gifts {
+//!                 println!("礼物: {} x{}", gift.gift_name, gift.num);
+//!             }
+//!         }
 //!         _ => {}
 //!     }
 //! }

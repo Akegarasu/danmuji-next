@@ -379,14 +379,11 @@ impl BliveService {
         let room_info_for_rank = room_info.clone();
 
         let task = tokio::spawn(async move {
-            let mut client_builder = BliveDmClient::builder()
+            let client_builder = BliveDmClient::builder()
                 .room_id(room_id)
                 .cookie(cookie_clone.clone())
-                .auto_reconnect(true);
-
-            if crate::is_dev_mode() {
-                client_builder = client_builder.raw_event_handler(crate::raw_event_dump::dump);
-            }
+                .auto_reconnect(true)
+                .raw_event_handler(crate::raw_event_dump::dump);
 
             let client = match client_builder.build().await {
                 Ok(c) => c,
@@ -571,6 +568,11 @@ impl BliveService {
                 self.spawn_video_fetches(to_fetch).await;
             }
             Event::Gift(gift) => data.process_gift(*gift),
+            Event::GiftBatch(gifts) => {
+                for gift in gifts {
+                    data.process_gift(gift);
+                }
+            }
             Event::SuperChat(sc) => {
                 let to_fetch = data.process_superchat(sc);
                 drop(data);

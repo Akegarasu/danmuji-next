@@ -38,6 +38,8 @@ pub enum Event {
     Danmaku(Danmaku),
     /// 礼物
     Gift(Box<Gift>),
+    /// 同一条 V2 通知中的多个礼物结果（例如十连盲盒）
+    GiftBatch(Vec<Gift>),
     /// 醒目留言
     SuperChat(SuperChat),
     /// 大航海原始购买通知；其中价格是标准标价
@@ -92,8 +94,12 @@ pub fn parse_notification(
             Ok(Event::Gift(Box::new(gift)))
         }
         "SEND_GIFT_V2" => {
-            let gift = parse_required(cmd_base, Gift::parse_v2(&value))?;
-            Ok(Event::Gift(Box::new(gift)))
+            let mut gifts = parse_required(cmd_base, Gift::parse_v2(&value))?;
+            if gifts.len() == 1 {
+                Ok(Event::Gift(Box::new(gifts.pop().expect("one gift"))))
+            } else {
+                Ok(Event::GiftBatch(gifts))
+            }
         }
         "SUPER_CHAT_MESSAGE" => {
             let superchat = parse_required(cmd_base, SuperChat::parse(&value))?;
@@ -171,6 +177,43 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+
+    #[test]
+    fn parses_every_result_in_a_ten_draw_notification_and_observes_raw_once() {
+        // 合成十连：三个结果共享支付流水，分别为 4、1、5 件。
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = calls.clone();
+        let handler = move |_: &Value| {
+            observed.fetch_add(1, Ordering::Relaxed);
+        };
+        let event = parse_notification(
+            include_bytes!("../../tests/fixtures/ten_blind_gift_v2.json"),
+            Some(&handler),
+        )
+        .unwrap();
+        let Event::GiftBatch(gifts) = event else {
+            panic!("expected all V2 gift results");
+        };
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            gifts
+                .iter()
+                .map(|gift| (gift.gift_id, gift.num))
+                .collect::<Vec<_>>(),
+            vec![(32128, 4), (32125, 1), (32126, 5)]
+        );
+        assert_eq!(
+            gifts.iter().map(Gift::revealed_total_coin).sum::<u64>(),
+            111_000
+        );
+        assert_eq!(
+            gifts.iter().map(|gift| gift.total_coin).sum::<u64>(),
+            150_000
+        );
+        assert!(gifts
+            .iter()
+            .all(|gift| gift.sender_uid == 42 && gift.blind_gift.is_some()));
+    }
     #[test]
     fn invokes_raw_event_handler_before_parsing() {
         let calls = Arc::new(AtomicUsize::new(0));

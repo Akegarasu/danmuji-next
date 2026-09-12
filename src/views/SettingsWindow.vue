@@ -5,6 +5,7 @@ import TitleBar from '@/components/common/TitleBar.vue'
 import LoginDialog from '@/components/common/LoginDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import UpdateToast from '@/components/common/UpdateToast.vue'
+import RawEventDumpPanel from '@/components/common/RawEventDumpPanel.vue'
 import { useSettingsStore } from '@/stores/settings'
 import { useDanmakuStore } from '@/stores/danmaku'
 import { applyCurrentSettings, initSettingsApplier } from '@/services/settings-applier'
@@ -1892,6 +1893,8 @@ const openProjectUrl = async () => {
         <!-- 手动测试 -->
         <div v-show="activeSection === 'test'" class="section">
           <h3 class="section-title">手动测试</h3>
+
+          <RawEventDumpPanel v-if="activeSection === 'test'" />
 
           <div class="setting-group">
             <label class="setting-label">礼物全屏特效</label>

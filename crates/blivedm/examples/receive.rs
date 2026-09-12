@@ -123,6 +123,11 @@ fn print_event(event: &Event) {
                 gift.sender_name, gift.action, gift.gift_name, gift.num, value_str
             );
         }
+        Event::GiftBatch(gifts) => {
+            for gift in gifts {
+                print_event(&Event::Gift(Box::new(gift.clone())));
+            }
+        }
         Event::SuperChat(sc) => {
             println!("💰 ========== SC ¥{} ==========", sc.price);
             println!("   {} 说:", sc.sender_name);
