@@ -230,7 +230,7 @@ export const DEFAULT_DISPLAY_SETTINGS: DisplaySettings = {
   giftUsernameColor: '#9b9b9b',
   giftPriceColor: '#f5c842',
   giftEffectEnabled: true,
-  giftEffectMinPrice: 0,
+  giftEffectMinPrice: 100,
   giftEffectMaxConcurrent: 3,
   giftEffectQueueLimit: 20,
   scMergeWithGift: false,
