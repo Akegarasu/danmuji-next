@@ -30,6 +30,9 @@ mod voting;
 mod window_state;
 mod window_topmost;
 
+#[cfg(test)]
+mod gift_pipeline_tests;
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
