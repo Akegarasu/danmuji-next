@@ -96,6 +96,12 @@ html, body, #app {
   }
 }
 
+// 失焦时隐藏滚动条滑块，保留占位和滚动能力，避免内容宽度变化。
+.window-unfocused ::-webkit-scrollbar-thumb,
+.window-unfocused ::-webkit-scrollbar-thumb:hover {
+  background: transparent;
+}
+
 // ==================== Utility Classes ====================
 .flex {
   display: flex;

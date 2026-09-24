@@ -19,7 +19,7 @@ const route = useRoute()
 const appWindow = getCurrentWindow()
 const windowLabel = appWindow.label
 const settingsStore = useSettingsStore()
-const isWindowFocused = ref(true)
+const isWindowFocused = ref(document.hasFocus())
 let unlistenFocus: UnlistenFn | null = null
 
 const tabType = computed(() => route.params.type as TabType)
@@ -76,7 +76,7 @@ onUnmounted(async () => {
 </script>
 
 <template>
-  <div class="tab-window">
+  <div class="tab-window" :class="{ 'window-unfocused': !isWindowFocused }">
     <div class="bars-wrapper" :class="{ hidden: !showBars }">
       <TitleBar
         :title="tabInfo.label"

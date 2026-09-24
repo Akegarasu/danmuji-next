@@ -137,6 +137,8 @@ export interface DisplaySettings {
   entryPanelShowInInteraction: boolean
   /** 在观众栏显示进房面板 */
   entryPanelShowInAudience: boolean
+  /** 显示入场通知面板顶部的分割线 */
+  entryPanelShowDivider: boolean
   entryFilterAll: boolean
   entryFilterCaptain: boolean
   entryFilterAdmiral: boolean
@@ -245,6 +247,7 @@ export const DEFAULT_DISPLAY_SETTINGS: DisplaySettings = {
   entryShowEnabled: true,
   entryPanelShowInInteraction: true,
   entryPanelShowInAudience: true,
+  entryPanelShowDivider: true,
   entryFilterAll: true,
   entryFilterCaptain: false,
   entryFilterAdmiral: false,

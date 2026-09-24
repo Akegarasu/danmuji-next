@@ -21,7 +21,7 @@ const settingsStore = useSettingsStore()
 const logger = createLogger('MainWindow')
 const activeTab = ref<TabType>('interaction')
 const isLocked = ref(false)
-const isWindowFocused = ref(true)
+const isWindowFocused = ref(document.hasFocus())
 let unlistenFocus: UnlistenFn | null = null
 
 // 更新相关
@@ -94,7 +94,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="main-window" :class="{ locked: isLocked }">
+  <div class="main-window" :class="{ locked: isLocked, 'window-unfocused': !isWindowFocused }">
     <div class="bars-wrapper" :class="{ hidden: !showBars }">
       <TitleBar
         title="AKI 弹幕姬"

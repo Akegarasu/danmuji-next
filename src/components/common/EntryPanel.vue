@@ -192,7 +192,7 @@ onUnmounted(() => {
     v-if="settingsStore.entryShowEnabled"
     class="entry-panel"
     :style="[{ height: panelHeight + 'px' }, entryStyle]"
-    :class="{ dragging: isDragging }"
+    :class="{ dragging: isDragging, 'hide-divider': !settingsStore.entryPanelShowDivider }"
   >
     <div class="resize-handle" @mousedown="startResize">
       <div class="handle-line" />
@@ -285,6 +285,11 @@ onUnmounted(() => {
   max-height: 400px;
   font-family: var(--entry-font-family, var(--font-family));
   font-weight: var(--entry-font-weight, 400);
+
+  // 保留边框占位及拖拽区域，切换分割线时内容位置不变。
+  &.hide-divider {
+    border-top-color: transparent;
+  }
 
   &.dragging {
     user-select: none;

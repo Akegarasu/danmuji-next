@@ -102,6 +102,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const entryShowEnabled = computed(() => settings.value.display.entryShowEnabled)
   const entryPanelShowInInteraction = computed(() => settings.value.display.entryPanelShowInInteraction)
   const entryPanelShowInAudience = computed(() => settings.value.display.entryPanelShowInAudience)
+  const entryPanelShowDivider = computed(() => settings.value.display.entryPanelShowDivider)
   const entryFilterAll = computed(() => settings.value.display.entryFilterAll)
   const entryFilterCaptain = computed(() => settings.value.display.entryFilterCaptain)
   const entryFilterAdmiral = computed(() => settings.value.display.entryFilterAdmiral)
@@ -418,6 +419,7 @@ export const useSettingsStore = defineStore('settings', () => {
     entryShowEnabled,
     entryPanelShowInInteraction,
     entryPanelShowInAudience,
+    entryPanelShowDivider,
     entryFilterAll,
     entryFilterCaptain,
     entryFilterAdmiral,

@@ -764,6 +764,11 @@ const entryPanelShowInAudience = computed({
   set: (v) => settingsStore.updateDisplaySettings({ entryPanelShowInAudience: v })
 })
 
+const entryPanelShowDivider = computed({
+  get: () => settings.value.display.entryPanelShowDivider,
+  set: (v) => settingsStore.updateDisplaySettings({ entryPanelShowDivider: v })
+})
+
 const entryShowMedal = computed({
   get: () => settings.value.display.entryShowMedal,
   set: (v) => settingsStore.updateDisplaySettings({ entryShowMedal: v })
@@ -1613,6 +1618,11 @@ const openProjectUrl = async () => {
             <div class="setting-group toggle">
               <label class="setting-label">在观众栏显示</label>
               <input v-model="entryPanelShowInAudience" type="checkbox" class="toggle-checkbox" />
+            </div>
+
+            <div class="setting-group toggle">
+              <label class="setting-label">显示分割线</label>
+              <input v-model="entryPanelShowDivider" type="checkbox" class="toggle-checkbox" />
             </div>
 
             <div class="setting-group toggle">
