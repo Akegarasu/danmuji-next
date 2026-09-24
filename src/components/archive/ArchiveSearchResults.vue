@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import InteractionContextMenu from '@/components/common/InteractionContextMenu.vue'
 import type { ArchiveSearchItem, PagedResult } from '@/types'
 import { formatPrice } from '@/types'
 
@@ -27,6 +28,19 @@ type ArchiveDateGroup = {
 }
 
 const shell = ref<HTMLElement | null>(null)
+const contextMenuRef = ref<InstanceType<typeof InteractionContextMenu>>()
+
+const handleContextMenu = (event: MouseEvent, item: ArchiveSearchItem) => {
+  if (item.event_type !== 'danmaku') return
+  contextMenuRef.value?.show(event, {
+    kind: 'danmaku',
+    data: {
+      user: { uid: item.user_uid, name: item.user_name },
+      content: item.content,
+    },
+  }, item.room_id)
+}
+
 const labels = { danmaku: '弹幕', gift: '礼物', superchat: 'SC' } as const
 const dayFormatter = new Intl.DateTimeFormat('zh-CN', {
   year: 'numeric',
@@ -114,6 +128,7 @@ const goPage = (page: number) => {
             :key="`${item.event_type}-${item.id}`"
             class="result-item"
             :class="item.event_type"
+            @contextmenu="handleContextMenu($event, item)"
           >
             <div class="type-mark">{{ labels[item.event_type] }}</div>
             <span class="event-time">{{ formatFullTime(item.timestamp) }}</span>
@@ -160,6 +175,7 @@ const goPage = (page: number) => {
       <span>第 {{ result.page }} / {{ totalPages }} 页 · 共 {{ result.total }} 条</span>
       <button :disabled="result.page >= totalPages" @click="goPage(result.page + 1)">下一页</button>
     </div>
+    <InteractionContextMenu ref="contextMenuRef" />
   </div>
 </template>
 

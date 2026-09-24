@@ -11,19 +11,13 @@ import DanmakuItem from '@/components/items/DanmakuItem.vue'
 import GiftItem from '@/components/items/GiftItem.vue'
 import SuperChatItem from '@/components/items/SuperChatItem.vue'
 import EntryPanel from '@/components/common/EntryPanel.vue'
-import ContextMenu from '@/components/common/ContextMenu.vue'
-import SilentDialog from '@/components/common/SilentDialog.vue'
-import type { MenuItem } from '@/components/common/ContextMenu.vue'
+import InteractionContextMenu from '@/components/common/InteractionContextMenu.vue'
 import type {
-  ProcessedDanmaku,
   ProcessedGift,
   ProcessedMedal,
-  ProcessedSuperChat,
   InteractionItem
 } from '@/types'
 import { shouldShowMedal } from '@/types'
-import { useToast } from '@/composables/useToast'
-import { useContextMenuActions } from '@/composables/useContextMenuActions'
 
 const danmakuStore = useDanmakuStore()
 const settingsStore = useSettingsStore()
@@ -35,11 +29,6 @@ const isMedalVisible = (medal: ProcessedMedal | undefined): boolean =>
     settingsStore.medalShowUnlit,
     settingsStore.medalShowOtherRoom
   )
-
-// ==================== Composables ====================
-
-const { showToast, toastMessage, toastType, showToastMessage } = useToast()
-const { openUserPage, copyUsername, copyContent, toggleSpecialFollow } = useContextMenuActions(showToastMessage)
 
 // ==================== 礼物过滤与过期 ====================
 
@@ -142,110 +131,7 @@ const scrollToBottom = () => {
   virtualListRef.value?.scrollToBottom()
 }
 
-// ==================== 右键菜单 ====================
-
-const contextMenuRef = ref<InstanceType<typeof ContextMenu>>()
-
-type CurrentItem =
-  | { kind: 'danmaku'; data: ProcessedDanmaku }
-  | { kind: 'gift'; data: ProcessedGift }
-  | { kind: 'superchat'; data: ProcessedSuperChat }
-
-const currentItem = ref<CurrentItem | null>(null)
-
-const isCurrentSpecialFollow = computed(() =>
-  currentItem.value ? settingsStore.isSpecialFollow(currentItem.value.data.user.uid) : false
-)
-
-// ==================== 禁言弹窗 ====================
-
-const showSilentDialog = ref(false)
-const silentDialogRef = ref<InstanceType<typeof SilentDialog>>()
-
-const canSilent = computed(() => {
-  if (!currentItem.value) return false
-  const cookie = settingsStore.settings.cookie
-  const roomIdNum = parseInt(settingsStore.settings.roomId, 10)
-  return !!cookie && !!roomIdNum && roomIdNum > 0
-})
-
-const openSilentDialog = () => {
-  if (!currentItem.value) return
-  silentDialogRef.value?.resetAndShow()
-  showSilentDialog.value = true
-}
-
-const onSilentToast = (msg: string, type: 'success' | 'error' | 'info') => {
-  showToastMessage(msg, type)
-}
-
-// ==================== 动态菜单项 ====================
-
-const dynamicMenuItems = computed<MenuItem[]>(() => {
-  if (!currentItem.value) return []
-
-  const currentUser = currentItem.value.data.user
-  const items: MenuItem[] = [
-    {
-      label: currentUser.name,
-      avatar: currentUser.face ?? null,
-      children: [
-        {
-          label: '打开用户主页',
-          icon: '🔗',
-          action: () => currentItem.value && openUserPage(currentItem.value.data.user.uid)
-        },
-        {
-          label: '复制用户名',
-          icon: '📋',
-          action: () => currentItem.value && copyUsername(currentItem.value.data.user.name)
-        },
-        {
-          label: '复制UID',
-          icon: '🪪',
-          action: () => currentItem.value && copyContent(String(currentItem.value.data.user.uid), 'UID')
-        },
-        {
-          label: isCurrentSpecialFollow.value ? '取消特别关注' : '特别关注',
-          icon: '⭐',
-          action: () => currentItem.value && toggleSpecialFollow(currentItem.value.data.user.uid, currentItem.value.data.user.name)
-        },
-        {
-          label: '禁言',
-          icon: '🔇',
-          disabled: !canSilent.value,
-          action: () => openSilentDialog()
-        }
-      ]
-    }
-  ]
-
-  // 弹幕和 SC 可以复制内容
-  if (currentItem.value.kind === 'danmaku') {
-    items.push({
-      label: '复制弹幕',
-      icon: '📝',
-      action: () => currentItem.value?.kind === 'danmaku' && copyContent(currentItem.value.data.content, '弹幕内容')
-    })
-  } else if (currentItem.value.kind === 'superchat') {
-    items.push({
-      label: '复制SC内容',
-      icon: '📝',
-      action: () => currentItem.value?.kind === 'superchat' && copyContent(currentItem.value.data.content, 'SC内容')
-    })
-  }
-
-  return items
-})
-
-// ==================== 右键处理 ====================
-
-const handleContextMenu = (e: MouseEvent, item: CurrentItem) => {
-  e.preventDefault()
-  e.stopPropagation()
-  currentItem.value = item
-  contextMenuRef.value?.show(e.clientX, e.clientY)
-}
+const contextMenuRef = ref<InstanceType<typeof InteractionContextMenu>>()
 
 // ==================== 随机提示 ====================
 
@@ -306,7 +192,7 @@ onUnmounted(() => {
             :font-weight="settingsStore.contentFontWeight"
             :font-color="settingsStore.danmakuFontColor"
             :username-color="settingsStore.danmakuUsernameColor"
-            @contextmenu="handleContextMenu($event, { kind: 'danmaku', data: item.data })"
+            @contextmenu="contextMenuRef?.show($event, { kind: 'danmaku', data: item.data })"
           />
           <GiftItem
             v-else-if="item.kind === 'gift'"
@@ -320,7 +206,7 @@ onUnmounted(() => {
             :font-color="settingsStore.giftFontColor"
             :username-color="settingsStore.giftUsernameColor"
             :price-color="settingsStore.giftPriceColor"
-            @contextmenu="handleContextMenu($event, { kind: 'gift', data: item.data })"
+            @contextmenu="contextMenuRef?.show($event, { kind: 'gift', data: item.data })"
           />
           <SuperChatItem
             v-else
@@ -328,7 +214,7 @@ onUnmounted(() => {
             :font-family="settingsStore.contentFontFamily"
             :font-weight="settingsStore.contentFontWeight"
             :font-color="settingsStore.superChatFontColor"
-            @contextmenu="handleContextMenu($event, { kind: 'superchat', data: item.data })"
+            @contextmenu="contextMenuRef?.show($event, { kind: 'superchat', data: item.data })"
           />
         </template>
 
@@ -352,28 +238,8 @@ onUnmounted(() => {
     <!-- 入场通知面板 -->
     <EntryPanel v-if="settingsStore.entryPanelShowInInteraction" />
 
-    <ContextMenu ref="contextMenuRef" :items="dynamicMenuItems" />
+    <InteractionContextMenu ref="contextMenuRef" />
 
-    <!-- Toast 提示 -->
-    <Teleport to="body">
-      <Transition name="toast">
-        <div v-if="showToast" class="toast" :class="toastType">
-          <span class="toast-icon">
-            {{ toastType === 'success' ? '✓' : toastType === 'error' ? '✗' : 'i' }}
-          </span>
-          <span class="toast-text">{{ toastMessage }}</span>
-        </div>
-      </Transition>
-    </Teleport>
-
-    <!-- 禁言弹窗 -->
-    <SilentDialog
-      ref="silentDialogRef"
-      v-model:visible="showSilentDialog"
-      :user-name="currentItem?.data.user.name ?? ''"
-      :user-uid="currentItem?.data.user.uid ?? 0"
-      @toast="onSilentToast"
-    />
   </div>
 </template>
 
@@ -460,64 +326,4 @@ onUnmounted(() => {
   opacity: 0;
 }
 
-// ==================== Toast 提示 ====================
-
-.toast {
-  position: fixed;
-  top: 48px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 10001;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 20px;
-  border-radius: var(--border-radius);
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-  pointer-events: none;
-
-  &.success {
-    background: rgba(34, 197, 94, 0.95);
-    color: white;
-  }
-
-  &.error {
-    background: rgba(239, 68, 68, 0.95);
-    color: white;
-  }
-
-  &.info {
-    background: rgba(92, 158, 255, 0.95);
-    color: white;
-  }
-}
-
-.toast-icon {
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.toast-text {
-  white-space: nowrap;
-}
-
-.toast-enter-active {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.toast-leave-active {
-  transition: all 0.2s ease-in;
-}
-
-.toast-enter-from {
-  opacity: 0;
-  transform: translateX(-50%) translateY(-12px);
-}
-
-.toast-leave-to {
-  opacity: 0;
-  transform: translateX(-50%) translateY(-8px);
-}
 </style>

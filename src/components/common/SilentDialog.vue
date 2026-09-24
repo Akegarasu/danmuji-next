@@ -12,6 +12,7 @@ const props = defineProps<{
   visible: boolean
   userName: string
   userUid: number
+  roomId?: number
 }>()
 
 const emit = defineEmits<{
@@ -20,6 +21,8 @@ const emit = defineEmits<{
 }>()
 
 const settingsStore = useSettingsStore()
+// 归档操作使用记录所属房间；实时互动默认使用当前设置的房间。
+const targetRoomId = computed(() => props.roomId ?? parseInt(settingsStore.settings.roomId, 10))
 
 const silentDuration = ref<SilentDuration>('scene')
 const silentReason = ref('')
@@ -36,7 +39,7 @@ const silentDurationOptions: { value: SilentDuration; label: string }[] = [
 
 const canSilent = computed(() => {
   const cookie = settingsStore.settings.cookie
-  const roomIdNum = parseInt(settingsStore.settings.roomId, 10)
+  const roomIdNum = targetRoomId.value
   return !!cookie && !!roomIdNum && roomIdNum > 0
 })
 
@@ -47,7 +50,7 @@ const close = () => {
 
 const confirm = async () => {
   const cookie = settingsStore.settings.cookie
-  const roomIdNum = parseInt(settingsStore.settings.roomId, 10)
+  const roomIdNum = targetRoomId.value
 
   if (!cookie || !roomIdNum || roomIdNum <= 0) {
     emit('toast', '缺少 Cookie 或房间号，无法禁言', 'error')
