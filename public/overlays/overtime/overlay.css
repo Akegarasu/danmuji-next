@@ -1,0 +1,80 @@
+/* 依据 .tests/new 对应的“透明-加班器”皮肤，裁切原画布主体及顶部 50px 留白。 */
+@font-face {
+  font-family: TimerHeavy;
+  src: url('./timer-heavy.otf') format('opentype');
+  font-display: swap;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; background: transparent; overflow: hidden; }
+body { font-family: TimerHeavy, "Microsoft YaHei", sans-serif; }
+.timer-room { width: 600px; margin: 0 auto; transform-origin: top left; }
+.timer-card { position: relative; width: 600px; height: 175px; }
+#clock {
+  height: 157px;
+  padding: 5px 20px;
+  color: #fff;
+  font-size: 96px;
+  line-height: 1.5;
+  text-align: center;
+  letter-spacing: 5px;
+  text-shadow: 0 0 10px #000;
+  white-space: nowrap;
+}
+#clock.long { font-size: 65px; letter-spacing: 2px; }
+#notice {
+  position: absolute;
+  top: 135px;
+  left: 75.5px;
+  width: 449px;
+  height: 37px;
+  padding: 5px 30px;
+  overflow: hidden;
+  color: #fff;
+  font-size: 18px;
+  line-height: 27px;
+  letter-spacing: 5px;
+  text-align: center;
+  text-shadow: 0 0 10px #000;
+}
+#notice-text { display: inline-block; white-space: nowrap; }
+#notice-text.scrolling { animation: notice-scroll 10s linear infinite; }
+#connection {
+  position: absolute;
+  top: 119px;
+  left: 0;
+  width: 100%;
+  text-align: center;
+  color: #e8e8e8;
+  font: 12px "Microsoft YaHei", sans-serif;
+  text-shadow: 0 1px 3px #000;
+}
+#connection:empty { display: none; }
+#rules {
+  width: 500px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 10px;
+  align-items: start;
+}
+.rule {
+  padding: 0 5px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 25px;
+  line-height: 1.2;
+  letter-spacing: 5px;
+  text-shadow: 0 0 10px #000;
+  overflow-wrap: anywhere;
+}
+.rule-name, .rule-action { padding: 10px 0; max-width: 100%; }
+.rule-name { text-align: center; }
+.rule-action { min-width: 80px; text-align: left; letter-spacing: 2px; }
+.rule small { flex-basis: 100%; text-align: center; font-size: 12px; line-height: 1.5; letter-spacing: 1px; opacity: .9; }
+@keyframes notice-scroll {
+  from { transform: translateX(170%); }
+  to { transform: translateX(-200%); }
+}

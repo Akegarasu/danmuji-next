@@ -25,6 +25,7 @@ dist-ssr
 
 pkg/mod/*
 test/
+.tests
 
 .claude/*
 .codex-target
@@ -41,3 +42,5 @@ scripts/cos_upload.py
 trace/
 
 UPDATE.md
+# 参考站静态源码，仅供本地研究
+.reference/

@@ -1242,3 +1242,39 @@ Remove-Item -Path "{script_path_str}" -Force -ErrorAction SilentlyContinue
 
     Ok(())
 }
+
+
+// ==================== 独立扩展宿主与 OBS 服务 ====================
+#[tauri::command]
+pub fn get_extension_snapshot(
+    host: State<'_, Arc<crate::extensions::ExtensionHost>>,
+    extension_id: String,
+) -> Result<Value, String> {
+    host.snapshot(&extension_id)
+}
+
+#[tauri::command]
+pub fn extension_request(
+    host: State<'_, Arc<crate::extensions::ExtensionHost>>,
+    extension_id: String,
+    request: Value,
+) -> Result<Value, String> {
+    host.request(&extension_id, request)
+}
+
+#[tauri::command]
+pub async fn get_overlay_server(
+    server: State<'_, Arc<crate::extensions::server::OverlayServer>>,
+    host: State<'_, Arc<crate::extensions::ExtensionHost>>,
+) -> Result<crate::extensions::server::ServerInfo, String> {
+    Ok(server.info(&host).await)
+}
+
+#[tauri::command]
+pub async fn start_overlay_server(
+    server: State<'_, Arc<crate::extensions::server::OverlayServer>>,
+    host: State<'_, Arc<crate::extensions::ExtensionHost>>,
+    port: u16,
+) -> Result<crate::extensions::server::ServerInfo, String> {
+    server.start(host.inner().clone(), Some(port)).await
+}

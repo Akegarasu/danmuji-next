@@ -59,6 +59,7 @@ pub struct BliveService {
     streamer_uid: AtomicU64,
     live_data: Arc<Mutex<LiveData>>,
     speech: Arc<SpeechService>,
+    extensions: Arc<crate::extensions::ExtensionHost>,
     /// 窗口订阅: window_label -> subscription
     subscriptions: RwLock<HashMap<String, WindowSubscription>>,
 }
@@ -68,12 +69,14 @@ impl BliveService {
         vr_store: VideoRequestStore,
         voting_store: VotingStore,
         speech: Arc<SpeechService>,
+        extensions: Arc<crate::extensions::ExtensionHost>,
     ) -> Self {
         Self {
             state: RwLock::new(ServiceState::default()),
             streamer_uid: AtomicU64::new(0),
             live_data: Arc::new(Mutex::new(LiveData::new(vr_store, voting_store))),
             speech,
+            extensions,
             subscriptions: RwLock::new(HashMap::new()),
         }
     }
@@ -567,10 +570,21 @@ impl BliveService {
                 drop(data);
                 self.spawn_video_fetches(to_fetch).await;
             }
-            Event::Gift(gift) => data.process_gift(*gift),
+            Event::Gift(gift) => {
+                let received = data.process_gift(*gift);
+                drop(data);
+                if let Some(gift) = received {
+                    self.extensions.dispatch_gift(&gift);
+                }
+            }
             Event::GiftBatch(gifts) => {
-                for gift in gifts {
-                    data.process_gift(gift);
+                let received: Vec<_> = gifts
+                    .into_iter()
+                    .filter_map(|gift| data.process_gift(gift))
+                    .collect();
+                drop(data);
+                for gift in received {
+                    self.extensions.dispatch_gift(&gift);
                 }
             }
             Event::SuperChat(sc) => {
@@ -581,7 +595,13 @@ impl BliveService {
             // GUARD_BUY 中是标准标价（例如舰长固定 198 元），不能用于实际营收。
             // 同一订单随后下发的 Toast 才包含连续包月/续费后的成交总价。
             Event::GuardBuy(_) => {}
-            Event::GuardToast(toast) => data.process_guard_toast(toast),
+            Event::GuardToast(toast) => {
+                let received = data.process_guard_toast(toast);
+                drop(data);
+                if let Some(gift) = received {
+                    self.extensions.dispatch_gift(&gift);
+                }
+            }
             Event::OnlineRankV2(rank) => data.process_online_rank(rank),
             Event::OnlineRankV3(rank) => data.process_online_rank_v3(rank),
             Event::OnlineRankCount(count) => data.process_online_count(count),

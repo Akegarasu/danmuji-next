@@ -18,6 +18,7 @@ mod blive_service;
 mod commands;
 mod config;
 mod crypto;
+mod extensions;
 mod kv_store;
 mod live_data;
 mod live_types;
@@ -96,10 +97,17 @@ pub fn run() {
     let speech_service = Arc::new(SpeechService::new(SpeechRuntimeConfig::load_from_config()));
     let video_request_store = VideoRequestStore::new(get_video_request_kv_path());
     let voting_store = VotingStore::new(get_voting_kv_path());
+    let extensions = Arc::new(extensions::ExtensionHost::new(
+        config::get_config_dir().join("extensions"),
+    ));
+    let overlay_server = Arc::new(extensions::server::OverlayServer::new(
+        config::get_config_dir().join("extensions/server.json"),
+    ));
     let blive_service = Arc::new(BliveService::new(
         video_request_store,
         voting_store,
         speech_service.clone(),
+        extensions.clone(),
     ));
 
     // 初始化窗口锁定状态管理器，并从 KV 存储加载保存的状态
@@ -114,8 +122,27 @@ pub fn run() {
         .manage(archive_manager)
         .manage(blive_service)
         .manage(speech_service)
+        .manage(extensions)
+        .manage(overlay_server)
         .manage(lock_manager)
         .setup(|app| {
+            let extensions = app.state::<Arc<extensions::ExtensionHost>>().inner().clone();
+            let overlay_server = app
+                .state::<Arc<extensions::server::OverlayServer>>()
+                .inner()
+                .clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(error) = overlay_server.start(extensions.clone(), None).await {
+                    log::error!("{error}");
+                }
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+                let mut ticks = 0u64;
+                loop {
+                    interval.tick().await;
+                    ticks += 1;
+                    extensions.tick(ticks % 5 == 0);
+                }
+            });
             // 恢复上次异常退出未关闭的存档会话
             let archive_for_recovery = app.state::<Arc<ArchiveManager>>().inner().clone();
             tauri::async_runtime::spawn(async move {
@@ -253,6 +280,10 @@ pub fn run() {
             commands::create_archive_window,
             // 扩展
             commands::create_extension_window,
+            commands::get_extension_snapshot,
+            commands::extension_request,
+            commands::get_overlay_server,
+            commands::start_overlay_server,
             // 视频信息
             commands::fetch_video_info,
             commands::load_video_requests,
@@ -279,9 +310,16 @@ pub fn run() {
                 let service = app_handle.state::<Arc<BliveService>>().inner().clone();
                 let archive = app_handle.state::<Arc<ArchiveManager>>().inner().clone();
                 let speech = app_handle.state::<Arc<SpeechService>>().inner().clone();
+                let extensions = app_handle.state::<Arc<extensions::ExtensionHost>>().inner().clone();
+                let overlay_server = app_handle
+                    .state::<Arc<extensions::server::OverlayServer>>()
+                    .inner()
+                    .clone();
                 tauri::async_runtime::block_on(async move {
                     // 断开连接（会触发 archive end_session）
                     service.disconnect().await;
+                    extensions.tick(true);
+                    overlay_server.shutdown().await;
                     // 兜底：恢复可能残留的孤立会话
                     if let Err(e) = archive.recover_orphaned_sessions().await {
                         log::error!("Failed to recover sessions on exit: {}", e);

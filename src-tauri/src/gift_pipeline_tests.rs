@@ -437,3 +437,33 @@ async fn audit_evicted_combo_should_not_overwrite_archive_with_partial_count() {
         960
     );
 }
+
+
+#[test]
+fn overtime_consumes_deduplicated_deltas_instead_of_combo_snapshots() {
+    use crate::extensions::{Extension, overtime::Overtime};
+    let now = std::time::Instant::now();
+    let mut timer = Overtime::new(now);
+    timer.request(json!({"type":"configure","config":{
+        "enabled":true,"initial_seconds":0,"rules":[
+            {"id":"pillow","enabled":true,"gift_id":32128,"gift_name":"爱心抱枕","action":"add","value":10,"per_gift":true},
+            {"id":"ticket","enabled":true,"gift_id":32125,"gift_name":"电影票","action":"add","value":10,"per_gift":true},
+            {"id":"candy","enabled":true,"gift_id":32126,"gift_name":"棉花糖","action":"add","value":10,"per_gift":true}
+        ]
+    }}), now).unwrap();
+    timer.request(json!({"type":"reset"}), now).unwrap();
+    let mut data = LiveData::default();
+    for round in 0..3 {
+        for item in 0..3 {
+            for gift in parse(&v1_packet(round, item, true)) {
+                let duplicate = gift.clone();
+                let received = data.process_gift(gift).unwrap();
+                assert_eq!(received.num, ROUNDS[round][item]);
+                timer.on_gift(&received, now);
+                assert!(data.process_gift(duplicate).is_none());
+            }
+        }
+    }
+    assert_eq!(timer.snapshot(now)["remaining_ms"], 300_000.0);
+    assert_eq!(timer.snapshot(now)["notices"].as_array().unwrap().len(), 9);
+}

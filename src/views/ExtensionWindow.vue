@@ -2,38 +2,23 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import TitleBar from '@/components/common/TitleBar.vue'
-import VideoRequestTab from '@/components/extension/VideoRequestTab.vue'
-import VotingTab from '@/components/extension/VotingTab.vue'
+import { extensionRegistry } from '@/components/extension/registry'
 import { initWindowManager, cleanupWindowManager } from '@/services/window-manager'
 import { initBliveClient, cleanupBliveClient } from '@/services/blive-client'
 import type { UnlistenFn } from '@tauri-apps/api/event'
-
-type ExtensionTabType = 'video-request' | 'voting'
 
 const appWindow = getCurrentWindow()
 const windowLabel = appWindow.label
 const isWindowFocused = ref(true)
 let unlistenFocus: UnlistenFn | null = null
 
-const activeTab = ref<ExtensionTabType>('video-request')
-
-/** 扩展 Tab 配置 */
-const tabs: { type: ExtensionTabType; label: string }[] = [
-  { type: 'video-request', label: '点播' },
-  { type: 'voting', label: '投票' },
-]
-
-const currentComponent = computed(() => {
-  switch (activeTab.value) {
-    case 'video-request': return VideoRequestTab
-    case 'voting': return VotingTab
-    default: return VideoRequestTab
-  }
-})
+const activeTab = ref(extensionRegistry[0].id)
+const tabs = extensionRegistry
+const currentComponent = computed(() => tabs.find(tab => tab.id === activeTab.value)?.component)
 
 onMounted(async () => {
   await initWindowManager(windowLabel)
-  await initBliveClient(['video_request', 'voting'])
+  await initBliveClient([...new Set(tabs.flatMap(tab => tab.liveEvents))])
   unlistenFocus = await appWindow.onFocusChanged(({ payload: focused }) => {
     isWindowFocused.value = focused
   })
@@ -59,10 +44,10 @@ onUnmounted(async () => {
     <div class="ext-tab-bar">
       <button
         v-for="tab in tabs"
-        :key="tab.type"
+        :key="tab.id"
         class="ext-tab-item"
-        :class="{ active: activeTab === tab.type }"
-        @click="activeTab = tab.type"
+        :class="{ active: activeTab === tab.id }"
+        @click="activeTab = tab.id"
       >
         {{ tab.label }}
       </button>

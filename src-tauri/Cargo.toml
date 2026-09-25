@@ -30,6 +30,7 @@ open = "5"
 
 tokio = { version = "1", features = ["full"] }
 futures-util = "0.3"
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json", "query"] }
 reqwest = { version = "0.12", features = ["json", "cookies"] }
 base64 = "0.22"
 log = "0.4"
@@ -37,6 +38,7 @@ tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
 chrono = "0.4"
 regex = "1"
+rand = "0.8.5"
 rusqlite = { version = "0.31", features = ["bundled"] }
 
 [target.'cfg(windows)'.dependencies]

@@ -419,3 +419,12 @@ pub fn guard_level_to_u8(level: &GuardLevel) -> u8 {
         GuardLevel::None => 0,
     }
 }
+
+/// 去重后的单次收礼事件；数量尚未进行连击合并。
+#[derive(Debug, Clone)]
+pub struct ReceivedGift {
+    pub gift_id: u64,
+    pub gift_name: String,
+    pub sender_name: String,
+    pub num: u32,
+}

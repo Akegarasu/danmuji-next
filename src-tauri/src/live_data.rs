@@ -256,7 +256,7 @@ impl LiveData {
     }
 
     /// 处理礼物
-    pub fn process_gift(&mut self, gift: Gift) {
+    pub fn process_gift(&mut self, gift: Gift) -> Option<ReceivedGift> {
         // 一笔盲盒交易可以包含多种结果，不能仅按 tid 丢弃后续礼物。
         let transaction_key = gift.transaction_id.as_deref().map(|transaction_id| {
             format!(
@@ -266,10 +266,16 @@ impl LiveData {
         });
         if let Some(key) = transaction_key.as_deref() {
             if !self.remember_gift_transaction(key) {
-                return;
+                return None;
             }
         }
 
+        let received = ReceivedGift {
+            gift_id: gift.gift_id,
+            gift_name: gift.gift_name.clone(),
+            sender_name: gift.sender_name.clone(),
+            num: gift.num,
+        };
         let is_combo = gift.is_combo();
         let (id, merge_key) = if let Some(batch_combo_id) = gift.batch_combo_id.as_deref() {
             let key = format!(
@@ -420,6 +426,7 @@ impl LiveData {
                 &guard_level,
             );
         }
+        Some(received)
     }
 
     /// 处理 SC，返回需要异步获取视频信息的列表
@@ -489,13 +496,19 @@ impl LiveData {
     /// 处理大航海成交 Toast。
     ///
     /// Toast 的 price 是已经包含折扣和购买数量的订单总金额，不能再次乘以 num。
-    pub fn process_guard_toast(&mut self, toast: GuardToast) {
+    pub fn process_guard_toast(&mut self, toast: GuardToast) -> Option<ReceivedGift> {
         if let Some(payflow_id) = toast.payflow_id.as_deref() {
             if !self.remember_guard_payflow_id(payflow_id) {
-                return;
+                return None;
             }
         }
 
+        let received = ReceivedGift {
+            gift_id: toast.gift_id,
+            gift_name: toast.guard_name().to_string(),
+            sender_name: toast.username.clone(),
+            num: toast.num,
+        };
         let total_value = toast.price / 100;
         let is_paid = total_value > 0;
         let guard_level = guard_level_to_u8(&toast.guard_level);
@@ -565,6 +578,7 @@ impl LiveData {
                 &toast.guard_level,
             );
         }
+        Some(received)
     }
 
     /// 处理贡献排行实时更新（ONLINE_RANK_V2）
@@ -1093,9 +1107,11 @@ mod tests {
             end_time: 1_700_000_000,
         };
 
-        data.process_guard_toast(toast.clone());
+        let received = data.process_guard_toast(toast.clone()).unwrap();
+        assert_eq!(received.num, 3);
+        assert_eq!(received.gift_name, "舰长");
         // Bilibili 会为同一订单同时下发 V1 和 V2，二者共享 payflow_id。
-        data.process_guard_toast(toast);
+        assert!(data.process_guard_toast(toast).is_none());
 
         assert_eq!(data.gift_list.len(), 1);
         assert_eq!(data.pending_gift_upserts.len(), 1);
