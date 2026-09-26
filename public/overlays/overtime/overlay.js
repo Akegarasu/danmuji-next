@@ -25,7 +25,7 @@
   const actionLabel = rule => {
     switch (rule.action) {
       case 'add': return `+${duration(rule.value)}`;
-      case 'subtract': return `−${duration(rule.value)}`;
+      case 'subtract': return `-${duration(rule.value)}`;
       case 'multiply': return `×${rule.value}`;
       case 'divide': return `÷${rule.value}`;
       case 'set_time': return `设为${duration(rule.value)}`;
@@ -47,7 +47,7 @@
     if (showingNotice || queue.length === 0) return;
     showingNotice = true;
     const notice = queue.shift();
-    let effect = `${notice.delta_ms < 0 ? '−' : '+'}${duration(Math.round(Math.abs(notice.delta_ms) / 1000))}`;
+    let effect = `${notice.delta_ms < 0 ? '-' : '+'}${duration(Math.round(Math.abs(notice.delta_ms) / 1000))}`;
     if (notice.actions.includes('clear')) effect = '清空时间';
     else if (notice.actions.includes('set_rate') && notice.delta_ms === 0) effect = '调整倒计时速度';
     const draws = (notice.results || []).filter(result => result.random).map(result => `随机${actionLabel(result)}`);

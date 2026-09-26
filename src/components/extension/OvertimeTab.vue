@@ -50,7 +50,7 @@ function changeRuleAction(rule: GiftRule) {
   dirty.value = true
 }
 function resultLabel(result: AppliedAction) {
-  const symbol: Record<string, string> = { add: '+', subtract: '−', multiply: '×', divide: '÷' }
+  const symbol: Record<string, string> = { add: '+', subtract: '-', multiply: '×', divide: '÷' }
   return `随机${symbol[result.action] ?? ''}${result.value}${['add', 'subtract'].includes(result.action) ? '秒' : ''}`
 }
 const gifts = computed(() => {
@@ -257,7 +257,7 @@ onBeforeUnmount(stop)
           <span>{{ notice.sender_name }} · {{ notice.gift_name }} ×{{ notice.num }}<small
               v-for="(result, index) in notice.results.filter(result => result.random)" :key="index">{{
                 resultLabel(result) }}</small></span>
-          <strong>{{ notice.delta_ms >= 0 ? '+' : '−' }}{{ Math.round(Math.abs(notice.delta_ms) / 1000) }} 秒</strong>
+          <strong>{{ notice.delta_ms >= 0 ? '+' : '-' }}{{ Math.round(Math.abs(notice.delta_ms) / 1000) }} 秒</strong>
         </div>
       </section>
     </template>
