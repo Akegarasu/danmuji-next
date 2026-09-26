@@ -34,6 +34,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   windows: {
     main: { ...DEFAULT_WINDOW_SETTINGS }
   },
+  otherWindowOpacity: DEFAULT_WINDOW_SETTINGS.opacity,
   display: { ...DEFAULT_DISPLAY_SETTINGS },
   speech: { ...DEFAULT_SPEECH_SETTINGS },
   tabOrder: ['interaction', 'danmaku', 'gift', 'superchat', 'audience'],
@@ -251,6 +252,11 @@ export const useSettingsStore = defineStore('settings', () => {
     autoSave()
   }
 
+  const setOtherWindowOpacity = (opacity: number) => {
+    settings.value.otherWindowOpacity = opacity
+    autoSave()
+  }
+
   const updateDisplaySettings = (updates: Partial<DisplaySettings>) => {
     settings.value.display = { ...settings.value.display, ...updates }
     if ('giftShowFree' in updates || 'giftMinPrice' in updates) {
@@ -437,6 +443,7 @@ export const useSettingsStore = defineStore('settings', () => {
     setCookie,
     getWindowSettings,
     updateWindowSettings,
+    setOtherWindowOpacity,
     updateDisplaySettings,
     updateSpeechSettings,
     syncSpeechRuntime,

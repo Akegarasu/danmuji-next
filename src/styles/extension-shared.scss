@@ -1,5 +1,6 @@
 // ==================== 扩展面板共享样式 ====================
 // 用于 VotingTab、VideoRequestTab 等扩展功能面板
+@use './settings-controls' as controls;
 
 // ==================== 工具栏 ====================
 
@@ -7,50 +8,65 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 8px;
 
   .toolbar-right,
   .toolbar-actions {
     display: flex;
-    gap: 4px;
+    flex-wrap: wrap;
+    gap: 8px;
   }
 }
 
 // ==================== 按钮 ====================
 
 .ext-btn {
-  padding: 4px 12px;
+  padding: 8px 12px;
   border: none;
   border-radius: var(--border-radius-sm);
   background: var(--bg-hover);
   color: var(--text-secondary);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   cursor: pointer;
+  font-family: inherit;
+  line-height: 1.5;
   transition: background 0.2s, color 0.2s, transform 0.1s, box-shadow 0.2s;
 
-  &:hover {
+  &:hover:not(:disabled) {
     background: var(--bg-active);
     color: var(--text-primary);
   }
 
-  &:active {
+  &:active:not(:disabled) {
     transform: scale(0.96);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 2px;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   &--primary {
     background: var(--accent-primary);
     color: white;
 
-    &:hover {
+    &:hover:not(:disabled) {
       background: #4a8df0;
       box-shadow: 0 2px 8px rgba(92, 158, 255, 0.3);
     }
   }
 
   &--danger {
-    &:hover {
+    &:hover:not(:disabled) {
       background: rgba(220, 60, 60, 0.2);
       color: #dc3c3c;
     }
@@ -62,7 +78,7 @@
   }
 
   &--warning {
-    &:hover {
+    &:hover:not(:disabled) {
       background: rgba(255, 160, 40, 0.2);
       color: #ffa028;
     }
@@ -70,7 +86,7 @@
 
   &--submit {
     width: 100%;
-    padding: 7px;
+    padding: 8px 12px;
     background: var(--accent-primary);
     color: white;
     font-size: var(--font-size-sm);
@@ -78,7 +94,7 @@
     margin-top: 4px;
     border-radius: var(--border-radius-sm);
 
-    &:hover {
+    &:hover:not(:disabled) {
       background: #4a8df0;
       box-shadow: 0 2px 8px rgba(92, 158, 255, 0.3);
     }
@@ -88,14 +104,14 @@
 // ==================== 图标按钮（小操作） ====================
 
 .ext-icon-btn {
-  width: 24px;
-  height: 24px;
+  width: max(24px, 1.5em);
+  height: max(24px, 1.5em);
   border: none;
   border-radius: var(--border-radius-sm);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -139,9 +155,11 @@
 
 .ext-list {
   flex: 1;
+  min-height: 0;
+  min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 8px;
+  padding: 16px;
 
   // 隐藏滚动条，hover 时显示
   scrollbar-gutter: stable;
@@ -178,12 +196,12 @@
   }
 
   &__title {
-    font-size: var(--content-font-size-base);
+    font-size: var(--font-size-base);
     margin-bottom: 4px;
   }
 
   &__hint {
-    font-size: var(--content-font-size-xs);
+    @include controls.hint;
     text-align: center;
     padding: 0 20px;
     line-height: 1.5;
@@ -196,7 +214,7 @@
   display: flex;
   align-items: center;
   margin: 12px 0 8px;
-  font-size: var(--content-font-size-xs);
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
 
   &::before,
@@ -217,8 +235,8 @@
 .ext-card {
   background: var(--bg-card);
   border-radius: var(--border-radius);
-  padding: 10px 12px;
-  margin-bottom: 8px;
+  padding: 16px;
+  margin-bottom: 12px;
   transition: opacity 0.2s, transform 0.2s, box-shadow 0.2s;
   border: 1px solid transparent;
 
@@ -238,26 +256,7 @@
 // ==================== 表单元素 ====================
 
 .ext-input {
-  width: 100%;
-  padding: 6px 10px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-sm);
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font-size: var(--font-size-sm);
-  font-family: var(--font-family);
-  outline: none;
-  box-sizing: border-box;
-  transition: border-color 0.2s, box-shadow 0.2s;
-
-  &::placeholder {
-    color: var(--text-muted);
-  }
-
-  &:focus {
-    border-color: var(--accent-primary);
-    box-shadow: 0 0 0 2px rgba(92, 158, 255, 0.15);
-  }
+  @include controls.control;
 }
 
 .ext-number-input {
@@ -275,20 +274,30 @@
 }
 
 .ext-form-group {
-  margin-bottom: 8px;
+  min-width: 0;
+  margin-bottom: 16px;
 
   label {
     display: block;
-    font-size: var(--font-size-xs);
+    font-size: var(--font-size-sm);
     color: var(--text-secondary);
-    margin-bottom: 4px;
+    margin-bottom: 6px;
   }
 }
 
 .ext-form-row {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 0 16px;
   align-items: flex-end;
+
+  > .ext-form-group {
+    flex: 1 1 140px;
+  }
+
+  :deep(.ext-select) {
+    width: 100%;
+  }
 }
 
 // ==================== 徽标 ====================
@@ -299,7 +308,7 @@
   justify-content: center;
   padding: 1px 6px;
   border-radius: 10px;
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   font-weight: 500;
   line-height: 1.4;
 
@@ -377,7 +386,7 @@
 
 .ext-list-leave-active {
   position: absolute;
-  width: calc(100% - 16px); // 补偿 ext-list padding
+  width: calc(100% - 32px); // 补偿 ext-list padding
   transition: opacity 0.15s ease, transform 0.15s ease;
 }
 
@@ -410,7 +419,7 @@
 }
 
 .extension-error {
-  padding: 8px 12px;
+  padding: 12px 16px;
   color: var(--text-primary);
   background: var(--bg-hover);
 }

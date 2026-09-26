@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, onActivated, onDeactivated, onBeforeUnmount, ref } from 'vue'
 import giftCatalog from '@/assets/gift.json'
+import ExtSelect from '@/components/common/ExtSelect.vue'
+import SettingsSectionTitle from '@/components/common/SettingsSectionTitle.vue'
+import SettingsToggle from '@/components/common/SettingsToggle.vue'
 import { createExtensionClient, getOverlayServer, startOverlayServer, type OverlayServerInfo } from '@/services/extensions'
 import type { GiftRule, OvertimeRequest, OvertimeSnapshot, TimerAction, TimerConfig, RandomAction, AppliedAction } from '@/types/overtime'
 
@@ -29,7 +32,16 @@ const actions: { value: TimerAction; label: string }[] = [
   { value: 'clear', label: '清空时间' },
   { value: 'random', label: '随机加减乘除' },
 ]
-const fixedActions = actions.filter(action => action.value !== 'random')
+const fixedActions = actions.filter((action): action is { value: Exclude<TimerAction, 'random'>; label: string } => action.value !== 'random')
+const blindGiftModes: { value: TimerConfig['blind_gift_mode']; label: string }[] = [
+  { value: 'revealed', label: '处理爆出的礼物（默认）' },
+  { value: 'original', label: '直接处理盲盒' },
+]
+function changeBlindGiftMode(value: TimerConfig['blind_gift_mode']) {
+  if (!config.value) return
+  config.value.blind_gift_mode = value
+  dirty.value = true
+}
 const randomActions: { value: RandomAction; label: string; unit: string }[] = [
   { value: 'add', label: '增加', unit: '秒' },
   { value: 'subtract', label: '减少', unit: '秒' },
@@ -43,7 +55,8 @@ function toggleRandomAction(rule: GiftRule, action: RandomAction, enabled: boole
   } else if (!enabled) rule.random_ranges = rule.random_ranges.filter(range => range.action !== action)
   dirty.value = true
 }
-function changeRuleAction(rule: GiftRule) {
+function changeRuleAction(rule: GiftRule, action: TimerAction) {
+  rule.action = action
   if (rule.action === 'random' && !rule.random_ranges.length) {
     randomActions.forEach(action => toggleRandomAction(rule, action.value, true))
   }
@@ -89,7 +102,7 @@ async function execute(request: OvertimeRequest) {
     if (request.type === 'configure') {
       if (state.value) config.value = JSON.parse(JSON.stringify(state.value.config)) as TimerConfig
       dirty.value = false
-      message.value = '设置已保存；初始时间将在点击“重置”后应用。'
+      message.value = '设置已保存'
     }
   } catch (cause) { error.value = String(cause) }
   finally { busy.value = false }
@@ -155,9 +168,7 @@ onBeforeUnmount(stop)
             @click="execute({ type: 'apply', action: 'clear', value: 0 })">清空</button>
         </div>
         <div class="manual-row">
-          <select v-model="manualAction" aria-label="手动操作">
-            <option v-for="action in fixedActions" :key="action.value" :value="action.value">{{ action.label }}</option>
-          </select>
+          <ExtSelect v-model="manualAction" :options="fixedActions" class="manual-select" aria-label="手动操作" />
           <input v-if="manualAction !== 'clear'" v-model.number="manualValue" type="number" min="0" step="any"
             aria-label="手动操作数值">
           <button class="ext-btn" :disabled="busy"
@@ -165,7 +176,7 @@ onBeforeUnmount(stop)
         </div>
       </section>
       <section>
-        <h3>OBS 浏览器源</h3>
+        <SettingsSectionTitle class="section-heading">OBS 浏览器源</SettingsSectionTitle>
         <div class="feedback error" v-if="server?.error">{{ server.error }}</div>
         <input class="url-input" :value="server?.url ?? '服务尚未启动'" readonly aria-label="OBS 浏览器源地址"
           @focus="($event.target as HTMLInputElement).select()">
@@ -177,33 +188,46 @@ onBeforeUnmount(stop)
               aria-label="服务端口"></label>
           <button class="ext-btn" :disabled="busy" @click="restartServer">应用端口 / 重试</button>
         </div>
-        <p>OBS → 添加“浏览器”源 → 粘贴地址，建议宽度 600、高度 800。背景透明，需保持弹幕姬运行并连接直播间。</p>
+        <details class="help-details"><summary>OBS 接入说明</summary><p>在 OBS 中添加浏览器源并粘贴地址，建议尺寸 600 × 800。使用时保持弹幕姬运行并连接直播间。</p></details>
         <iframe v-if="preview && server?.url" class="overlay-preview" :src="server.url" title="加班机 OBS 预览" />
       </section>
       <section @input="dirty = true" @change="dirty = true">
-        <h3>基本设置 <span v-if="dirty" class="unsaved">未保存</span></h3>
+        <SettingsSectionTitle class="section-heading">基本设置 <span v-if="dirty" class="unsaved">未保存</span></SettingsSectionTitle>
         <div class="settings-row">
-          <label><input v-model="config.enabled" type="checkbox">启用加班机</label>
-          <label>初始时间（分钟）<input v-model.number="initialMinutes" type="number" min="0" max="5256000" step="any"></label>
+          <SettingsToggle v-model="config.enabled" class="toggle-setting" label="启用加班机" @change="dirty = true" />
+          <label class="field-setting">初始时间（分钟）<input v-model.number="initialMinutes" type="number" min="0" max="5256000" step="any"></label>
         </div>
         <div class="settings-row">
-          <label><input v-model="config.show_rules" type="checkbox">显示礼物规则</label>
-          <label><input v-model="config.show_notice" type="checkbox">显示循环投喂提示</label>
+          <SettingsToggle v-model="config.show_rules" class="toggle-setting" label="显示礼物规则" @change="dirty = true" />
+          <SettingsToggle v-model="config.show_notice" class="toggle-setting" label="显示投喂提示" @change="dirty = true" />
         </div>
-        <p>暂停时仍接收礼物；禁用后忽略礼物。重置会暂停并恢复 1 倍速。应用重启后保留剩余时间并暂停。</p>
+        <div class="settings-row">
+          <div class="field-setting"><span>盲盒处理方式</span>
+            <ExtSelect :model-value="config.blind_gift_mode" :options="blindGiftModes" aria-label="盲盒处理方式"
+              @update:model-value="changeBlindGiftMode" />
+          </div>
+        </div>
+        <p v-if="config.blind_gift_mode === 'original'">按“心动盲盒”等盲盒本身匹配，不触发爆出礼物规则。</p>
+        <p v-else>按“棉花糖”等爆出礼物匹配，不触发盲盒本身的规则。</p>
       </section>
       <section>
-        <h3>礼物触发规则 <span>{{ config.rules.length }} / 100</span></h3>
+        <SettingsSectionTitle class="section-heading">礼物触发规则 <span>{{ config.rules.length }} / 100</span></SettingsSectionTitle>
         <div class="gift-search">
           <input v-model="giftSearch" placeholder="搜索礼物名称或 ID…" aria-label="搜索礼物">
           <button class="ext-btn" :disabled="config.rules.length >= 100" @click="addRule()">自定义礼物</button>
         </div>
         <div class="gift-results" v-if="giftSearch">
           <button v-for="gift in gifts" :key="gift.id" :disabled="config.rules.length >= 100" @click="addRule(gift)">{{
-            gift.name }} <small>#{{ gift.id }}</small></button>
+            gift.name }} <span class="gift-id">#{{ gift.id }}</span></button>
           <p v-if="!gifts.length">未找到礼物，可添加自定义规则；大航海可填写“舰长 / 提督 / 总督”。</p>
         </div>
-        <p>优先按礼物 ID 匹配；ID 留空时按完整名称匹配。盲盒按开出的礼物处理。同一礼物多条规则按列表顺序执行。</p>
+        <details class="help-details">
+          <summary>规则与计时说明</summary>
+          <p>填写 ID 时只匹配 ID；留空则匹配完整名称。同一礼物的多条规则按列表顺序执行。</p>
+          <p>按个执行时使用本次通知的数量，例如 3 个 ×2 会执行 ×8；取消则每条通知执行一次。十连盲盒可能分成多条通知。设置时间、速度和清空操作始终执行一次。</p>
+          <p>随机规则每条通知抽取一次操作和数值，按个执行时复用结果。加减为整数秒，乘除保留两位小数，范围包含两端。</p>
+          <p>暂停时仍接收礼物，禁用后忽略礼物。初始时间在重置后应用，重置会暂停并恢复 1 倍速；重启后保留剩余时间并暂停。</p>
+        </details>
         <div v-if="!config.rules.length" class="empty-rules">还没有规则，搜索或添加礼物开始配置。</div>
         <article v-for="(rule, index) in config.rules" :key="rule.id" class="rule-card" @input="dirty = true"
           @change="dirty = true">
@@ -215,9 +239,10 @@ onBeforeUnmount(stop)
             <label>礼物名称<input v-model="rule.gift_name" maxlength="80" placeholder="如：小心心、舰长"></label>
             <label>礼物 ID（选填）<input :value="rule.gift_id ?? ''" type="number" min="1" step="1" placeholder="留空按名称匹配"
                 @input="changeGiftId(rule, $event)"></label>
-            <label>触发操作<select v-model="rule.action" @change="changeRuleAction(rule)">
-                <option v-for="action in actions" :key="action.value" :value="action.value">{{ action.label }}</option>
-              </select></label>
+            <div class="field-setting"><span>触发操作</span>
+              <ExtSelect :model-value="rule.action" :options="actions" :aria-label="`规则 ${index + 1} 触发操作`"
+                @update:model-value="changeRuleAction(rule, $event)" />
+            </div>
             <label v-if="!['clear', 'random'].includes(rule.action)">数值<input v-model.number="rule.value" type="number"
                 min="0" step="any"></label>
           </div>
@@ -230,7 +255,7 @@ onBeforeUnmount(stop)
               </label>
             </div>
             <div v-for="range in rule.random_ranges" :key="range.action" class="random-range">
-              <span>{{randomActions.find(action => action.value === range.action)?.label}}</span>
+              <span>{{randomActions.find(action => action.value === range.action)?.label}}（{{randomActions.find(action => action.value === range.action)?.unit}}）</span>
               <label>最小<input v-model.number="range.min" type="number"
                   :min="['add', 'subtract'].includes(range.action) ? 0 : 0.01"
                   :max="['add', 'subtract'].includes(range.action) ? 315360000 : 100"
@@ -239,24 +264,19 @@ onBeforeUnmount(stop)
                   :min="['add', 'subtract'].includes(range.action) ? 0 : 0.01"
                   :max="['add', 'subtract'].includes(range.action) ? 315360000 : 100"
                   :step="['add', 'subtract'].includes(range.action) ? 1 : 0.01"></label>
-              <span>{{randomActions.find(action => action.value === range.action)?.unit}}</span>
             </div>
-            <p>每条通知从勾选的操作中等概率抽取一种，再在该范围内抽值（含两端）。加减为整数秒，乘除精确到 0.01 倍；只勾选一种即可固定随机操作的类型。</p>
           </div>
-          <label class="count-mode"><input v-model="rule.per_gift" type="checkbox">按礼物个数执行加减 / 乘除（取消则每条通知一次）</label>
-          <p v-if="['set_time', 'set_rate', 'clear'].includes(rule.action)">设置或清空操作始终只执行一次。</p>
-          <p v-if="rule.action === 'random'">按个执行时复用这次抽出的值：例如 3 个礼物抽到 ×2，将执行 ×8。抽签结果会显示在投喂提示和最近触发中。</p>
-          <p v-if="['multiply', 'divide'].includes(rule.action)">例如收到 3 个“×2”礼物，剩余时间将乘以 8。</p>
+          <label v-if="!['set_time', 'set_rate', 'clear'].includes(rule.action)" class="count-mode"><input v-model="rule.per_gift" type="checkbox">按礼物个数执行</label>
         </article>
       </section>
       <div class="save-bar"><button class="ext-btn ext-btn--primary" :disabled="busy || !dirty" @click="save">{{ busy ?
-        '处理中…' : '保存设置与规则' }}</button><span>保存后生效</span></div>
+        '处理中…' : '保存设置与规则' }}</button></div>
       <section v-if="state.notices.length">
-        <h3>最近触发</h3>
+        <SettingsSectionTitle class="section-heading">最近触发</SettingsSectionTitle>
         <div class="history-row" v-for="notice in [...state.notices].reverse().slice(0, 5)" :key="notice.id">
-          <span>{{ notice.sender_name }} · {{ notice.gift_name }} ×{{ notice.num }}<small
+          <span>{{ notice.sender_name }} · {{ notice.gift_name }} ×{{ notice.num }}<span class="history-result"
               v-for="(result, index) in notice.results.filter(result => result.random)" :key="index">{{
-                resultLabel(result) }}</small></span>
+                resultLabel(result) }}</span></span>
           <strong>{{ notice.delta_ms >= 0 ? '+' : '-' }}{{ Math.round(Math.abs(notice.delta_ms) / 1000) }} 秒</strong>
         </div>
       </section>
@@ -267,81 +287,66 @@ onBeforeUnmount(stop)
 
 <style scoped lang="scss">
 @use '@/styles/extension-shared.scss';
+@use '@/styles/settings-controls' as controls;
 
 .overtime-panel {
   height: 100%;
   overflow-y: auto;
-  padding: 12px;
+  overflow-x: hidden;
+  container-type: inline-size;
+  padding: 16px;
   color: var(--text-primary);
-  font-size: var(--font-size-sm)
+  font-size: var(--font-size-sm);
+  line-height: 1.5
 }
 
 section {
-  margin-bottom: 16px;
-  padding: 14px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px
+  margin-bottom: 24px
 }
 
-h3 {
-  margin: 0 0 12px;
-  font-size: 14px;
+.section-heading {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px
+  gap: 8px
 }
 
-h3 span {
+.section-heading span {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   font-weight: normal
 }
 
-h3 .unsaved {
+.section-heading .unsaved {
   color: #eeb854
 }
 
 p {
-  margin: 8px 0 0;
-  color: var(--text-muted);
-  font-size: 11px;
-  line-height: 1.7
+  @include controls.hint;
+  margin: 6px 0 0
 }
 
-input:not([type=checkbox]),
-select {
-  width: 100%;
-  min-width: 0;
-  border: 1px solid var(--border-color);
-  border-radius: 5px;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  padding: 7px 8px;
-  font-size: 12px;
-  box-sizing: border-box
-}
-
-input:focus,
-select:focus {
-  outline: 1px solid var(--accent-primary)
+input:not([type=checkbox]) {
+  @include controls.control;
 }
 
 input[type=checkbox] {
   accent-color: var(--accent-primary);
-  margin-right: 5px
+  flex-shrink: 0;
+  margin: 0
 }
 
 label {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 12px
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm)
 }
 
 .button-row {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   flex-wrap: wrap;
   align-items: center;
   margin-top: 10px
@@ -354,7 +359,10 @@ button:disabled {
 
 .clock-panel {
   text-align: center;
-  background: linear-gradient(145deg, var(--bg-secondary), var(--bg-primary))
+  padding: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  background: var(--bg-secondary)
 }
 
 .clock-caption {
@@ -364,15 +372,15 @@ button:disabled {
 }
 
 .clock-caption span {
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   color: var(--text-secondary)
 }
 
 .clock-value {
-  font-size: 40px;
+  font-size: clamp(32px, calc(var(--font-size-base) * 2.85), 72px);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  letter-spacing: 3px;
+  letter-spacing: 0.05em;
   padding: 12px 0
 }
 
@@ -382,11 +390,12 @@ button:disabled {
 
 .manual-row {
   display: flex;
-  gap: 6px;
-  margin-top: 14px
+  gap: 8px;
+  align-items: stretch;
+  margin-top: 16px
 }
 
-.manual-row select {
+.manual-row .manual-select {
   flex: 2
 }
 
@@ -400,18 +409,46 @@ button:disabled {
 }
 
 .port-label input {
-  width: 80px
+  width: max(90px, 5em)
 }
 
 .settings-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  align-items: center;
+  gap: 16px;
+  margin-top: 16px
+}
+
+.field-setting {
   display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 0
+}
+
+.toggle-setting {
+  justify-content: space-between;
+  min-height: 34px
+}
+
+.help-details {
+  @include controls.hint;
   margin-top: 12px
 }
 
-.settings-row input[type=number] {
-  width: 95px
+.help-details summary {
+  color: var(--text-secondary);
+  cursor: pointer;
+  width: fit-content
+}
+
+.help-details summary:focus-visible {
+  outline: 1px solid var(--accent-primary);
+  outline-offset: 4px
 }
 
 .feedback {
@@ -419,7 +456,7 @@ button:disabled {
   margin-bottom: 10px;
   border-radius: 6px;
   overflow-wrap: anywhere;
-  font-size: 12px;
+  font-size: var(--font-size-sm);
   line-height: 1.6
 }
 
@@ -435,7 +472,12 @@ button:disabled {
 
 .gift-search {
   display: flex;
-  gap: 6px
+  flex-wrap: wrap;
+  gap: 8px
+}
+
+.gift-search input {
+  flex: 1 1 180px;
 }
 
 .gift-search button {
@@ -450,7 +492,8 @@ button:disabled {
 }
 
 .gift-results button {
-  padding: 6px 8px;
+  padding: 8px 12px;
+  font: inherit;
   border: 1px solid var(--border-color);
   border-radius: 5px;
   color: var(--text-primary);
@@ -458,7 +501,7 @@ button:disabled {
   cursor: pointer
 }
 
-.gift-results small {
+.gift-id {
   color: var(--text-muted)
 }
 
@@ -466,12 +509,12 @@ button:disabled {
   text-align: center;
   padding: 24px 0;
   color: var(--text-muted);
-  font-size: 12px
+  font-size: var(--font-size-sm)
 }
 
 .rule-card {
   margin-top: 12px;
-  padding: 10px;
+  padding: 16px;
   border: 1px solid var(--border-color);
   border-radius: 6px;
   background: var(--bg-primary)
@@ -486,41 +529,36 @@ button:disabled {
 
 .rule-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 16px
 }
 
 .rule-grid label {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
-  gap: 5px
+  gap: 6px
 }
 
 .count-mode {
-  margin-top: 10px;
-  font-size: 11px;
+  margin-top: 16px;
+  font-size: var(--font-size-sm);
   line-height: 1.5
 }
 
 .save-bar {
   position: sticky;
-  bottom: -12px;
+  bottom: -16px;
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 12px;
-  margin: 0 -12px 12px;
+  margin: 0 -16px 16px;
   background: var(--bg-secondary);
   border-top: 1px solid var(--border-color);
   z-index: 1
-}
-
-.save-bar span {
-  font-size: 11px;
-  color: var(--text-muted)
 }
 
 .overlay-preview {
@@ -537,13 +575,13 @@ button:disabled {
   justify-content: space-between;
   gap: 8px;
   padding: 6px 0;
-  font-size: 11px
+  font-size: var(--font-size-sm)
 }
 
-.history-row span {
+.history-row > span {
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap
+  min-width: 0;
+  overflow-wrap: anywhere
 }
 
 .history-row strong {
@@ -554,7 +592,7 @@ button:disabled {
 .random-settings {
   margin-top: 10px;
   padding: 10px;
-  border: 1px dashed var(--border-color);
+  border: 1px solid var(--border-color);
   border-radius: 5px
 }
 
@@ -570,7 +608,7 @@ button:disabled {
   align-items: center;
   gap: 6px;
   margin: 8px 0;
-  font-size: 11px
+  font-size: var(--font-size-sm)
 }
 
 .random-range>span {
@@ -580,7 +618,8 @@ button:disabled {
 .random-range label {
   flex: 1;
   min-width: 0;
-  font-size: 11px
+  white-space: nowrap;
+  font-size: var(--font-size-sm)
 }
 
 .random-range input {
@@ -588,27 +627,44 @@ button:disabled {
   min-width: 0
 }
 
-.history-row small {
+.history-result {
   display: block;
   margin-top: 3px;
   color: var(--text-secondary)
 }
 
-@media(max-width:380px) {
-  .overtime-panel {
-    padding: 8px
-  }
-
-  section {
-    padding: 10px
-  }
-
+@container (max-width: 460px) {
+  .settings-row,
   .rule-grid {
     grid-template-columns: 1fr
   }
 
   .clock-value {
-    font-size: 32px
+    font-size: clamp(28px, calc(var(--font-size-base) * 2.3), 56px)
+  }
+
+  .manual-row {
+    flex-wrap: wrap
+  }
+
+  .manual-row .manual-select {
+    flex-basis: 100%
+  }
+
+  .random-range {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin: 16px 0
+  }
+
+  .random-range > span:first-child {
+    grid-column: 1 / -1
+  }
+
+  .random-range label {
+    flex-direction: column;
+    align-items: stretch
   }
 }
 </style>

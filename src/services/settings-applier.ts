@@ -5,11 +5,21 @@
 
 import { watch } from 'vue'
 import { storeToRefs } from 'pinia'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useSettingsStore } from '@/stores/settings'
 import { createLogger } from '@/services/logger'
 
 let initialized = false
 const logger = createLogger('SettingsApplier')
+
+// 设置、扩展和存档窗口独立调节；拆分的内容窗口继续跟随主窗口。
+const getCurrentWindowOpacity = () => {
+  const settingsStore = useSettingsStore()
+  const windowLabel = getCurrentWindow().label
+  return ['settings', 'extension', 'archive'].includes(windowLabel)
+    ? settingsStore.settings.otherWindowOpacity
+    : settingsStore.mainWindowSettings.opacity
+}
 
 /**
  * 应用透明度设置
@@ -73,9 +83,9 @@ export const applyCurrentSettings = () => {
   const settingsStore = useSettingsStore()
   const mainSettings = settingsStore.getWindowSettings('main')
   const displaySettings = settingsStore.displaySettings
+  applyOpacity(getCurrentWindowOpacity())
   
   if (mainSettings) {
-    applyOpacity(mainSettings.opacity)
     applyFontSize(mainSettings.fontSize)
     applyUiFontSize(mainSettings.uiFontSize ?? 14)
     applyHideBorder(mainSettings.hideBorder)
@@ -96,12 +106,14 @@ export const initSettingsApplier = () => {
   // 使用 storeToRefs 获取响应式引用
   const { mainWindowSettings, displaySettings } = storeToRefs(settingsStore)
   
-  // 监听主窗口设置变化（透明度、字体大小）
+  // 根据当前窗口监听对应的不透明度，避免两组设置互相影响。
+  watch(getCurrentWindowOpacity, applyOpacity, { immediate: true })
+
+  // 监听共用的字体与边框设置
   watch(
     mainWindowSettings,
     (newSettings) => {
       if (newSettings) {
-        applyOpacity(newSettings.opacity)
         applyFontSize(newSettings.fontSize)
         applyUiFontSize(newSettings.uiFontSize ?? 14)
         applyHideBorder(newSettings.hideBorder)

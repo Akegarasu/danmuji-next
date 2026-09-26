@@ -5,6 +5,14 @@ pub struct ReceivedGift {
     pub gift_name: String,
     pub sender_name: String,
     pub num: u32,
+    /// 本条增量礼物的盲盒来源，数量沿用 num，不使用连击累计数量。
+    pub blind_gift: Option<ReceivedBlindGift>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReceivedBlindGift {
+    pub gift_id: u64,
+    pub gift_name: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

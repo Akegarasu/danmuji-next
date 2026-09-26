@@ -467,3 +467,55 @@ fn overtime_consumes_deduplicated_deltas_instead_of_combo_snapshots() {
     assert_eq!(timer.snapshot(now)["remaining_ms"], 300_000.0);
     assert_eq!(timer.snapshot(now)["notices"].as_array().unwrap().len(), 9);
 }
+
+
+#[test]
+fn overtime_blind_boxes_count_v1_v2_deltas_without_double_triggers() {
+    use crate::extensions::{overtime::Overtime, Extension};
+    let now = std::time::Instant::now();
+    let v2: Value = serde_json::from_str(include_str!(
+        "../../crates/blivedm/tests/fixtures/ten_blind_gift_v2.json"
+    )).unwrap();
+    let v1: Vec<_> = (0..3).flat_map(|round| {
+        (0..3).map(move |item| v1_packet(round, item, true))
+    }).collect();
+    for (packets, count, notices) in [(v1, 30, 9), (vec![v2], 10, 3)] {
+        for mode in ["original", "revealed"] {
+            let mut timer = Overtime::new(now);
+            timer.request(json!({"type":"configure","config":{
+                "enabled":true,"initial_seconds":0,"blind_gift_mode":mode,"rules":[
+                    {"id":"blind","enabled":true,"gift_id":32251,"gift_name":"心动盲盒","action":"add","value":60,"per_gift":true},
+                    {"id":"pillow","enabled":true,"gift_id":32128,"gift_name":"爱心抱枕","action":"add","value":10,"per_gift":true},
+                    {"id":"ticket","enabled":true,"gift_id":32125,"gift_name":"电影票","action":"add","value":10,"per_gift":true},
+                    {"id":"candy","enabled":true,"gift_id":32126,"gift_name":"棉花糖","action":"add","value":10,"per_gift":true}
+                ]
+            }}), now).unwrap();
+            timer.request(json!({"type":"reset"}), now).unwrap();
+            let mut data = LiveData::default();
+            for raw in &packets {
+                for gift in parse(raw) {
+                    let duplicate = gift.clone();
+                    let v1_duplicate = v1_from_gift(&gift);
+                    let received = data.process_gift(gift).unwrap();
+                    let blind = received.blind_gift.as_ref().unwrap();
+                    assert_eq!(blind.gift_id, 32251);
+                    assert_eq!(blind.gift_name, "心动盲盒");
+                    assert!(timer.on_gift(&received, now));
+                    assert!(data.process_gift(duplicate).is_none());
+                    for duplicate in parse(&v1_duplicate) {
+                        assert!(data.process_gift(duplicate).is_none());
+                    }
+                }
+            }
+            let state = timer.snapshot(now);
+            let unit_ms = if mode == "original" { 60_000.0 } else { 10_000.0 };
+            assert_eq!(state["remaining_ms"], f64::from(count) * unit_ms);
+            let actual = state["notices"].as_array().unwrap();
+            assert_eq!(actual.len(), notices);
+            for notice in actual {
+                assert_eq!(notice["gift_name"] == "心动盲盒", mode == "original");
+                assert_eq!(notice["results"].as_array().unwrap().len(), 1);
+            }
+        }
+    }
+}

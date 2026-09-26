@@ -280,7 +280,8 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   border-top: 1px solid var(--border-color);
-  background: var(--bg-primary);
+  // 与互动区域共用窗口背景，避免半透明背景叠加后显得更不透明。
+  background: transparent;
   min-height: 60px;
   max-height: 400px;
   font-family: var(--entry-font-family, var(--font-family));

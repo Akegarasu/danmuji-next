@@ -72,7 +72,6 @@ const openVideo = async (bvid: string) => {
     <!-- 列表 -->
     <div class="ext-list">
       <div v-if="unwatchedList.length === 0 && watchedList.length === 0" class="ext-empty">
-        <div class="ext-empty__icon">🎬</div>
         <div class="ext-empty__title">暂无点播请求</div>
         <div class="ext-empty__hint">观众在弹幕或 SC 中发送 BV/AV号 时会自动捕获</div>
       </div>
@@ -201,6 +200,9 @@ const openVideo = async (bvid: string) => {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
 }
 
 .count {
@@ -235,8 +237,8 @@ const openVideo = async (bvid: string) => {
 
   .card-content {
     display: flex;
-    gap: 8px;
-    padding: 8px;
+    gap: 12px;
+    padding: 12px 16px;
   }
 }
 
@@ -275,7 +277,7 @@ const openVideo = async (bvid: string) => {
     padding: 1px 5px;
     background: rgba(0, 0, 0, 0.75);
     color: white;
-    font-size: 10px;
+    font-size: var(--font-size-xs);
     border-radius: 3px;
     font-variant-numeric: tabular-nums;
     backdrop-filter: blur(4px);
@@ -302,7 +304,7 @@ const openVideo = async (bvid: string) => {
 
   &.error {
     color: #dc3c3c;
-    font-size: 14px;
+    font-size: var(--font-size-base);
   }
 }
 
@@ -321,9 +323,9 @@ const openVideo = async (bvid: string) => {
   gap: 3px;
 
   .video-title {
-    font-size: var(--content-font-size-sm);
+    font-size: var(--font-size-sm);
     color: var(--text-primary);
-    line-height: 1.3;
+    line-height: 1.5;
     cursor: pointer;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -340,16 +342,18 @@ const openVideo = async (bvid: string) => {
 
   .meta {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
-    font-size: var(--content-font-size-xs);
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
   }
 
   .requester {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 4px;
-    font-size: var(--content-font-size-xs);
+    font-size: var(--font-size-xs);
     color: var(--text-secondary);
 
     .sc-price {
@@ -372,5 +376,17 @@ const openVideo = async (bvid: string) => {
   flex-direction: column;
   gap: 4px;
   flex-shrink: 0;
+}
+@media (max-width: 480px) {
+  .cover-wrapper {
+    width: 88px;
+    min-width: 88px;
+    height: 50px;
+  }
+
+  .video-card .card-content {
+    gap: 8px;
+    padding: 12px;
+  }
 }
 </style>

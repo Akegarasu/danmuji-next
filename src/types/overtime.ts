@@ -27,6 +27,7 @@ export interface TimerConfig {
   initial_seconds: number
   show_rules: boolean
   show_notice: boolean
+  blind_gift_mode: 'revealed' | 'original'
   rules: GiftRule[]
 }
 export interface GiftNotice {

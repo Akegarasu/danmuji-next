@@ -397,12 +397,14 @@ mod tests {
             gift_name: "无关礼物".into(),
             sender_name: "不应输出".into(),
             num: 1,
+            blind_gift: None,
         });
         host.dispatch_gift(&ReceivedGift {
             gift_id: 1,
             gift_name: "小心心".into(),
             sender_name: "测试用户".into(),
             num: 2,
+            blind_gift: None,
         });
         let update = tokio::time::timeout(Duration::from_secs(2), stream.chunk())
             .await

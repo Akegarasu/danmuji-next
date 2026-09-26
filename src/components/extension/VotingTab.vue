@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useVotingStore } from '@/stores/voting'
 import ExtSelect from '@/components/common/ExtSelect.vue'
+import SettingsSectionTitle from '@/components/common/SettingsSectionTitle.vue'
 import type { SelectOption } from '@/components/common/ExtSelect.vue'
 import type { Poll, PollOption, Voter, VoteKeyType } from '@/types/extensions'
 import { createLogger } from '@/services/logger'
@@ -189,7 +190,7 @@ const formatTime = (ts: number): string => {
         :class="showCreateForm ? 'ext-btn--danger' : 'ext-btn--primary'"
         @click="showCreateForm = !showCreateForm"
       >
-        {{ showCreateForm ? '取消' : '✦ 创建投票' }}
+        {{ showCreateForm ? '取消' : '创建投票' }}
       </button>
       <div class="toolbar-right">
         <button
@@ -206,6 +207,7 @@ const formatTime = (ts: number): string => {
       <!-- 创建表单 -->
       <Transition name="ext-expand">
         <div v-if="showCreateForm" class="create-form">
+          <SettingsSectionTitle>创建投票</SettingsSectionTitle>
           <div class="ext-form-group">
             <label>标题</label>
             <input
@@ -244,6 +246,7 @@ const formatTime = (ts: number): string => {
             <div class="ext-form-group">
               <label>类型</label>
               <ExtSelect
+                aria-label="投票类型"
                 :model-value="formKeyType"
                 :options="keyTypeOptions"
                 @update:model-value="v => { formKeyType = v as VoteKeyType; onKeyTypeChange() }"
@@ -252,6 +255,7 @@ const formatTime = (ts: number): string => {
             <div class="ext-form-group">
               <label>时长</label>
               <ExtSelect
+                aria-label="投票时长"
                 v-model="formDuration"
                 :options="durationOptions"
               />
@@ -277,9 +281,7 @@ const formatTime = (ts: number): string => {
         v-if="votingStore.polls.length === 0 && !showCreateForm"
         class="ext-empty"
       >
-        <div class="ext-empty__icon">📊</div>
         <div class="ext-empty__title">暂无投票</div>
-        <div class="ext-empty__hint">点击「创建投票」发起弹幕投票</div>
       </div>
 
       <!-- 进行中的投票 -->
@@ -312,7 +314,7 @@ const formatTime = (ts: number): string => {
               >
                 <div class="option-info">
                   <span class="option-key-badge">{{ option.key }}</span>
-                  <span class="option-label">{{ option.label }}</span>
+                  <span class="option-label" :title="option.label">{{ option.label }}</span>
                 </div>
                 <div class="bar-container">
                   <div
@@ -376,7 +378,7 @@ const formatTime = (ts: number): string => {
               >
                 <div class="option-info">
                   <span class="option-key-badge ended">{{ option.key }}</span>
-                  <span class="option-label">{{ option.label }}</span>
+                  <span class="option-label" :title="option.label">{{ option.label }}</span>
                 </div>
                 <div class="bar-container">
                   <div
@@ -425,6 +427,10 @@ const formatTime = (ts: number): string => {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
+  container-type: inline-size;
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
 }
 
 // ==================== 创建表单 ====================
@@ -432,15 +438,15 @@ const formatTime = (ts: number): string => {
 .create-form {
   background: var(--bg-card);
   border-radius: var(--border-radius);
-  padding: 12px;
-  margin-bottom: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
   border: 1px solid var(--border-color);
 }
 
 .options-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
 }
 
 .option-row {
@@ -463,12 +469,13 @@ const formatTime = (ts: number): string => {
 }
 
 .add-option-btn {
-  padding: 5px 8px;
+  padding: 8px 12px;
+  font-family: inherit;
   border: 1px dashed var(--border-color);
   border-radius: var(--border-radius-sm);
   background: transparent;
   color: var(--text-secondary);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   cursor: pointer;
   margin-top: 2px;
   transition: border-color 0.2s, color 0.2s, background 0.2s;
@@ -490,32 +497,34 @@ const formatTime = (ts: number): string => {
 
 .poll-header {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 6px;
 }
 
 .poll-title {
-  font-size: var(--content-font-size-base);
+  font-size: var(--font-size-base);
   font-weight: 600;
   color: var(--text-primary);
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  flex: 1 1 12em;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .poll-actions {
   display: flex;
   gap: 4px;
   flex-shrink: 0;
-  margin-left: 8px;
+  margin-left: auto;
 }
 
 .poll-meta {
   display: flex;
-  gap: 12px;
-  font-size: var(--content-font-size-xs);
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  font-size: var(--font-size-xs);
   color: var(--text-secondary);
   margin-bottom: 8px;
 
@@ -573,12 +582,13 @@ const formatTime = (ts: number): string => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  min-width: 20px;
+  height: max(20px, 1.5em);
+  padding: 0 4px;
   border-radius: var(--border-radius-sm);
   background: rgba(92, 158, 255, 0.15);
   color: var(--accent-primary);
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   flex-shrink: 0;
   transition: background 0.2s, color 0.2s;
@@ -590,12 +600,12 @@ const formatTime = (ts: number): string => {
 }
 
 .option-label {
-  font-size: var(--content-font-size-sm);
+  font-size: var(--font-size-sm);
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 80px;
+  max-width: 8em;
 }
 
 .bar-container {
@@ -625,7 +635,7 @@ const formatTime = (ts: number): string => {
 }
 
 .option-count {
-  font-size: var(--content-font-size-xs);
+  font-size: var(--font-size-sm);
   color: var(--text-primary);
   font-weight: 500;
   min-width: 60px;
@@ -655,7 +665,7 @@ const formatTime = (ts: number): string => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: var(--content-font-size-xs);
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
   margin-bottom: 6px;
   padding-bottom: 4px;
@@ -665,7 +675,7 @@ const formatTime = (ts: number): string => {
 .voters-loading,
 .voters-empty {
   text-align: center;
-  font-size: var(--content-font-size-xs);
+  font-size: var(--font-size-sm);
   color: var(--text-muted);
   padding: 8px;
 }
@@ -679,7 +689,7 @@ const formatTime = (ts: number): string => {
 .voter-item {
   display: flex;
   justify-content: space-between;
-  font-size: var(--content-font-size-xs);
+  font-size: var(--font-size-sm);
   padding: 2px 4px;
   border-radius: 2px;
   transition: background 0.15s;
@@ -695,6 +705,33 @@ const formatTime = (ts: number): string => {
   .voter-time {
     color: var(--text-muted);
     font-variant-numeric: tabular-nums;
+  }
+}
+// 较窄窗口或较大字号时，票数与选项在上，进度条独占一行。
+@container (max-width: 32em) {
+  .option-bar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 8px;
+    padding: 8px 6px;
+  }
+
+  .option-info {
+    min-width: 0;
+  }
+
+  .option-label {
+    max-width: none;
+  }
+
+  .option-count {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .bar-container {
+    grid-column: 1 / -1;
+    grid-row: 2;
   }
 }
 </style>

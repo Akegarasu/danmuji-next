@@ -6,6 +6,8 @@ import LoginDialog from '@/components/common/LoginDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import UpdateToast from '@/components/common/UpdateToast.vue'
 import RawEventDumpPanel from '@/components/common/RawEventDumpPanel.vue'
+import SettingsSectionTitle from '@/components/common/SettingsSectionTitle.vue'
+import SettingsToggle from '@/components/common/SettingsToggle.vue'
 import { useSettingsStore } from '@/stores/settings'
 import { useDanmakuStore } from '@/stores/danmaku'
 import { applyCurrentSettings, initSettingsApplier } from '@/services/settings-applier'
@@ -451,10 +453,16 @@ const roomId = computed({
   set: (v) => settingsStore.setRoomId(v)
 })
 
-// 透明度（UI 显示为百分比）
-const opacity = computed({
+// 主窗口不透明度（UI 显示为百分比）
+const mainWindowOpacity = computed({
   get: () => Math.round((settings.value.windows.main?.opacity ?? 0.9) * 100),
   set: (v) => settingsStore.updateWindowSettings('main', { opacity: v / 100 })
+})
+
+// 设置、扩展和存档窗口共用的不透明度
+const otherWindowOpacity = computed({
+  get: () => Math.round(settings.value.otherWindowOpacity * 100),
+  set: (v) => settingsStore.setOtherWindowOpacity(v / 100)
 })
 
 // 内容字体大小
@@ -1154,7 +1162,7 @@ const openProjectUrl = async () => {
       <div class="settings-content">
         <!-- 通用设置 -->
         <div v-show="activeSection === 'connection'" class="section">
-          <h3 class="section-title">连接设置</h3>
+          <SettingsSectionTitle>连接设置</SettingsSectionTitle>
 
           <!-- 连接状态卡片 -->
           <div class="connection-card" :class="{ connected: isConnected, error: hasError }">
@@ -1217,33 +1225,32 @@ const openProjectUrl = async () => {
 
         <!-- 通用设置 -->
         <div v-show="activeSection === 'general'" class="section">
-          <h3 class="section-title">窗口设置</h3>
+          <SettingsSectionTitle>窗口设置</SettingsSectionTitle>
           <div class="setting-group">
             <label class="setting-label">
-              不透明度 <span class="value">{{ opacity }}%</span>
+              主窗口不透明度 <span class="value">{{ mainWindowOpacity }}%</span>
             </label>
-            <input v-model.number="opacity" type="range" min="0" max="100" class="setting-slider" />
+            <input v-model.number="mainWindowOpacity" type="range" min="0" max="100" class="setting-slider" />
           </div>
 
-          <div class="setting-group toggle">
-            <label class="setting-label">窗口置顶</label>
-            <input v-model="alwaysOnTop" type="checkbox" class="toggle-checkbox" />
+          <div class="setting-group">
+            <label class="setting-label">
+              其他窗口不透明度 <span class="value">{{ otherWindowOpacity }}%</span>
+            </label>
+            <input v-model.number="otherWindowOpacity" type="range" min="0" max="100" class="setting-slider" />
+            <p class="setting-hint">适用于设置、扩展和存档窗口</p>
           </div>
 
-          <div class="setting-group toggle">
-            <label class="setting-label">隐藏窗口边框</label>
-            <input v-model="hideBorder" type="checkbox" class="toggle-checkbox" />
-          </div>
+          <SettingsToggle v-model="alwaysOnTop" label="窗口置顶" class="setting-group" />
 
-          <div class="setting-group toggle">
-            <label class="setting-label">失焦时隐藏标题栏</label>
-            <input v-model="autoHideUi" type="checkbox" class="toggle-checkbox" />
-          </div>
+          <SettingsToggle v-model="hideBorder" label="隐藏窗口边框" class="setting-group" />
+
+          <SettingsToggle v-model="autoHideUi" label="失焦时隐藏标题栏" class="setting-group" />
         </div>
 
         <!-- 语音播报 -->
         <div v-show="activeSection === 'speech'" class="section">
-          <h3 class="section-title">语音播报</h3>
+          <SettingsSectionTitle>语音播报</SettingsSectionTitle>
 
           <div
             class="speech-status-card"
@@ -1257,15 +1264,7 @@ const openProjectUrl = async () => {
             <span>{{ speechStatusText }}</span>
           </div>
 
-          <div class="setting-group toggle">
-            <label class="setting-label">启用语音播报</label>
-            <input
-              v-model="speechEnabled"
-              type="checkbox"
-              class="toggle-checkbox"
-              :disabled="!speechStatus.available"
-            />
-          </div>
+          <SettingsToggle v-model="speechEnabled" label="启用语音播报" class="setting-group" :disabled="!speechStatus.available" />
 
           <div class="setting-group">
             <label class="setting-label">语音</label>
@@ -1310,19 +1309,10 @@ const openProjectUrl = async () => {
             <div class="setting-hint">不同系统语音对语速的表现可能略有差异。</div>
           </div>
 
-          <h3 class="section-title section-subtitle">播报内容</h3>
-          <div class="setting-group toggle">
-            <label class="setting-label">弹幕</label>
-            <input v-model="speechSpeakDanmaku" type="checkbox" class="toggle-checkbox" />
-          </div>
-          <div class="setting-group toggle">
-            <label class="setting-label">礼物</label>
-            <input v-model="speechSpeakGift" type="checkbox" class="toggle-checkbox" />
-          </div>
-          <div class="setting-group toggle">
-            <label class="setting-label">醒目留言（SC）</label>
-            <input v-model="speechSpeakSuperChat" type="checkbox" class="toggle-checkbox" />
-          </div>
+          <SettingsSectionTitle class="section-subtitle">播报内容</SettingsSectionTitle>
+          <SettingsToggle v-model="speechSpeakDanmaku" label="弹幕" class="setting-group" />
+          <SettingsToggle v-model="speechSpeakGift" label="礼物" class="setting-group" />
+          <SettingsToggle v-model="speechSpeakSuperChat" label="醒目留言（SC）" class="setting-group" />
 
           <div class="info-box">
             <span class="info-icon">🔊</span>
@@ -1335,7 +1325,7 @@ const openProjectUrl = async () => {
 
         <!-- 字体设置 -->
         <div v-show="activeSection === 'font'" class="section">
-          <h3 class="section-title">字体设置</h3>
+          <SettingsSectionTitle>字体设置</SettingsSectionTitle>
 
           <div class="setting-group">
             <label class="setting-label">
@@ -1387,7 +1377,7 @@ const openProjectUrl = async () => {
             </div>
           </div>
 
-          <h3 class="section-title section-subtitle">颜色</h3>
+          <SettingsSectionTitle class="section-subtitle">颜色</SettingsSectionTitle>
 
           <div class="font-color-grid">
             <div
@@ -1428,47 +1418,23 @@ const openProjectUrl = async () => {
 
         <!-- 弹幕设置 -->
         <div v-show="activeSection === 'danmaku'" class="section">
-          <h3 class="section-title">弹幕设置</h3>
+          <SettingsSectionTitle>弹幕设置</SettingsSectionTitle>
 
-          <div class="setting-group toggle">
-            <label class="setting-label">显示粉丝勋章</label>
-            <input v-model="danmakuShowMedal" type="checkbox" class="toggle-checkbox" />
-          </div>
+          <SettingsToggle v-model="danmakuShowMedal" label="显示粉丝勋章" class="setting-group" />
 
-          <div class="setting-group toggle">
-            <label class="setting-label">显示已熄灭的粉丝勋章</label>
-            <input v-model="medalShowUnlit" type="checkbox" class="toggle-checkbox" />
-          </div>
+          <SettingsToggle v-model="medalShowUnlit" label="显示已熄灭的粉丝勋章" class="setting-group" />
 
-          <div class="setting-group toggle">
-            <label class="setting-label">显示其他直播间的粉丝勋章</label>
-            <input v-model="medalShowOtherRoom" type="checkbox" class="toggle-checkbox" />
-          </div>
+          <SettingsToggle v-model="medalShowOtherRoom" label="显示其他直播间的粉丝勋章" class="setting-group" />
 
-          <div class="setting-group toggle">
-            <label class="setting-label">显示荣耀等级</label>
-            <input v-model="danmakuShowWealthLevel" type="checkbox" class="toggle-checkbox" />
-          </div>
+          <SettingsToggle v-model="danmakuShowWealthLevel" label="显示荣耀等级" class="setting-group" />
 
-          <div class="setting-group toggle">
-            <label class="setting-label">显示大航海标识</label>
-            <input v-model="danmakuShowGuard" type="checkbox" class="toggle-checkbox" />
-          </div>
+          <SettingsToggle v-model="danmakuShowGuard" label="显示大航海标识" class="setting-group" />
 
-          <div class="setting-group toggle">
-            <label class="setting-label">显示大航海左侧高亮边界</label>
-            <input v-model="danmakuShowGuardBorder" type="checkbox" class="toggle-checkbox" />
-          </div>
+          <SettingsToggle v-model="danmakuShowGuardBorder" label="显示大航海左侧高亮边界" class="setting-group" />
 
-          <div class="setting-group toggle">
-            <label class="setting-label">显示房管标识</label>
-            <input v-model="danmakuShowAdmin" type="checkbox" class="toggle-checkbox" />
-          </div>
+          <SettingsToggle v-model="danmakuShowAdmin" label="显示房管标识" class="setting-group" />
 
-          <div class="setting-group toggle">
-            <label class="setting-label">显示弹幕时间</label>
-            <input v-model="danmakuShowTime" type="checkbox" class="toggle-checkbox" />
-          </div>
+          <SettingsToggle v-model="danmakuShowTime" label="显示弹幕时间" class="setting-group" />
 
           <div class="setting-group">
             <label class="setting-label">
@@ -1481,32 +1447,17 @@ const openProjectUrl = async () => {
 
         <!-- 礼物设置 -->
         <div v-show="activeSection === 'gift'" class="section">
-          <h3 class="section-title">礼物设置</h3>
+          <SettingsSectionTitle>礼物设置</SettingsSectionTitle>
 
-          <div class="setting-group toggle">
-            <label class="setting-label">合并相同礼物</label>
-            <input v-model="giftMergeDisplay" type="checkbox" class="toggle-checkbox" />
-          </div>
+          <SettingsToggle v-model="giftMergeDisplay" label="合并相同礼物" class="setting-group" />
 
-          <div class="setting-group toggle">
-            <label class="setting-label">显示免费礼物</label>
-            <input v-model="giftShowFree" type="checkbox" class="toggle-checkbox" />
-          </div>
+          <SettingsToggle v-model="giftShowFree" label="显示免费礼物" class="setting-group" />
 
-          <div class="setting-group toggle">
-            <label class="setting-label">显示粉丝牌勋章</label>
-            <input v-model="giftShowMedal" type="checkbox" class="toggle-checkbox" />
-          </div>
+          <SettingsToggle v-model="giftShowMedal" label="显示粉丝牌勋章" class="setting-group" />
 
-          <div class="setting-group toggle">
-            <label class="setting-label">SC与礼物合并展示</label>
-            <input v-model="scMergeWithGift" type="checkbox" class="toggle-checkbox" />
-          </div>
+          <SettingsToggle v-model="scMergeWithGift" label="SC与礼物合并展示" class="setting-group" />
 
-          <div class="setting-group toggle">
-            <label class="setting-label">显示礼物时间</label>
-            <input v-model="giftShowTime" type="checkbox" class="toggle-checkbox" />
-          </div>
+          <SettingsToggle v-model="giftShowTime" label="显示礼物时间" class="setting-group" />
 
           <div class="setting-group">
             <label class="setting-label">
@@ -1516,10 +1467,7 @@ const openProjectUrl = async () => {
             <input v-model.number="giftMinPrice" type="range" min="0" max="1000" step="10" class="setting-slider" />
           </div>
 
-          <div class="setting-group toggle">
-            <label class="setting-label">礼物过期灰显</label>
-            <input v-model="giftExpireEnabled" type="checkbox" class="toggle-checkbox" />
-          </div>
+          <SettingsToggle v-model="giftExpireEnabled" label="礼物过期灰显" class="setting-group" />
 
           <div v-if="giftExpireEnabled" class="setting-group">
             <label class="setting-label">
@@ -1529,12 +1477,9 @@ const openProjectUrl = async () => {
             <input v-model.number="giftExpireMinutes" type="range" min="1" max="30" step="1" class="setting-slider" />
           </div>
 
-          <h3 class="section-title section-subtitle">全屏特效</h3>
+          <SettingsSectionTitle class="section-subtitle">全屏特效</SettingsSectionTitle>
 
-          <div class="setting-group toggle">
-            <label class="setting-label">启用礼物全屏特效</label>
-            <input v-model="giftEffectEnabled" type="checkbox" class="toggle-checkbox" />
-          </div>
+          <SettingsToggle v-model="giftEffectEnabled" label="启用礼物全屏特效" class="setting-group" />
 
           <div v-if="giftEffectEnabled" class="setting-group">
             <label class="setting-label">
@@ -1563,17 +1508,11 @@ const openProjectUrl = async () => {
 
         <!-- 观众设置 -->
         <div v-show="activeSection === 'audience'" class="section">
-          <h3 class="section-title">观众设置</h3>
+          <SettingsSectionTitle>观众设置</SettingsSectionTitle>
 
-          <div class="setting-group toggle">
-            <label class="setting-label">显示粉丝勋章</label>
-            <input v-model="audienceShowMedal" type="checkbox" class="toggle-checkbox" />
-          </div>
+          <SettingsToggle v-model="audienceShowMedal" label="显示粉丝勋章" class="setting-group" />
 
-          <div class="setting-group toggle">
-            <label class="setting-label">自动刷新贡献榜</label>
-            <input v-model="audienceAutoRefreshEnabled" type="checkbox" class="toggle-checkbox" />
-          </div>
+          <SettingsToggle v-model="audienceAutoRefreshEnabled" label="自动刷新贡献榜" class="setting-group" />
 
           <div v-if="audienceAutoRefreshEnabled" class="setting-group">
             <label class="setting-label">
@@ -1602,38 +1541,20 @@ const openProjectUrl = async () => {
             <div class="setting-hint">可设置 10 秒到 5 分钟。</div>
           </div>
 
-          <h3 class="section-title" style="margin-top: 24px;">入场通知</h3>
+          <SettingsSectionTitle style="margin-top: 24px;">入场通知</SettingsSectionTitle>
 
-          <div class="setting-group toggle">
-            <label class="setting-label">启用进房面板</label>
-            <input v-model="entryShowEnabled" type="checkbox" class="toggle-checkbox" />
-          </div>
+          <SettingsToggle v-model="entryShowEnabled" label="启用进房面板" class="setting-group" />
 
           <template v-if="entryShowEnabled">
-            <div class="setting-group toggle">
-              <label class="setting-label">在互动栏显示</label>
-              <input v-model="entryPanelShowInInteraction" type="checkbox" class="toggle-checkbox" />
-            </div>
+            <SettingsToggle v-model="entryPanelShowInInteraction" label="在互动栏显示" class="setting-group" />
 
-            <div class="setting-group toggle">
-              <label class="setting-label">在观众栏显示</label>
-              <input v-model="entryPanelShowInAudience" type="checkbox" class="toggle-checkbox" />
-            </div>
+            <SettingsToggle v-model="entryPanelShowInAudience" label="在观众栏显示" class="setting-group" />
 
-            <div class="setting-group toggle">
-              <label class="setting-label">显示分割线</label>
-              <input v-model="entryPanelShowDivider" type="checkbox" class="toggle-checkbox" />
-            </div>
+            <SettingsToggle v-model="entryPanelShowDivider" label="显示分割线" class="setting-group" />
 
-            <div class="setting-group toggle">
-              <label class="setting-label">显示粉丝勋章</label>
-              <input v-model="entryShowMedal" type="checkbox" class="toggle-checkbox" />
-            </div>
+            <SettingsToggle v-model="entryShowMedal" label="显示粉丝勋章" class="setting-group" />
 
-            <div class="setting-group toggle">
-              <label class="setting-label">显示舰队标识</label>
-              <input v-model="entryShowGuard" type="checkbox" class="toggle-checkbox" />
-            </div>
+            <SettingsToggle v-model="entryShowGuard" label="显示舰队标识" class="setting-group" />
 
             <div class="setting-group">
               <label class="setting-label">显示范围</label>
@@ -1665,7 +1586,7 @@ const openProjectUrl = async () => {
 
         <!-- 特别关注 -->
         <div v-show="activeSection === 'special-follow'" class="section">
-          <h3 class="section-title">特别关注</h3>
+          <SettingsSectionTitle>特别关注</SettingsSectionTitle>
 
           <div class="info-box">
             <span class="info-icon">⭐</span>
@@ -1709,7 +1630,7 @@ const openProjectUrl = async () => {
 
         <!-- 弹幕过滤 -->
         <div v-show="activeSection === 'danmaku-filter'" class="section">
-          <h3 class="section-title">弹幕过滤</h3>
+          <SettingsSectionTitle>弹幕过滤</SettingsSectionTitle>
 
           <div class="info-box">
             <span class="info-icon">🚫</span>
@@ -1810,10 +1731,10 @@ const openProjectUrl = async () => {
 
         <!-- 屏蔽词 -->
         <div v-show="activeSection === 'shield-keyword'" class="section">
-          <h3 class="section-title">
+          <SettingsSectionTitle>
             屏蔽词
             <span v-if="shieldMaxLimit" class="shield-count">{{ shieldKeywords.length }} / {{ shieldMaxLimit }}</span>
-          </h3>
+          </SettingsSectionTitle>
 
           <div class="info-box">
             <span class="info-icon">❗</span>
@@ -1867,7 +1788,7 @@ const openProjectUrl = async () => {
 
         <!-- 关于 -->
         <div v-show="activeSection === 'about'" class="section">
-          <h3 class="section-title">关于</h3>
+          <SettingsSectionTitle>关于</SettingsSectionTitle>
 
           <div class="about-info-card">
             <div class="about-row">
@@ -1902,7 +1823,7 @@ const openProjectUrl = async () => {
 
         <!-- 手动测试 -->
         <div v-show="activeSection === 'test'" class="section">
-          <h3 class="section-title">手动测试</h3>
+          <SettingsSectionTitle>手动测试</SettingsSectionTitle>
 
           <RawEventDumpPanel v-if="activeSection === 'test'" />
 
@@ -2012,6 +1933,8 @@ const openProjectUrl = async () => {
 </template>
 
 <style scoped lang="scss">
+@use "@/styles/settings-controls" as settings;
+
 .settings-window {
   position: relative;
   display: flex;
@@ -2073,15 +1996,6 @@ const openProjectUrl = async () => {
 
 .section {
   animation: fadeIn 0.2s ease;
-}
-
-.section-title {
-  font-size: var(--font-size-base);
-  font-weight: 600;
-  color: var(--text-primary);
-  margin-bottom: 16px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border-color);
 }
 
 .info-box {
@@ -2189,12 +2103,6 @@ const openProjectUrl = async () => {
 
 .setting-group {
   margin-bottom: 16px;
-
-  &.toggle {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
 }
 
 .setting-label {
@@ -2212,23 +2120,8 @@ const openProjectUrl = async () => {
 }
 
 .setting-input {
+  @include settings.control;
   width: 100%;
-  padding: 8px 12px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-sm);
-  color: var(--text-primary);
-  font-size: var(--font-size-sm);
-  outline: none;
-  transition: border-color 0.2s;
-
-  &:focus {
-    border-color: var(--accent-primary);
-  }
-
-  &::placeholder {
-    color: var(--text-muted);
-  }
 }
 
 .setting-textarea {
@@ -2322,9 +2215,8 @@ const openProjectUrl = async () => {
 }
 
 .setting-hint {
+  @include settings.hint;
   margin-top: 6px;
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
 }
 
 .section-subtitle {
@@ -2547,19 +2439,9 @@ const openProjectUrl = async () => {
 }
 
 .setting-select {
+  @include settings.control;
   width: 100%;
-  padding: 8px 12px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-sm);
-  color: var(--text-primary);
-  font-size: var(--font-size-sm);
-  outline: none;
   cursor: pointer;
-
-  &:focus {
-    border-color: var(--accent-primary);
-  }
 
   option {
     background: var(--bg-secondary);
@@ -2804,41 +2686,10 @@ const openProjectUrl = async () => {
   }
 }
 
-.toggle-checkbox {
-  appearance: none;
-  width: 40px;
-  height: 20px;
-  background: var(--bg-card);
-  border-radius: 10px;
-  position: relative;
-  cursor: pointer;
-  transition: background 0.2s;
-  flex-shrink: 0;
-
-  &::after {
-    content: '';
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 16px;
-    height: 16px;
-    background: var(--text-muted);
-    border-radius: 50%;
-    transition: all 0.2s;
-  }
-
-  &:checked {
-    background: var(--accent-primary);
-
-    &::after {
-      left: 22px;
-      background: white;
-    }
-  }
-}
-
 .settings-footer {
   display: flex;
+  flex-shrink: 0;
+  gap: 12px;
   align-items: center;
   justify-content: space-between;
   padding: 10px 16px;
@@ -2852,6 +2703,8 @@ const openProjectUrl = async () => {
 }
 
 .save-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
   padding: 8px 20px;
   background: var(--bg-active);
   color: var(--text-primary);

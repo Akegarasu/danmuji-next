@@ -29,7 +29,7 @@ onUnmounted(async () => {
 </script>
 
 <template>
-  <div class="extension-window">
+  <div class="extension-window" :class="{ 'window-unfocused': !isWindowFocused }">
     <TitleBar
       title="扩展"
       :show-settings-btn="false"
@@ -38,17 +38,19 @@ onUnmounted(async () => {
     />
 
     <!-- 扩展 Tab 栏 -->
-    <div class="ext-tab-bar">
+    <nav class="ext-tab-bar" aria-label="扩展功能">
       <button
         v-for="tab in tabs"
         :key="tab.id"
         class="ext-tab-item"
+        type="button"
+        :aria-current="activeTab === tab.id ? 'page' : undefined"
         :class="{ active: activeTab === tab.id }"
         @click="activeTab = tab.id"
       >
         {{ tab.label }}
       </button>
-    </div>
+    </nav>
 
     <div class="content">
       <KeepAlive>
@@ -72,12 +74,13 @@ onUnmounted(async () => {
 
 .ext-tab-bar {
   display: flex;
-  height: var(--tab-bar-height);
+  min-height: var(--tab-bar-height);
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
-  padding: 4px;
+  padding: 8px;
   gap: 4px;
   overflow-x: auto;
+  flex-shrink: 0;
 
   &::-webkit-scrollbar {
     height: 0;
@@ -88,13 +91,14 @@ onUnmounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 16px;
+  padding: 8px 12px;
   background: transparent;
   border: none;
   border-radius: var(--border-radius-sm);
   color: var(--text-secondary);
-  font-size: var(--font-size-sm);
-  font-weight: 500;
+  font-size: var(--font-size-xs);
+  font-family: inherit;
+  line-height: 1.5;
   cursor: pointer;
   white-space: nowrap;
   transition: background 0.15s, color 0.15s;
@@ -102,6 +106,11 @@ onUnmounted(async () => {
   &:hover {
     color: var(--text-primary);
     background: var(--bg-hover);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: -2px;
   }
 
   &.active {
@@ -112,6 +121,8 @@ onUnmounted(async () => {
 
 .content {
   flex: 1;
+  min-height: 0;
+  min-width: 0;
   overflow: hidden;
   position: relative;
 }

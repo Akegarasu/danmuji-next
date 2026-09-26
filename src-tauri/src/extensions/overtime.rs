@@ -84,6 +84,13 @@ pub struct GiftRule {
     pub random_ranges: Vec<RandomRange>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum BlindGiftMode {
+    Revealed,
+    Original,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TimerConfig {
@@ -91,6 +98,7 @@ pub struct TimerConfig {
     pub initial_seconds: f64,
     pub show_rules: bool,
     pub show_notice: bool,
+    pub blind_gift_mode: BlindGiftMode,
     pub rules: Vec<GiftRule>,
 }
 
@@ -101,6 +109,7 @@ impl Default for TimerConfig {
             initial_seconds: 3600.0,
             show_rules: true,
             show_notice: true,
+            blind_gift_mode: BlindGiftMode::Revealed,
             rules: Vec::new(),
         }
     }
@@ -341,6 +350,11 @@ impl Extension for Overtime {
         if !self.config.enabled || gift.num == 0 {
             return false;
         }
+        // 只选择一种身份匹配，盲盒与爆出礼物不会同时触发；普通礼物不受影响。
+        let (gift_id, gift_name) = match (self.config.blind_gift_mode, &gift.blind_gift) {
+            (BlindGiftMode::Original, Some(blind)) => (blind.gift_id, &blind.gift_name),
+            _ => (gift.gift_id, &gift.gift_name),
+        };
         let rules: Vec<_> = self
             .config
             .rules
@@ -348,8 +362,8 @@ impl Extension for Overtime {
             .filter(|rule| {
                 rule.enabled
                     && match rule.gift_id {
-                        Some(id) => id == gift.gift_id,
-                        None => rule.gift_name.trim() == gift.gift_name,
+                        Some(id) => id == gift_id,
+                        None => rule.gift_name.trim() == gift_name,
                     }
             })
             .cloned()
@@ -385,7 +399,7 @@ impl Extension for Overtime {
         self.sequence += 1;
         self.notices.push(GiftNotice {
             id: self.sequence,
-            gift_name: gift.gift_name.clone(),
+            gift_name: gift_name.clone(),
             sender_name: gift.sender_name.clone(),
             num: gift.num,
             delta_ms: self.remaining_ms - before,
@@ -415,6 +429,7 @@ mod tests {
             gift_name: "小心心".into(),
             sender_name: "测试用户".into(),
             num,
+            blind_gift: None,
         }
     }
     fn rule(action: Action, value: f64) -> GiftRule {
@@ -457,6 +472,78 @@ mod tests {
         t.config.enabled = false;
         assert!(!t.on_gift(&gift(2), now));
     }
+    #[test]
+    fn blind_gift_modes_match_only_selected_identity() {
+        use crate::live_events::ReceivedBlindGift;
+
+        let now = Instant::now();
+        for mode in [BlindGiftMode::Original, BlindGiftMode::Revealed] {
+            for by_id in [false, true] {
+                for per_gift in [false, true] {
+                    let mut timer = timer(now);
+                    timer.config.blind_gift_mode = mode;
+                    let mut revealed = rule(Action::Add, 10.0);
+                    revealed.per_gift = per_gift;
+                    let mut original = revealed.clone();
+                    original.id = "blind".into();
+                    original.gift_id = Some(32251);
+                    original.gift_name = "心动盲盒".into();
+                    original.value = 60.0;
+                    if !by_id {
+                        original.gift_id = None;
+                        revealed.gift_id = None;
+                    }
+                    timer.config.rules = vec![original, revealed];
+                    let mut received = gift(3);
+                    received.blind_gift = Some(ReceivedBlindGift {
+                        gift_id: 32251,
+                        gift_name: "心动盲盒".into(),
+                    });
+                    assert!(timer.on_gift(&received, now));
+                    let (value, name) = if mode == BlindGiftMode::Original {
+                        (60.0, "心动盲盒")
+                    } else {
+                        (10.0, "小心心")
+                    };
+                    let count = if per_gift { 3.0 } else { 1.0 };
+                    assert_eq!(timer.remaining_ms, 3_600_000.0 + value * count * 1000.0);
+                    assert_eq!(timer.notices[0].gift_name, name);
+                    assert_eq!(timer.notices[0].num, 3);
+                    assert_eq!(timer.notices[0].results.len(), 1);
+
+                    // 所选身份没有规则时，不回退到另一种身份。
+                    let selected = if mode == BlindGiftMode::Original { 0 } else { 1 };
+                    timer.config.rules[selected].enabled = false;
+                    assert!(!timer.on_gift(&received, now));
+                    timer.config.rules[selected].enabled = true;
+
+                    // 切换模式不改变普通礼物的匹配和计数。
+                    let before = timer.remaining_ms;
+                    assert!(timer.on_gift(&gift(2), now));
+                    let count = if per_gift { 2.0 } else { 1.0 };
+                    assert_eq!(timer.remaining_ms, before + 10_000.0 * count);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn blind_gift_mode_restores_and_old_checkpoints_keep_revealed_behavior() {
+        let now = Instant::now();
+        let mut timer = timer(now);
+        timer.request(json!({"type":"configure", "config":{
+            "enabled":true, "blind_gift_mode":"original"
+        }}), now).unwrap();
+        let saved = timer.checkpoint(now);
+        let mut restored = Overtime::new(now);
+        restored.restore(saved.clone(), now).unwrap();
+        assert_eq!(restored.snapshot(now)["config"]["blind_gift_mode"], "original");
+        let mut old = saved;
+        old["config"].as_object_mut().unwrap().remove("blind_gift_mode");
+        restored.restore(old, now).unwrap();
+        assert_eq!(restored.config.blind_gift_mode, BlindGiftMode::Revealed);
+    }
+
     #[test]
     fn actions_clamp_and_zero_does_not_produce_nan() {
         let now = Instant::now();

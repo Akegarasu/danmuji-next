@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use tokio::sync::mpsc;
 
 use crate::archive::ArchiveEvent;
-use crate::live_events::{ReceivedGift, ReceivedText, TextSource};
+use crate::live_events::{ReceivedBlindGift, ReceivedGift, ReceivedText, TextSource};
 use crate::live_types::*;
 use blivedm::api::ContributionRankUser;
 use blivedm::{
@@ -218,6 +218,10 @@ impl LiveData {
             gift_name: gift.gift_name.clone(),
             sender_name: gift.sender_name.clone(),
             num: gift.num,
+            blind_gift: gift.blind_gift.as_ref().map(|blind| ReceivedBlindGift {
+                gift_id: blind.original_gift_id,
+                gift_name: blind.original_gift_name.clone(),
+            }),
         };
         let is_combo = gift.is_combo();
         let (id, merge_key) = if let Some(batch_combo_id) = gift.batch_combo_id.as_deref() {
@@ -450,6 +454,7 @@ impl LiveData {
             gift_name: toast.guard_name().to_string(),
             sender_name: toast.username.clone(),
             num: toast.num,
+            blind_gift: None,
         };
         let total_value = toast.price / 100;
         let is_paid = total_value > 0;

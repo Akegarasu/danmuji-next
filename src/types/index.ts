@@ -189,6 +189,8 @@ export interface AppSettings {
   cookie: string
   user: UserLoginInfo | null
   windows: Record<string, WindowSettings>
+  /** 设置、扩展和存档窗口共用的不透明度 */
+  otherWindowOpacity: number
   display: DisplaySettings
   speech: SpeechSettings
   tabOrder: TabType[]
