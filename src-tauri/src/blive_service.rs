@@ -14,20 +14,16 @@ use futures_util::StreamExt;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::task::JoinHandle;
-use tokio::time::interval;
 
 use crate::archive::{ArchiveEvent, ArchiveManager};
+use crate::live_data::{LiveData, WindowSubscription};
+use crate::live_types::*;
+use crate::speech::SpeechService;
 use blivedm::api::{
     get_all_guard_top_list, get_contribution_rank, get_contribution_rank_by_type, get_danmu_info,
     get_room_init, ContributionRankResponse, ContributionRankType, GuardTopListResponse, RoomInfo,
 };
 use blivedm::{parse_notification, BliveDmClient, Error as BliveError, Event};
-use crate::kv_store::{VideoRequestStore, VotingStore};
-use crate::live_data::{LiveData, WindowSubscription};
-use crate::live_types::*;
-use crate::speech::SpeechService;
-use crate::video_info;
-use crate::voting::{Poll, VoteKeyType, Voter};
 
 // ==================== 服务状态 ====================
 
@@ -57,27 +53,28 @@ pub struct BliveService {
     state: RwLock<ServiceState>,
     /// 当前房主 UID 的无锁快照；仅在连接状态切换时更新。
     streamer_uid: AtomicU64,
-    live_data: Arc<Mutex<LiveData>>,
+    live_data: Mutex<LiveData>,
     speech: Arc<SpeechService>,
     extensions: Arc<crate::extensions::ExtensionHost>,
+    /// 串行化批次发布，防止测试事件和周期推送交错。
+    publish_lock: Mutex<()>,
     /// 窗口订阅: window_label -> subscription
     subscriptions: RwLock<HashMap<String, WindowSubscription>>,
 }
 
 impl BliveService {
     pub fn new(
-        vr_store: VideoRequestStore,
-        voting_store: VotingStore,
         speech: Arc<SpeechService>,
         extensions: Arc<crate::extensions::ExtensionHost>,
     ) -> Self {
         Self {
             state: RwLock::new(ServiceState::default()),
             streamer_uid: AtomicU64::new(0),
-            live_data: Arc::new(Mutex::new(LiveData::new(vr_store, voting_store))),
+            live_data: Mutex::new(LiveData::default()),
             speech,
             extensions,
             subscriptions: RwLock::new(HashMap::new()),
+            publish_lock: Mutex::new(()),
         }
     }
 
@@ -90,7 +87,11 @@ impl BliveService {
     }
 
     /// 解析并处理手动输入的原始 B 站通知事件。
-    pub async fn process_test_event(&self, app: &AppHandle, event_json: &str) -> Result<(), String> {
+    pub async fn process_test_event(
+        &self,
+        app: &AppHandle,
+        event_json: &str,
+    ) -> Result<(), String> {
         let event = parse_notification(event_json.as_bytes(), None)
             .map_err(|error| format!("解析事件失败: {error}"))?;
 
@@ -146,10 +147,7 @@ impl BliveService {
                     list.first().map(|user| user.uid)
                 );
                 if rank_type == ContributionRankType::Online {
-                    self.live_data
-                        .lock()
-                        .await
-                        .set_contribution_rank_full(list);
+                    self.live_data.lock().await.set_contribution_rank_full(list);
                 }
                 Ok(rank)
             }
@@ -174,17 +172,12 @@ impl BliveService {
             .ok_or_else(|| "未连接房间".to_string())?;
         let http_client = reqwest::Client::new();
 
-        get_all_guard_top_list(
-            &http_client,
-            room_info.room_id,
-            room_info.uid,
-            Some(cookie),
-        )
-        .await
-        .map_err(|error| {
-            log::warn!("[GuardTopList] refresh failed: {}", error);
-            format!("获取大航海榜失败: {error}")
-        })
+        get_all_guard_top_list(&http_client, room_info.room_id, room_info.uid, Some(cookie))
+            .await
+            .map_err(|error| {
+                log::warn!("[GuardTopList] refresh failed: {}", error);
+                format!("获取大航海榜失败: {error}")
+            })
     }
 
     /// 订阅事件
@@ -208,92 +201,7 @@ impl BliveService {
 
     /// 获取数据快照
     pub async fn get_snapshot(&self, event_types: HashSet<EventType>) -> DataSnapshot {
-        let data = self.live_data.lock().await;
-        data.snapshot(&event_types)
-    }
-
-    // ==================== 点播管理 ====================
-
-    /// 从 KV Store 加载持久化的点播数据
-    pub async fn load_video_requests(&self) {
-        let mut data = self.live_data.lock().await;
-        data.load_video_requests();
-    }
-
-    /// 异步获取视频信息（批量）
-    async fn spawn_video_fetches(&self, to_fetch: Vec<(String, String, u64, Option<u64>)>) {
-        for (request_id, video_id, _uid, _sc_price) in to_fetch {
-            let live_data = self.live_data.clone();
-            tokio::spawn(async move {
-                let result = video_info::fetch_video_info(&video_id).await;
-                let mut data = live_data.lock().await;
-                data.update_video_request_info(&request_id, result);
-            });
-        }
-    }
-
-    /// 标记点播为已看
-    pub async fn mark_video_watched(&self, request_id: &str, watched: bool) {
-        let mut data = self.live_data.lock().await;
-        data.set_video_watched(request_id, watched);
-    }
-
-    /// 删除点播请求
-    pub async fn remove_video_request(&self, request_id: &str) {
-        let mut data = self.live_data.lock().await;
-        data.remove_video_request(request_id);
-    }
-
-    /// 清空已看
-    pub async fn clear_watched_videos(&self) {
-        let mut data = self.live_data.lock().await;
-        data.clear_watched_videos();
-    }
-
-    /// 清空所有
-    pub async fn clear_all_videos(&self) {
-        let mut data = self.live_data.lock().await;
-        data.clear_all_videos();
-    }
-
-    // ==================== 投票管理 ====================
-
-    /// 创建投票
-    pub async fn create_poll(
-        &self,
-        title: String,
-        options: Vec<(String, String)>,
-        key_type: VoteKeyType,
-        duration_secs: Option<u64>,
-    ) -> Poll {
-        let mut data = self.live_data.lock().await;
-        let poll = data.voting.create_poll(title, options, key_type, duration_secs);
-        data.pending_updates.push(DataUpdate::VotingUpdate(poll.clone()));
-        poll
-    }
-
-    /// 结束投票
-    pub async fn end_poll(&self, poll_id: &str) -> Result<Poll, String> {
-        let mut data = self.live_data.lock().await;
-        let poll = data.voting.end_poll(poll_id).ok_or("投票不存在或已结束")?;
-        data.pending_updates.push(DataUpdate::VotingUpdate(poll.clone()));
-        Ok(poll)
-    }
-
-    /// 删除投票
-    pub async fn delete_poll(&self, poll_id: &str) {
-        let mut data = self.live_data.lock().await;
-        data.voting.delete_poll(poll_id);
-        let polls = data.voting.get_all_polls_for_snapshot();
-        data.pending_updates.push(DataUpdate::VotingSync(polls));
-    }
-
-    /// 获取投票选项的投票者列表
-    pub async fn get_poll_voters(&self, poll_id: &str, option_key: &str) -> Result<Vec<Voter>, String> {
-        let data = self.live_data.lock().await;
-        data.voting
-            .get_poll_voters(poll_id, option_key)
-            .ok_or_else(|| "投票或选项不存在".to_string())
+        self.live_data.lock().await.snapshot(&event_types)
     }
 
     pub async fn connect(
@@ -460,17 +368,6 @@ impl BliveService {
                 }
             }
 
-            // 启动数据推送任务
-            let app_for_push = app_clone.clone();
-            let service_for_push = service.clone();
-            let push_task = tokio::spawn(async move {
-                let mut ticker = interval(DATA_PUSH_INTERVAL);
-                loop {
-                    ticker.tick().await;
-                    service_for_push.push_updates(&app_for_push).await;
-                }
-            });
-
             // 事件处理循环
             loop {
                 tokio::select! {
@@ -500,7 +397,6 @@ impl BliveService {
                 }
             }
 
-            push_task.abort();
             service.push_updates(&app_clone).await;
             service.speech.reset_session();
 
@@ -566,9 +462,9 @@ impl BliveService {
 
         match event {
             Event::Danmaku(danmaku) => {
-                let to_fetch = data.process_danmaku(danmaku);
+                let received = data.process_danmaku(danmaku);
                 drop(data);
-                self.spawn_video_fetches(to_fetch).await;
+                self.extensions.dispatch_text(&received);
             }
             Event::Gift(gift) => {
                 let received = data.process_gift(*gift);
@@ -588,9 +484,9 @@ impl BliveService {
                 }
             }
             Event::SuperChat(sc) => {
-                let to_fetch = data.process_superchat(sc);
+                let received = data.process_superchat(sc);
                 drop(data);
-                self.spawn_video_fetches(to_fetch).await;
+                self.extensions.dispatch_text(&received);
             }
             // GUARD_BUY 中是标准标价（例如舰长固定 198 元），不能用于实际营收。
             // 同一订单随后下发的 Toast 才包含连续包月/续费后的成交总价。
@@ -620,7 +516,11 @@ impl BliveService {
                         room_info.live_status = 1; // 1 = 直播中
                     }
                 }
-                self.live_data.lock().await.pending_updates.push(DataUpdate::LiveStart);
+                self.live_data
+                    .lock()
+                    .await
+                    .pending_updates
+                    .push(DataUpdate::LiveStart);
             }
             Event::LiveStop(preparing) => {
                 log::info!(
@@ -637,7 +537,11 @@ impl BliveService {
                         // 0 = 未开播, 2 = 轮播中
                     }
                 }
-                self.live_data.lock().await.pending_updates.push(DataUpdate::LiveStop);
+                self.live_data
+                    .lock()
+                    .await
+                    .pending_updates
+                    .push(DataUpdate::LiveStop);
             }
             Event::Raw { .. } => {} // 忽略未处理的命令
             _ => {}                 // blivedm 的 Event 可向后扩展
@@ -645,7 +549,8 @@ impl BliveService {
     }
 
     /// 推送更新到前端（按窗口订阅过滤）
-    async fn push_updates(&self, app: &AppHandle) {
+    pub(crate) async fn push_updates(&self, app: &AppHandle) {
+        let _publication = self.publish_lock.lock().await;
         let updates = {
             let mut data = self.live_data.lock().await;
             data.take_pending_updates()

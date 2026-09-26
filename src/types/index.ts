@@ -17,8 +17,6 @@ export type EventType =
   | 'contribution_rank'  // 贡献排行
   | 'stats'          // 统计数据
   | 'live_status'    // 直播状态
-  | 'video_request'  // 点播请求
-  | 'voting'         // 投票
   | 'interact_word'  // 进入直播间
 
 /** 所有事件类型 */
@@ -29,8 +27,6 @@ export const ALL_EVENT_TYPES: EventType[] = [
   'contribution_rank',
   'stats',
   'live_status',
-  'video_request',
-  'voting',
   'interact_word'
 ]
 
@@ -546,71 +542,6 @@ export interface GiftEffectTrigger {
   timestamp: number
 }
 
-/** 视频信息（来自后端） */
-export interface VideoInfo {
-  bvid: string
-  aid: number
-  title: string
-  cover: string
-  view: number
-  owner_name: string
-  owner_face: string
-  duration: number
-}
-
-/** 点播来源 */
-export type VideoRequestSource = 'danmaku' | 'superchat'
-
-/** 点播请求项（来自后端） */
-export interface VideoRequestItem {
-  id: string
-  video_id: string
-  username: string
-  uid: number
-  source: VideoRequestSource
-  sc_price?: number
-  timestamp: number
-  watched: boolean
-  video_info?: VideoInfo
-  loading: boolean
-  error?: string
-}
-
-// ==================== 投票相关 ====================
-
-/** 投票选项标识类型 */
-export type VoteKeyType = 'letter' | 'number'
-
-/** 投票状态 */
-export type PollStatus = 'active' | 'ended'
-
-/** 投票人 */
-export interface Voter {
-  uid: number
-  username: string
-  timestamp: number
-}
-
-/** 投票选项 */
-export interface PollOption {
-  key: string
-  label: string
-  vote_count: number
-}
-
-/** 投票 */
-export interface Poll {
-  id: string
-  title: string
-  key_type: VoteKeyType
-  options: PollOption[]
-  status: PollStatus
-  voted_uids: Record<string, string>
-  total_votes: number
-  created_at: number
-  end_at: number | null
-}
-
 /** 数据更新类型（来自后端） */
 export type DataUpdate =
   | { type: 'DanmakuAppend'; data: ProcessedDanmaku[] }
@@ -623,11 +554,6 @@ export type DataUpdate =
   | { type: 'ContributionsUpdate'; data: UserContribution[] }
   | { type: 'LiveStart' }
   | { type: 'LiveStop' }
-  | { type: 'VideoRequestAppend'; data: VideoRequestItem }
-  | { type: 'VideoRequestUpdate'; data: VideoRequestItem }
-  | { type: 'VideoRequestSync'; data: VideoRequestItem[] }
-  | { type: 'VotingUpdate'; data: Poll }
-  | { type: 'VotingSync'; data: Poll[] }
   | { type: 'InteractWordAppend'; data: ProcessedInteractWord[] }
 
 /** 数据快照（来自后端） */
@@ -639,8 +565,6 @@ export interface DataSnapshot {
   contribution_rank_full?: ContributionRankUser[]
   contributions?: UserContribution[]
   stats?: LiveStats
-  video_requests?: VideoRequestItem[]
-  voting_polls?: Poll[]
   interact_word_list?: ProcessedInteractWord[]
 }
 

@@ -8,8 +8,6 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useDanmakuStore } from '@/stores/danmaku'
 import { useSettingsStore } from '@/stores/settings'
-import { useVideoRequestStore } from '@/stores/video-request'
-import { useVotingStore } from '@/stores/voting'
 import type {
   ContributionRankResponse,
   ContributionRankType,
@@ -437,14 +435,6 @@ function applySnapshot(snapshot: DataSnapshot, store: ReturnType<typeof useDanma
   if (snapshot.stats) {
     store.updateStats(snapshot.stats)
   }
-  if (snapshot.video_requests) {
-    const videoStore = useVideoRequestStore()
-    videoStore.syncRequests(snapshot.video_requests)
-  }
-  if (snapshot.voting_polls) {
-    const votingStore = useVotingStore()
-    votingStore.syncPolls(snapshot.voting_polls)
-  }
   if (snapshot.interact_word_list) {
     store.setInteractWordList(snapshot.interact_word_list)
   }
@@ -496,36 +486,6 @@ function processDataUpdate(update: DataUpdate, store: ReturnType<typeof useDanma
       logger.debug('Live stopped')
       store.updateRoomInfo({ liveStatus: 0 })
       break
-
-    case 'VideoRequestAppend': {
-      const videoStore = useVideoRequestStore()
-      videoStore.appendRequest(update.data)
-      break
-    }
-
-    case 'VideoRequestUpdate': {
-      const videoStore = useVideoRequestStore()
-      videoStore.updateRequest(update.data)
-      break
-    }
-
-    case 'VideoRequestSync': {
-      const videoStore = useVideoRequestStore()
-      videoStore.syncRequests(update.data)
-      break
-    }
-
-    case 'VotingUpdate': {
-      const votingStore = useVotingStore()
-      votingStore.updatePoll(update.data)
-      break
-    }
-
-    case 'VotingSync': {
-      const votingStore = useVotingStore()
-      votingStore.syncPolls(update.data)
-      break
-    }
 
     case 'InteractWordAppend':
       store.appendInteractWords(update.data)

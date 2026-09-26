@@ -7,8 +7,6 @@ use std::time::Duration;
 
 use blivedm::api::ContributionRankUser;
 use blivedm::{GuardLevel, Medal, User};
-use crate::video_info::VideoInfo;
-use crate::voting::Poll;
 
 // ==================== 常量 ====================
 
@@ -42,10 +40,6 @@ pub enum EventType {
     Stats,
     /// 直播状态（开播/下播）
     LiveStatus,
-    /// 点播请求
-    VideoRequest,
-    /// 投票
-    Voting,
     /// 进入直播间
     InteractWord,
 }
@@ -263,35 +257,6 @@ pub struct LiveStats {
     pub online_count: u32,  // 在线人数（观看人数）
 }
 
-// ==================== 点播相关 ====================
-
-/// 点播请求（发送给前端）
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VideoRequestItem {
-    pub id: String,
-    pub video_id: String,
-    pub username: String,
-    pub uid: u64,
-    pub source: VideoRequestSource,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sc_price: Option<u64>,
-    pub timestamp: i64,
-    pub watched: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub video_info: Option<VideoInfo>,
-    pub loading: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-}
-
-/// 点播来源
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum VideoRequestSource {
-    Danmaku,
-    Superchat,
-}
-
 // ==================== 数据更新 ====================
 
 /// 数据更新（发送给前端）
@@ -309,13 +274,6 @@ pub enum DataUpdate {
     ContributionsUpdate(Vec<UserContribution>),
     LiveStart,
     LiveStop,
-    VideoRequestAppend(VideoRequestItem),
-    VideoRequestUpdate(VideoRequestItem),
-    VideoRequestSync(Vec<VideoRequestItem>),
-    /// 投票更新（单个投票状态变化：创建/投票/结束）
-    VotingUpdate(Poll),
-    /// 投票全量同步（删除后）
-    VotingSync(Vec<Poll>),
     /// 进入直播间通知
     InteractWordAppend(Vec<ProcessedInteractWord>),
 }
@@ -334,11 +292,6 @@ impl DataUpdate {
             DataUpdate::ContributionsUpdate(_) => EventType::ContributionRank,
             DataUpdate::LiveStart => EventType::LiveStatus,
             DataUpdate::LiveStop => EventType::LiveStatus,
-            DataUpdate::VideoRequestAppend(_) => EventType::VideoRequest,
-            DataUpdate::VideoRequestUpdate(_) => EventType::VideoRequest,
-            DataUpdate::VideoRequestSync(_) => EventType::VideoRequest,
-            DataUpdate::VotingUpdate(_) => EventType::Voting,
-            DataUpdate::VotingSync(_) => EventType::Voting,
             DataUpdate::InteractWordAppend(_) => EventType::InteractWord,
         }
     }
@@ -380,10 +333,6 @@ pub struct DataSnapshot {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stats: Option<LiveStats>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub video_requests: Option<Vec<VideoRequestItem>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub voting_polls: Option<Vec<Poll>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub interact_word_list: Option<Vec<ProcessedInteractWord>>,
 }
 
@@ -418,13 +367,4 @@ pub fn guard_level_to_u8(level: &GuardLevel) -> u8 {
         GuardLevel::Captain => 3,
         GuardLevel::None => 0,
     }
-}
-
-/// 去重后的单次收礼事件；数量尚未进行连击合并。
-#[derive(Debug, Clone)]
-pub struct ReceivedGift {
-    pub gift_id: u64,
-    pub gift_name: String,
-    pub sender_name: String,
-    pub num: u32,
 }

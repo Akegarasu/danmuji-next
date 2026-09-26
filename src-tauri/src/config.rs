@@ -26,16 +26,6 @@ pub fn get_window_kv_path() -> PathBuf {
     get_config_dir().join("window_states.json")
 }
 
-/// 获取点播数据 KV 存储文件路径
-pub fn get_video_request_kv_path() -> PathBuf {
-    get_config_dir().join("video_requests.json")
-}
-
-/// 获取投票数据 KV 存储文件路径
-pub fn get_voting_kv_path() -> PathBuf {
-    get_config_dir().join("voting.json")
-}
-
 /// 获取存档数据库文件路径
 pub fn get_archive_db_path() -> PathBuf {
     get_config_dir().join("archives.db")

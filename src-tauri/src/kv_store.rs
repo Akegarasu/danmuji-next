@@ -72,37 +72,3 @@ impl KVStore {
         fs::write(&self.file_path, json).map_err(|e| e.to_string())
     }
 }
-
-/// 点播数据专用 KV 存储（与窗口状态分离）
-#[derive(Debug)]
-pub struct VideoRequestStore(KVStore);
-
-impl VideoRequestStore {
-    pub fn new(file_path: PathBuf) -> Self {
-        Self(KVStore::new(file_path))
-    }
-}
-
-impl std::ops::Deref for VideoRequestStore {
-    type Target = KVStore;
-    fn deref(&self) -> &KVStore {
-        &self.0
-    }
-}
-
-/// 投票数据专用 KV 存储
-#[derive(Debug)]
-pub struct VotingStore(KVStore);
-
-impl VotingStore {
-    pub fn new(file_path: PathBuf) -> Self {
-        Self(KVStore::new(file_path))
-    }
-}
-
-impl std::ops::Deref for VotingStore {
-    type Target = KVStore;
-    fn deref(&self) -> &KVStore {
-        &self.0
-    }
-}

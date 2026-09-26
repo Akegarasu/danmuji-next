@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::Extension;
-use crate::live_types::ReceivedGift;
+use crate::live_events::ReceivedGift;
 
 // 限制在十年以内，避免恶意数量、倍率溢出和浏览器数值精度问题。
 const MAX_SECONDS: f64 = 315_360_000.0;
@@ -294,7 +294,7 @@ impl Extension for Overtime {
         Ok(())
     }
 
-    fn request(&mut self, request: Value, now: Instant) -> Result<(), String> {
+    fn request(&mut self, request: Value, now: Instant) -> Result<Value, String> {
         let request: TimerRequest =
             serde_json::from_value(request).map_err(|e| format!("无效的加班机操作：{e}"))?;
         // 先校验，失败不能改变正在运行的状态。
@@ -330,7 +330,11 @@ impl Extension for Overtime {
             }
             TimerRequest::Apply { action, value } => self.apply(action, value, 1),
         }
-        Ok(())
+        Ok(self.snapshot(now))
+    }
+
+    fn browser_visible(&self) -> bool {
+        true
     }
 
     fn on_gift(&mut self, gift: &ReceivedGift, now: Instant) -> bool {

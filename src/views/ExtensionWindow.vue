@@ -4,7 +4,6 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import TitleBar from '@/components/common/TitleBar.vue'
 import { extensionRegistry } from '@/components/extension/registry'
 import { initWindowManager, cleanupWindowManager } from '@/services/window-manager'
-import { initBliveClient, cleanupBliveClient } from '@/services/blive-client'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 
 const appWindow = getCurrentWindow()
@@ -18,7 +17,6 @@ const currentComponent = computed(() => tabs.find(tab => tab.id === activeTab.va
 
 onMounted(async () => {
   await initWindowManager(windowLabel)
-  await initBliveClient([...new Set(tabs.flatMap(tab => tab.liveEvents))])
   unlistenFocus = await appWindow.onFocusChanged(({ payload: focused }) => {
     isWindowFocused.value = focused
   })
@@ -26,7 +24,6 @@ onMounted(async () => {
 
 onUnmounted(async () => {
   unlistenFocus?.()
-  await cleanupBliveClient()
   await cleanupWindowManager(windowLabel)
 })
 </script>

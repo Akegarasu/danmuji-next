@@ -1,6 +1,8 @@
 //! Tauri 命令模块
 //! 所有暴露给前端的命令
 
+pub mod extensions;
+
 use serde_json::Value;
 use std::collections::HashSet;
 use std::fs;
@@ -11,29 +13,27 @@ use tauri::{
 
 use std::sync::Mutex;
 
-use crate::auth::{self, QRCodeData, QRCodeStatus, UserInfo};
 use crate::archive::{
     ArchiveManager, ArchiveOverview, ArchiveSearchItem, ArchiveSession, ArchiveStatistics,
     ArchivedDanmaku, ArchivedGift, ArchivedSuperChat, ArchivedUserName, PagedResult,
 };
+use crate::auth::{self, QRCodeData, QRCodeStatus, UserInfo};
 use crate::blive_service::BliveService;
-use crate::live_types::{
-    ConnectResult, ConnectionStatus, DataSnapshot, EventType, RoomInfoResponse, VideoRequestItem,
-};
-use crate::voting::{Poll, VoteKeyType, Voter};
-use blivedm::api::{
-    get_gift_effect_config as fetch_gift_effect_config, ContributionRankResponse,
-    ContributionRankType, GiftEffectConfig, GuardTopListResponse,
-};
 use crate::config::get_config_path;
 use crate::crypto;
 use crate::kv_store::KVStore;
+use crate::live_types::{
+    ConnectResult, ConnectionStatus, DataSnapshot, EventType, RoomInfoResponse,
+};
 use crate::lock_state::LockStateManager;
 use crate::speech::{
     SpeechRuntimeConfig, SpeechService, SpeechSettings, SpeechStatus, SpeechVoice,
 };
-use crate::video_info::{self, VideoInfo};
 use crate::window_state::{WindowConfig, WindowState};
+use blivedm::api::{
+    get_gift_effect_config as fetch_gift_effect_config, ContributionRankResponse,
+    ContributionRankType, GiftEffectConfig, GuardTopListResponse,
+};
 
 // ==================== 配置文件操作 ====================
 
@@ -44,7 +44,11 @@ static COOKIE_CACHE: Mutex<Option<(String, String)>> = Mutex::new(None);
 fn cache_lookup(key: &str, match_plain: bool) -> Option<String> {
     let cache = COOKIE_CACHE.lock().unwrap();
     cache.as_ref().and_then(|(plain, enc)| {
-        let (k, v) = if match_plain { (plain, enc) } else { (enc, plain) };
+        let (k, v) = if match_plain {
+            (plain, enc)
+        } else {
+            (enc, plain)
+        };
         (k == key).then(|| v.clone())
     })
 }
@@ -512,15 +516,9 @@ pub async fn get_gift_effect_config(
     base_version: Option<u64>,
 ) -> Result<GiftEffectConfig, String> {
     let client = reqwest::Client::new();
-    fetch_gift_effect_config(
-        &client,
-        room_id,
-        area_parent_id,
-        area_id,
-        base_version,
-    )
-    .await
-    .map_err(|error| format!("获取礼物特效配置失败: {error}"))
+    fetch_gift_effect_config(&client, room_id, area_parent_id, area_id, base_version)
+        .await
+        .map_err(|error| format!("获取礼物特效配置失败: {error}"))
 }
 
 /// 刷新贡献排行榜
@@ -559,19 +557,25 @@ pub async fn process_test_event(
 /// 查询用户手动保存原始事件的状态。
 #[tauri::command]
 pub async fn get_raw_dump_status() -> Result<crate::raw_event_dump::RawDumpStatus, String> {
-    tokio::task::spawn_blocking(crate::raw_event_dump::status).await.map_err(|e| e.to_string())
+    tokio::task::spawn_blocking(crate::raw_event_dump::status)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// 开始保存原始事件；每次新建文件，避免覆盖已有诊断日志。
 #[tauri::command]
 pub async fn start_raw_dump() -> Result<crate::raw_event_dump::RawDumpStatus, String> {
-    tokio::task::spawn_blocking(crate::raw_event_dump::start).await.map_err(|e| e.to_string())?
+    tokio::task::spawn_blocking(crate::raw_event_dump::start)
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// 停止并等待已接收消息全部写入文件。
 #[tauri::command]
 pub async fn stop_raw_dump() -> Result<crate::raw_event_dump::RawDumpStatus, String> {
-    tokio::task::spawn_blocking(crate::raw_event_dump::stop).await.map_err(|e| e.to_string())
+    tokio::task::spawn_blocking(crate::raw_event_dump::stop)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// 打开固定的 dump 保存目录。
@@ -581,7 +585,9 @@ pub async fn open_raw_dump_directory() -> Result<(), String> {
         let directory = crate::raw_event_dump::directory();
         std::fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
         open::that(directory).map_err(|e| format!("打开日志目录失败: {e}"))
-    }).await.map_err(|e| e.to_string())?
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// 订阅事件（窗口注册感兴趣的事件类型）
@@ -987,111 +993,6 @@ pub async fn create_extension_window(
     build_window(&app, &config, saved_state.as_ref())
 }
 
-// ==================== 视频信息 ====================
-
-/// 获取 Bilibili 视频信息
-#[tauri::command]
-pub async fn fetch_video_info(video_id: String) -> Result<VideoInfo, String> {
-    video_info::fetch_video_info(&video_id).await
-}
-
-/// 加载持久化的点播数据
-#[tauri::command]
-pub async fn load_video_requests(
-    service: State<'_, Arc<BliveService>>,
-) -> Result<Vec<VideoRequestItem>, String> {
-    service.load_video_requests().await;
-    let snapshot = service.get_snapshot([EventType::VideoRequest].into()).await;
-    Ok(snapshot.video_requests.unwrap_or_default())
-}
-
-/// 标记点播为已看/未看
-#[tauri::command]
-pub async fn mark_video_watched(
-    service: State<'_, Arc<BliveService>>,
-    request_id: String,
-    watched: bool,
-) -> Result<(), String> {
-    service.mark_video_watched(&request_id, watched).await;
-    Ok(())
-}
-
-/// 删除点播请求
-#[tauri::command]
-pub async fn remove_video_request(
-    service: State<'_, Arc<BliveService>>,
-    request_id: String,
-) -> Result<(), String> {
-    service.remove_video_request(&request_id).await;
-    Ok(())
-}
-
-/// 清空已看的点播
-#[tauri::command]
-pub async fn clear_watched_videos(
-    service: State<'_, Arc<BliveService>>,
-) -> Result<(), String> {
-    service.clear_watched_videos().await;
-    Ok(())
-}
-
-/// 清空所有点播
-#[tauri::command]
-pub async fn clear_all_videos(
-    service: State<'_, Arc<BliveService>>,
-) -> Result<(), String> {
-    service.clear_all_videos().await;
-    Ok(())
-}
-
-// ==================== 投票操作 ====================
-
-/// 创建投票
-#[tauri::command]
-pub async fn create_poll(
-    service: State<'_, Arc<BliveService>>,
-    title: String,
-    options: Vec<(String, String)>,
-    key_type: String,
-    duration_secs: Option<u64>,
-) -> Result<Poll, String> {
-    let key_type = match key_type.as_str() {
-        "letter" => VoteKeyType::Letter,
-        "number" => VoteKeyType::Number,
-        _ => return Err("无效的选项类型".to_string()),
-    };
-    Ok(service.create_poll(title, options, key_type, duration_secs).await)
-}
-
-/// 结束投票
-#[tauri::command]
-pub async fn end_poll(
-    service: State<'_, Arc<BliveService>>,
-    poll_id: String,
-) -> Result<Poll, String> {
-    service.end_poll(&poll_id).await
-}
-
-/// 删除投票
-#[tauri::command]
-pub async fn delete_poll(
-    service: State<'_, Arc<BliveService>>,
-    poll_id: String,
-) -> Result<(), String> {
-    service.delete_poll(&poll_id).await;
-    Ok(())
-}
-
-/// 获取投票选项的投票者列表
-#[tauri::command]
-pub async fn get_poll_voters(
-    service: State<'_, Arc<BliveService>>,
-    poll_id: String,
-    option_key: String,
-) -> Result<Vec<Voter>, String> {
-    service.get_poll_voters(&poll_id, &option_key).await
-}
-
 // ==================== 版本和更新 ====================
 
 /// COS 防盗链 Referer
@@ -1162,9 +1063,7 @@ pub async fn check_portable_update(url: String) -> Result<Option<String>, String
 #[tauri::command]
 pub async fn install_portable_update(download_url: String) -> Result<(), String> {
     let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
-    let exe_dir = exe_path
-        .parent()
-        .ok_or("无法获取程序所在目录")?;
+    let exe_dir = exe_path.parent().ok_or("无法获取程序所在目录")?;
 
     // 下载新版本到临时文件
     let tmp_path = exe_dir.join("danmuji-next_update.tmp");
@@ -1185,7 +1084,10 @@ pub async fn install_portable_update(download_url: String) -> Result<(), String>
         return Err(format!("下载失败，服务器返回状态码 {}", resp.status()));
     }
 
-    let bytes = resp.bytes().await.map_err(|e| format!("读取下载数据失败: {}", e))?;
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| format!("读取下载数据失败: {}", e))?;
     std::fs::write(&tmp_path, &bytes).map_err(|e| format!("保存临时文件失败: {}", e))?;
 
     // 生成 PowerShell 替换脚本
@@ -1224,8 +1126,7 @@ Remove-Item -Path "{script_path_str}" -Force -ErrorAction SilentlyContinue
 "#
     );
 
-    std::fs::write(&script_path, &script)
-        .map_err(|e| format!("写入更新脚本失败: {}", e))?;
+    std::fs::write(&script_path, &script).map_err(|e| format!("写入更新脚本失败: {}", e))?;
 
     // 启动 PowerShell 脚本（隐藏窗口）
     std::process::Command::new("powershell")
@@ -1241,40 +1142,4 @@ Remove-Item -Path "{script_path_str}" -Force -ErrorAction SilentlyContinue
         .map_err(|e| format!("启动更新脚本失败: {}", e))?;
 
     Ok(())
-}
-
-
-// ==================== 独立扩展宿主与 OBS 服务 ====================
-#[tauri::command]
-pub fn get_extension_snapshot(
-    host: State<'_, Arc<crate::extensions::ExtensionHost>>,
-    extension_id: String,
-) -> Result<Value, String> {
-    host.snapshot(&extension_id)
-}
-
-#[tauri::command]
-pub fn extension_request(
-    host: State<'_, Arc<crate::extensions::ExtensionHost>>,
-    extension_id: String,
-    request: Value,
-) -> Result<Value, String> {
-    host.request(&extension_id, request)
-}
-
-#[tauri::command]
-pub async fn get_overlay_server(
-    server: State<'_, Arc<crate::extensions::server::OverlayServer>>,
-    host: State<'_, Arc<crate::extensions::ExtensionHost>>,
-) -> Result<crate::extensions::server::ServerInfo, String> {
-    Ok(server.info(&host).await)
-}
-
-#[tauri::command]
-pub async fn start_overlay_server(
-    server: State<'_, Arc<crate::extensions::server::OverlayServer>>,
-    host: State<'_, Arc<crate::extensions::ExtensionHost>>,
-    port: u16,
-) -> Result<crate::extensions::server::ServerInfo, String> {
-    server.start(host.inner().clone(), Some(port)).await
 }

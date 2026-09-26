@@ -59,6 +59,7 @@ struct ApiOwner {
 /// 全局复用的 HTTP 客户端（避免每次请求创建新的连接池）
 static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
     reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
         .build()
         .expect("Failed to build HTTP client")

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onActivated, onDeactivated, onBeforeUnmount, ref } from 'vue'
 import giftCatalog from '@/assets/gift.json'
-import { getOverlayServer, getOvertimeSnapshot, requestOvertime, startOverlayServer, type OverlayServerInfo } from '@/services/extensions'
+import { createExtensionClient, getOverlayServer, startOverlayServer, type OverlayServerInfo } from '@/services/extensions'
 import type { GiftRule, OvertimeRequest, OvertimeSnapshot, TimerAction, TimerConfig, RandomAction, AppliedAction } from '@/types/overtime'
 
 const state = ref<OvertimeSnapshot | null>(null)
@@ -68,26 +68,26 @@ const initialMinutes = computed({
   set: value => { if (config.value) { config.value.initial_seconds = Number(value) * 60; dirty.value = true } },
 })
 
-async function refresh() {
+const client = createExtensionClient('overtime', snapshot => {
+  state.value = snapshot
+  if (!config.value || !dirty.value) config.value = structuredClone(snapshot.config)
+}, message => { error.value = message })
+
+async function refreshServer() {
   const token = ++revision
   try {
-    const [snapshot, info] = await Promise.all([getOvertimeSnapshot(), getOverlayServer()])
+    const info = await getOverlayServer()
     if (!active || token !== revision) return
-    state.value = snapshot
+    if (!server.value) port.value = info.port
     server.value = info
-    if (!config.value) {
-      config.value = structuredClone(snapshot.config)
-      port.value = info.port
-    }
   } catch (cause) { if (active && token === revision) error.value = String(cause) }
 }
 async function execute(request: OvertimeRequest) {
-  busy.value = true; error.value = ''; message.value = ''; ++revision
+  busy.value = true; error.value = ''; message.value = ''
   try {
-    const snapshot = await requestOvertime(request)
-    state.value = snapshot
+    await client.request(request)
     if (request.type === 'configure') {
-      config.value = structuredClone(snapshot.config)
+      if (state.value) config.value = JSON.parse(JSON.stringify(state.value.config)) as TimerConfig
       dirty.value = false
       message.value = '设置已保存；初始时间将在点击“重置”后应用。'
     }
@@ -128,10 +128,10 @@ async function copyUrl() {
   try { await navigator.clipboard.writeText(server.value.url); message.value = 'OBS 地址已复制' }
   catch { error.value = '复制失败，请选中下方地址手动复制。' }
 }
-function stop() { active = false; ++revision; clearInterval(interval) }
+function stop() { active = false; ++revision; clearInterval(interval); client.disconnect() }
 onActivated(() => {
-  active = true; void refresh()
-  interval = setInterval(() => { if (!busy.value) void refresh() }, 1000)
+  active = true; void client.connect(); void refreshServer()
+  interval = setInterval(() => { if (!busy.value) void refreshServer() }, 1000)
 })
 onDeactivated(stop)
 onBeforeUnmount(stop)

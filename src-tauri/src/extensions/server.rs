@@ -201,7 +201,7 @@ async fn catalog(State(state): State<WebState>) -> Json<Value> {
 }
 
 async fn snapshot(State(state): State<WebState>, Path(id): Path<String>) -> Response {
-    match state.host.snapshot(&id) {
+    match state.host.browser_snapshot(&id) {
         Ok(value) => Json(value).into_response(),
         Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
@@ -261,7 +261,7 @@ fn asset(file: &str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::live_types::ReceivedGift;
+    use crate::live_events::ReceivedGift;
     #[tokio::test]
     async fn occupied_port_keeps_existing_service_and_shutdown_closes_streams() {
         let directory = std::env::temp_dir().join(format!(
@@ -365,6 +365,28 @@ mod tests {
                 .unwrap()
                 .status()
                 .is_success());
+        }
+        let catalog: Value = client
+            .get(format!("{base}/api/extensions"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(catalog["extensions"], json!(["overtime"]));
+        for id in ["video-request", "voting"] {
+            for route in ["state", "events"] {
+                assert_eq!(
+                    client
+                        .get(format!("{base}/api/extensions/{id}/{route}"))
+                        .send()
+                        .await
+                        .unwrap()
+                        .status(),
+                    StatusCode::NOT_FOUND
+                );
+            }
         }
         let endpoint = format!("{base}/api/extensions/overtime/events");
         let mut stream = client.get(&endpoint).send().await.unwrap();

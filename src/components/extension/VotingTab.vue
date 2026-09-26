@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useVotingStore } from '@/stores/voting'
 import ExtSelect from '@/components/common/ExtSelect.vue'
 import type { SelectOption } from '@/components/common/ExtSelect.vue'
-import type { Poll, PollOption, Voter, VoteKeyType } from '@/types'
+import type { Poll, PollOption, Voter, VoteKeyType } from '@/types/extensions'
 import { createLogger } from '@/services/logger'
 
 const votingStore = useVotingStore()
@@ -140,12 +140,14 @@ let countdownTimer: ReturnType<typeof setInterval> | null = null
 const now = ref(Date.now())
 
 onMounted(() => {
+  void votingStore.connect()
   countdownTimer = setInterval(() => {
     now.value = Date.now()
   }, 1000)
 })
 
 onUnmounted(() => {
+  votingStore.disconnect()
   if (countdownTimer) {
     clearInterval(countdownTimer)
   }
@@ -179,6 +181,7 @@ const formatTime = (ts: number): string => {
 
 <template>
   <div class="voting-tab">
+    <div v-if="votingStore.error" class="extension-error" role="alert">{{ votingStore.error }} <button class="ext-btn" @click="votingStore.connect()">刷新状态</button></div>
     <!-- 工具栏 -->
     <div class="ext-toolbar">
       <button
@@ -415,6 +418,7 @@ const formatTime = (ts: number): string => {
 </template>
 
 <style scoped lang="scss">
+
 @use '@/styles/extension-shared.scss';
 
 .voting-tab {

@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import { useVideoRequestStore } from '@/stores/video-request'
 import { invoke } from '@tauri-apps/api/core'
 
 const videoStore = useVideoRequestStore()
 
-// 挂载时加载持久化的点播数据
+// 页面挂载时独立订阅扩展状态。
 onMounted(() => {
-  videoStore.loadPersistedRequests()
+  void videoStore.connect()
 })
+
+onUnmounted(videoStore.disconnect)
 
 const unwatchedList = computed(() => videoStore.unwatchedRequests)
 const watchedList = computed(() => videoStore.watchedRequests)
@@ -50,6 +52,7 @@ const openVideo = async (bvid: string) => {
 
 <template>
   <div class="video-request-tab">
+    <div v-if="videoStore.error" class="extension-error" role="alert">{{ videoStore.error }} <button class="ext-btn" @click="videoStore.connect()">刷新状态</button></div>
     <!-- 工具栏 -->
     <div class="ext-toolbar">
       <span class="count">
@@ -191,6 +194,7 @@ const openVideo = async (bvid: string) => {
 </template>
 
 <style scoped lang="scss">
+
 @use '@/styles/extension-shared.scss';
 
 .video-request-tab {

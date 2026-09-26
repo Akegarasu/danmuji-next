@@ -11,9 +11,9 @@
 //! - `blive_service`: 弹幕服务管理器
 //! - `lock_state`: 窗口锁定状态管理
 
-mod auth;
 mod archive;
 mod archive_migrations;
+mod auth;
 mod blive_service;
 mod commands;
 mod config;
@@ -21,33 +21,45 @@ mod crypto;
 mod extensions;
 mod kv_store;
 mod live_data;
+mod live_events;
 mod live_types;
 mod lock_state;
 mod raw_event_dump;
 mod speech;
-mod video_info;
-mod video_request;
-mod voting;
 mod window_state;
 mod window_topmost;
 
+#[cfg(test)]
+mod extension_pipeline_tests;
 #[cfg(test)]
 mod gift_pipeline_tests;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use blive_service::BliveService;
-use config::{get_archive_db_path, get_video_request_kv_path, get_voting_kv_path, get_window_kv_path};
-use kv_store::{KVStore, VideoRequestStore, VotingStore};
-use lock_state::LockStateManager;
 use archive::ArchiveManager;
+use blive_service::BliveService;
+use config::{get_archive_db_path, get_window_kv_path};
+use kv_store::KVStore;
+use lock_state::LockStateManager;
 use speech::{SpeechRuntimeConfig, SpeechService};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
     Emitter, Manager, RunEvent,
 };
+
+/// 应用级任务统一退出，防止最后一次检查点之后仍发生异步回写。
+#[derive(Default)]
+struct BackgroundTasks(std::sync::Mutex<Vec<tauri::async_runtime::JoinHandle<()>>>);
+impl BackgroundTasks {
+    fn push(&self, task: tauri::async_runtime::JoinHandle<()>) {
+        self.0.lock().unwrap().push(task);
+    }
+    fn take(&self) -> Vec<tauri::async_runtime::JoinHandle<()>> {
+        std::mem::take(&mut *self.0.lock().unwrap())
+    }
+}
 
 /// 全局 dev mode 标志，通过环境变量 DANMUJI_NEXT_DEV 启用
 pub static DEV_MODE: AtomicBool = AtomicBool::new(false);
@@ -82,30 +94,25 @@ pub fn run() {
     // 检查 dev mode
     if std::env::var("DANMUJI_NEXT_DEV").is_ok() {
         DEV_MODE.store(true, Ordering::Relaxed);
-        eprintln!("[DEV] DANMUJI_NEXT_DEV is set, dev mode enabled — events will be dumped to file");
+        eprintln!(
+            "[DEV] DANMUJI_NEXT_DEV is set, dev mode enabled — events will be dumped to file"
+        );
     }
 
     // 初始化窗口 KV 存储
     let window_kv_store = KVStore::new(get_window_kv_path());
 
     // 初始化存档管理器
-    let archive_manager = Arc::new(
-        ArchiveManager::new(get_archive_db_path()).expect("初始化存档数据库失败"),
-    );
+    let archive_manager =
+        Arc::new(ArchiveManager::new(get_archive_db_path()).expect("初始化存档数据库失败"));
 
     // 初始化语音播报与弹幕服务（语音服务必须是全局单例，避免多窗口重复播报）
     let speech_service = Arc::new(SpeechService::new(SpeechRuntimeConfig::load_from_config()));
-    let video_request_store = VideoRequestStore::new(get_video_request_kv_path());
-    let voting_store = VotingStore::new(get_voting_kv_path());
-    let extensions = Arc::new(extensions::ExtensionHost::new(
-        config::get_config_dir().join("extensions"),
-    ));
+    let extensions = Arc::new(extensions::ExtensionHost::new(config::get_config_dir()));
     let overlay_server = Arc::new(extensions::server::OverlayServer::new(
         config::get_config_dir().join("extensions/server.json"),
     ));
     let blive_service = Arc::new(BliveService::new(
-        video_request_store,
-        voting_store,
         speech_service.clone(),
         extensions.clone(),
     ));
@@ -125,24 +132,48 @@ pub fn run() {
         .manage(extensions)
         .manage(overlay_server)
         .manage(lock_manager)
+        .manage(BackgroundTasks::default())
         .setup(|app| {
-            let extensions = app.state::<Arc<extensions::ExtensionHost>>().inner().clone();
+            let extensions = app
+                .state::<Arc<extensions::ExtensionHost>>()
+                .inner()
+                .clone();
             let overlay_server = app
                 .state::<Arc<extensions::server::OverlayServer>>()
                 .inner()
                 .clone();
-            tauri::async_runtime::spawn(async move {
-                if let Err(error) = overlay_server.start(extensions.clone(), None).await {
+            let tasks = app.state::<BackgroundTasks>();
+            let host_for_server = extensions.clone();
+            tasks.push(tauri::async_runtime::spawn(async move {
+                if let Err(error) = overlay_server.start(host_for_server, None).await {
                     log::error!("{error}");
                 }
-                let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
-                let mut ticks = 0u64;
-                loop {
-                    interval.tick().await;
-                    ticks += 1;
-                    extensions.tick(ticks % 5 == 0);
+            }));
+            tasks.push(tauri::async_runtime::spawn(extensions::tasks::run(
+                extensions.clone(),
+            )));
+            let service = app.state::<Arc<BliveService>>().inner().clone();
+            let app_for_push = app.handle().clone();
+            tasks.push(tauri::async_runtime::spawn(async move {
+                let mut push = tokio::time::interval(live_types::DATA_PUSH_INTERVAL);
+                let mut clock = tokio::time::interval(std::time::Duration::from_secs(1));
+                let mut checkpoint = tokio::time::interval(std::time::Duration::from_secs(5));
+                for timer in [&mut push, &mut clock, &mut checkpoint] {
+                    timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                 }
-            });
+                loop {
+                    tokio::select! {
+                        _ = push.tick() => {
+                            service.push_updates(&app_for_push).await;
+                            for state in extensions.take_changes() {
+                                let _ = app_for_push.emit(&format!("extension-state:{}", state.extension_id), &state);
+                            }
+                        },
+                        _ = clock.tick() => extensions.tick(false),
+                        _ = checkpoint.tick() => extensions.tick(true),
+                    }
+                }
+            }));
             // 恢复上次异常退出未关闭的存档会话
             let archive_for_recovery = app.state::<Arc<ArchiveManager>>().inner().clone();
             tauri::async_runtime::spawn(async move {
@@ -154,8 +185,10 @@ pub fn run() {
             });
 
             // 创建托盘菜单
-            let reapply_topmost = MenuItem::with_id(app, "reapply_topmost", "重新顶置", true, None::<&str>)?;
-            let unlock_all = MenuItem::with_id(app, "unlock_all", "解锁所有窗口", true, None::<&str>)?;
+            let reapply_topmost =
+                MenuItem::with_id(app, "reapply_topmost", "重新顶置", true, None::<&str>)?;
+            let unlock_all =
+                MenuItem::with_id(app, "unlock_all", "解锁所有窗口", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&reapply_topmost, &unlock_all, &quit])?;
 
@@ -280,22 +313,11 @@ pub fn run() {
             commands::create_archive_window,
             // 扩展
             commands::create_extension_window,
-            commands::get_extension_snapshot,
-            commands::extension_request,
-            commands::get_overlay_server,
-            commands::start_overlay_server,
-            // 视频信息
-            commands::fetch_video_info,
-            commands::load_video_requests,
-            commands::mark_video_watched,
-            commands::remove_video_request,
-            commands::clear_watched_videos,
-            commands::clear_all_videos,
-            // 投票
-            commands::create_poll,
-            commands::end_poll,
-            commands::delete_poll,
-            commands::get_poll_voters,
+            commands::extensions::get_extension_snapshot,
+            commands::extensions::extension_request,
+            commands::extensions::extension_query,
+            commands::extensions::get_overlay_server,
+            commands::extensions::start_overlay_server,
             // 版本和更新
             commands::get_app_version,
             commands::is_portable,
@@ -310,14 +332,24 @@ pub fn run() {
                 let service = app_handle.state::<Arc<BliveService>>().inner().clone();
                 let archive = app_handle.state::<Arc<ArchiveManager>>().inner().clone();
                 let speech = app_handle.state::<Arc<SpeechService>>().inner().clone();
-                let extensions = app_handle.state::<Arc<extensions::ExtensionHost>>().inner().clone();
+                let extensions = app_handle
+                    .state::<Arc<extensions::ExtensionHost>>()
+                    .inner()
+                    .clone();
                 let overlay_server = app_handle
                     .state::<Arc<extensions::server::OverlayServer>>()
                     .inner()
                     .clone();
+                let background_tasks = app_handle.state::<BackgroundTasks>().take();
                 tauri::async_runtime::block_on(async move {
                     // 断开连接（会触发 archive end_session）
                     service.disconnect().await;
+                    for task in &background_tasks {
+                        task.abort();
+                    }
+                    for task in background_tasks {
+                        let _ = task.await;
+                    }
                     extensions.tick(true);
                     overlay_server.shutdown().await;
                     // 兜底：恢复可能残留的孤立会话

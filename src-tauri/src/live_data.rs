@@ -2,18 +2,15 @@
 //!
 //! LiveData 持有所有实时直播数据（弹幕、礼物、SC、统计等），
 //! 负责事件处理、数据聚合、礼物合并等逻辑。
-//! 扩展功能（点播、投票等）通过独立 Manager 管理。
+//! 扩展仅接收规范化事件，不在此持有状态或执行扩展业务。
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use tokio::sync::mpsc;
 
 use crate::archive::ArchiveEvent;
-use crate::kv_store::{VideoRequestStore, VotingStore};
+use crate::live_events::{ReceivedGift, ReceivedText, TextSource};
 use crate::live_types::*;
-use crate::video_info::VideoInfo;
-use crate::video_request::VideoRequestManager;
-use crate::voting::VotingManager;
 use blivedm::api::ContributionRankUser;
 use blivedm::{
     CoinType, Danmaku, DanmakuType, Gift, GuardLevel, GuardToast, InteractWord, OnlineRankCount,
@@ -63,12 +60,6 @@ pub struct LiveData {
     /// 统计数据
     pub(crate) stats: LiveStats,
 
-    /// 点播请求管理器
-    pub(crate) video_requests: VideoRequestManager,
-
-    /// 投票管理器
-    pub(crate) voting: VotingManager,
-
     /// 待发送的更新
     pub(crate) pending_updates: Vec<DataUpdate>,
     /// 待发送的弹幕（批量）
@@ -105,8 +96,6 @@ impl Default for LiveData {
             contribution_rank_full: Vec::new(),
             user_contributions: HashMap::new(),
             stats: LiveStats::default(),
-            video_requests: VideoRequestManager::default(),
-            voting: VotingManager::default(),
             pending_updates: Vec::new(),
             pending_danmaku: Vec::new(),
             pending_gift_upserts: Vec::new(),
@@ -120,33 +109,9 @@ impl Default for LiveData {
 }
 
 impl LiveData {
-    /// 创建新实例，附带扩展持久化存储
-    pub(crate) fn new(vr_store: VideoRequestStore, voting_store: VotingStore) -> Self {
-        let mut video_requests = VideoRequestManager::new(vr_store);
-        video_requests.load();
-
-        let mut voting = VotingManager::new(voting_store);
-        voting.load();
-
-        Self {
-            video_requests,
-            voting,
-            ..Self::default()
-        }
-    }
-
-    /// 清空直播数据（保留扩展管理器状态和存储引用）
+    /// 清空本次直播聚合状态，扩展状态由宿主独立持有。
     pub fn clear(&mut self) {
-        let video_requests = std::mem::take(&mut self.video_requests);
-        let voting = std::mem::take(&mut self.voting);
         *self = Self::default();
-        self.video_requests = video_requests;
-        self.voting = voting;
-    }
-
-    /// 从 KV Store 加载点播数据
-    pub fn load_video_requests(&mut self) {
-        self.video_requests.load();
     }
 
     /// 生成数据快照
@@ -190,16 +155,6 @@ impl LiveData {
             } else {
                 None
             },
-            video_requests: if event_types.contains(&EventType::VideoRequest) {
-                Some(self.video_requests.get_all())
-            } else {
-                None
-            },
-            voting_polls: if event_types.contains(&EventType::Voting) {
-                Some(self.voting.get_all_polls_for_snapshot())
-            } else {
-                None
-            },
             interact_word_list: if event_types.contains(&EventType::InteractWord) {
                 Some(self.interact_word_list.iter().cloned().collect())
             } else {
@@ -210,8 +165,8 @@ impl LiveData {
 
     // ==================== 事件处理 ====================
 
-    /// 处理弹幕，返回需要异步获取视频信息的列表
-    pub fn process_danmaku(&mut self, danmaku: Danmaku) -> Vec<(String, String, u64, Option<u64>)> {
+    /// 处理弹幕并返回可供扩展消费的文本事件
+    pub fn process_danmaku(&mut self, danmaku: Danmaku) -> ReceivedText {
         let processed = ProcessedDanmaku {
             id: format!("dm_{}_{}", danmaku.timestamp, danmaku.sender.uid),
             content: danmaku.content,
@@ -230,29 +185,17 @@ impl LiveData {
             let _ = tx.send(ArchiveEvent::Danmaku(processed.clone()));
         }
 
-        let (detected, vr_updates) = self.video_requests.detect_and_add(
-            &processed.content,
-            &processed.user.name,
-            processed.user.uid,
-            VideoRequestSource::Danmaku,
-            None,
-            processed.timestamp,
-        );
-        self.pending_updates.extend(vr_updates);
-
-        // 投票匹配（仅在有活跃投票时）
-        if self.voting.has_active_polls() {
-            let vote_updates = self.voting.try_vote(
-                &processed.content,
-                processed.user.uid,
-                &processed.user.name,
-                processed.timestamp,
-            );
-            self.pending_updates.extend(vote_updates);
-        }
+        let received = ReceivedText {
+            content: processed.content.clone(),
+            username: processed.user.name.clone(),
+            uid: processed.user.uid,
+            timestamp: processed.timestamp,
+            source: TextSource::Danmaku,
+            sc_price: None,
+        };
 
         self.pending_danmaku.push(processed);
-        detected
+        received
     }
 
     /// 处理礼物
@@ -429,8 +372,8 @@ impl LiveData {
         Some(received)
     }
 
-    /// 处理 SC，返回需要异步获取视频信息的列表
-    pub fn process_superchat(&mut self, sc: SuperChat) -> Vec<(String, String, u64, Option<u64>)> {
+    /// 处理 SC 并返回可供扩展消费的文本事件
+    pub fn process_superchat(&mut self, sc: SuperChat) -> ReceivedText {
         let price = (sc.price as u64) * 10;
 
         let sender_uid = sc.sender_uid;
@@ -477,20 +420,19 @@ impl LiveData {
             &guard_level,
         );
 
-        let (detected, vr_updates) = self.video_requests.detect_and_add(
-            &processed.content,
-            &processed.user.name,
-            processed.user.uid,
-            VideoRequestSource::Superchat,
-            Some(price),
-            processed.start_time,
-        );
-        self.pending_updates.extend(vr_updates);
+        let received = ReceivedText {
+            content: processed.content.clone(),
+            username: processed.user.name.clone(),
+            uid: processed.user.uid,
+            timestamp: processed.start_time,
+            source: TextSource::Superchat,
+            sc_price: Some(price),
+        };
 
         self.pending_updates
             .push(DataUpdate::SuperChatAppend(processed));
 
-        detected
+        received
     }
 
     /// 处理大航海成交 Toast。
@@ -721,39 +663,6 @@ impl LiveData {
         }
     }
 
-    // ==================== 点播请求（代理到 Manager）====================
-
-    /// 更新点播请求的视频信息
-    pub fn update_video_request_info(&mut self, request_id: &str, info: Result<VideoInfo, String>) {
-        if let Some(update) = self.video_requests.update_info(request_id, info) {
-            self.pending_updates.push(update);
-        }
-    }
-
-    /// 标记点播为已看/未看
-    pub fn set_video_watched(&mut self, request_id: &str, watched: bool) {
-        let update = self.video_requests.set_watched(request_id, watched);
-        self.pending_updates.push(update);
-    }
-
-    /// 删除点播请求
-    pub fn remove_video_request(&mut self, request_id: &str) {
-        let update = self.video_requests.remove(request_id);
-        self.pending_updates.push(update);
-    }
-
-    /// 清空已看的点播
-    pub fn clear_watched_videos(&mut self) {
-        let update = self.video_requests.clear_watched();
-        self.pending_updates.push(update);
-    }
-
-    /// 清空所有点播
-    pub fn clear_all_videos(&mut self) {
-        let update = self.video_requests.clear_all();
-        self.pending_updates.push(update);
-    }
-
     // ==================== 更新收集 ====================
 
     /// 获取待发送的更新，并清空缓冲区
@@ -796,10 +705,6 @@ impl LiveData {
             updates.push(DataUpdate::ContributionsUpdate(contributions));
             self.contributions_dirty = false;
         }
-
-        // 检查定时结束的投票
-        let expired = self.voting.check_expired_polls();
-        updates.extend(expired);
 
         updates
     }
