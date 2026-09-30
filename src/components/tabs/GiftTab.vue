@@ -6,6 +6,7 @@ import VirtualList from '@/components/common/VirtualList.vue'
 import GiftItem from '@/components/items/GiftItem.vue'
 import SuperChatItem from '@/components/items/SuperChatItem.vue'
 import ContextMenu from '@/components/common/ContextMenu.vue'
+import GiftImageDialog from '@/components/common/GiftImageDialog.vue'
 import type { MenuItem } from '@/components/common/ContextMenu.vue'
 import type { ProcessedGift, ProcessedMedal, ProcessedSuperChat } from '@/types'
 import { formatPrice, shouldShowMedal } from '@/types'
@@ -103,8 +104,9 @@ const scrollToBottom = () => {
 
 const contextMenuRef = ref<InstanceType<typeof ContextMenu>>()
 const currentItem = ref<ProcessedGift | ProcessedSuperChat | null>(null)
+const imageGift = ref<ProcessedGift | null>(null)
 
-const menuItems = ref<MenuItem[]>([
+const menuItems = computed<MenuItem[]>(() => [
   {
     label: '打开用户主页',
     icon: '🔗',
@@ -114,12 +116,20 @@ const menuItems = ref<MenuItem[]>([
     label: '复制用户名',
     icon: '📋',
     action: () => currentItem.value && copyUsername(currentItem.value.user.name)
-  }
+  },
+  ...(currentItem.value && !isSuperChat(currentItem.value) ? [{
+    label: '生成礼物图片',
+    icon: '🖼️',
+    action: () => {
+      if (currentItem.value && !isSuperChat(currentItem.value)) imageGift.value = currentItem.value
+    }
+  }] : [])
 ])
 
 const handleContextMenu = (e: MouseEvent, item: ProcessedGift | ProcessedSuperChat) => {
   e.preventDefault()
   e.stopPropagation()
+  if (imageGift.value) return
   currentItem.value = item
   contextMenuRef.value?.show(e.clientX, e.clientY)
 }
@@ -208,6 +218,7 @@ onUnmounted(() => {
     </Transition>
 
     <ContextMenu ref="contextMenuRef" :items="menuItems" />
+    <GiftImageDialog v-if="imageGift" :gift="imageGift" @close="imageGift = null" />
   </div>
 </template>
 

@@ -19,6 +19,7 @@ mod commands;
 mod config;
 mod crypto;
 mod extensions;
+mod gift_image;
 mod kv_store;
 mod live_data;
 mod live_events;
@@ -256,6 +257,8 @@ pub fn run() {
             commands::kv_remove,
             // 工具
             commands::open_url,
+            gift_image::load_gift_image_asset,
+            gift_image::save_gift_image,
             commands::exit_app,
             // 弹幕服务
             commands::connect_room,

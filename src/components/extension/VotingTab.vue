@@ -422,6 +422,7 @@ const formatTime = (ts: number): string => {
 <style scoped lang="scss">
 
 @use '@/styles/extension-shared.scss';
+@use '@/styles/settings-controls' as controls;
 
 .voting-tab {
   display: flex;
@@ -469,10 +470,9 @@ const formatTime = (ts: number): string => {
 }
 
 .add-option-btn {
-  padding: 8px 12px;
-  font-family: inherit;
+  @include controls.button;
   border: 1px dashed var(--border-color);
-  border-radius: var(--border-radius-sm);
+  border-radius: controls.$radius;
   background: transparent;
   color: var(--text-secondary);
   font-size: var(--font-size-sm);

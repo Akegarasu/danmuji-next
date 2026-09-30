@@ -138,6 +138,8 @@ defineExpose({ canSilent, resetAndShow })
 </template>
 
 <style scoped lang="scss">
+@use '@/styles/settings-controls' as controls;
+
 .dialog-mask {
   position: fixed;
   inset: 0;
@@ -248,10 +250,10 @@ defineExpose({ canSilent, resetAndShow })
 }
 
 .duration-option {
-  padding: 8px 0;
+  @include controls.button(0);
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-sm);
+  border-radius: controls.$radius;
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
   cursor: pointer;
@@ -282,27 +284,7 @@ defineExpose({ canSilent, resetAndShow })
 }
 
 .dialog-input {
-  width: 100%;
-  padding: 8px 12px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-sm);
-  color: var(--text-primary);
-  font-size: var(--font-size-sm);
-  outline: none;
-  transition: border-color 0.2s;
-
-  &:focus {
-    border-color: var(--accent-primary);
-  }
-
-  &::placeholder {
-    color: var(--text-muted);
-  }
-
-  &:disabled {
-    opacity: 0.5;
-  }
+  @include controls.control;
 }
 
 .dialog-footer {
@@ -314,11 +296,11 @@ defineExpose({ canSilent, resetAndShow })
 }
 
 .dialog-btn {
-  padding: 8px 18px;
+  @include controls.button(18px);
   background: var(--bg-active);
   color: var(--text-primary);
   border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-sm);
+  border-radius: controls.$radius;
   font-size: var(--font-size-sm);
   font-weight: 500;
   cursor: pointer;
@@ -339,6 +321,7 @@ defineExpose({ canSilent, resetAndShow })
     color: white;
 
     &:hover:not(:disabled) {
+      background: var(--accent-primary);
       opacity: 0.9;
     }
   }

@@ -232,6 +232,8 @@ onUnmounted(() => {
 </template>
 
 <style scoped lang="scss">
+@use '@/styles/settings-controls' as controls;
+
 .login-overlay {
   position: fixed;
   top: 0;
@@ -433,12 +435,11 @@ onUnmounted(() => {
 }
 
 .refresh-btn {
-  padding: 10px 24px;
+  @include controls.button(24px);
   background: var(--accent-primary);
   border: none;
-  border-radius: 6px;
+  border-radius: controls.$radius;
   color: white;
-  font-size: 14px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s;

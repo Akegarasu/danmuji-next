@@ -215,7 +215,7 @@ onBeforeUnmount(() => {
   }
 
   &__option {
-    padding: 8px 12px;
+    padding: 5px 12px;
     line-height: 1.5;
     color: var(--text-secondary);
     border-radius: 2px;

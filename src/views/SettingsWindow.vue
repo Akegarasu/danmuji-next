@@ -2075,12 +2075,12 @@ const openProjectUrl = async () => {
 }
 
 .speech-preview-btn {
+  @include settings.button;
   flex-shrink: 0;
   min-width: 68px;
-  padding: 8px 12px;
   background: var(--bg-active);
   border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-sm);
+  border-radius: settings.$radius;
   color: var(--text-primary);
   font-size: var(--font-size-sm);
   cursor: pointer;
@@ -2177,11 +2177,11 @@ const openProjectUrl = async () => {
 }
 
 .test-event-send-btn {
+  @include settings.button(16px);
   width: 100%;
-  padding: 9px 16px;
   background: var(--accent-primary);
   border: none;
-  border-radius: var(--border-radius-sm);
+  border-radius: settings.$radius;
   color: white;
   font-size: var(--font-size-sm);
   font-weight: 500;
@@ -2291,13 +2291,13 @@ const openProjectUrl = async () => {
 }
 
 .connect-btn {
+  @include settings.button(16px);
   width: 100%;
-  padding: 10px 16px;
   font-size: var(--font-size-sm);
   font-weight: 500;
   background: var(--accent-primary);
   border: none;
-  border-radius: var(--border-radius-sm);
+  border-radius: settings.$radius;
   color: white;
   cursor: pointer;
   transition: all 0.15s;
@@ -2369,10 +2369,10 @@ const openProjectUrl = async () => {
   }
 
   .logout-btn {
-    padding: 6px 12px;
+    @include settings.button;
     background: transparent;
     border: 1px solid var(--border-color);
-    border-radius: var(--border-radius-sm);
+    border-radius: settings.$radius;
     color: var(--text-secondary);
     font-size: var(--font-size-xs);
     cursor: pointer;
@@ -2417,10 +2417,10 @@ const openProjectUrl = async () => {
   }
 
   .login-btn {
-    padding: 8px 16px;
+    @include settings.button(16px);
     background: var(--accent-primary);
     border: none;
-    border-radius: var(--border-radius-sm);
+    border-radius: settings.$radius;
     color: white;
     font-size: var(--font-size-sm);
     font-weight: 500;
@@ -2456,11 +2456,14 @@ const openProjectUrl = async () => {
 }
 
 .font-family-option {
-  min-height: 58px;
-  padding: 10px 12px;
+  @include settings.button;
+  display: flex;
+  justify-content: flex-start;
+  gap: 8px;
+  min-width: 0;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-sm);
+  border-radius: settings.$radius;
   color: var(--text-secondary);
   cursor: pointer;
   text-align: left;
@@ -2487,12 +2490,13 @@ const openProjectUrl = async () => {
 }
 
 .font-option-name {
+  flex-shrink: 0;
   font-size: var(--font-size-sm);
   font-weight: 600;
 }
 
 .font-option-preview {
-  margin-top: 4px;
+  min-width: 0;
   font-size: var(--font-size-xs);
   color: var(--text-muted);
 }
@@ -2504,11 +2508,10 @@ const openProjectUrl = async () => {
 }
 
 .font-weight-option {
-  height: 34px;
-  padding: 0 10px;
+  @include settings.button(10px);
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-sm);
+  border-radius: settings.$radius;
   color: var(--text-secondary);
   font-size: var(--font-size-xs);
   cursor: pointer;
@@ -2571,15 +2574,14 @@ const openProjectUrl = async () => {
 }
 
 .custom-color-btn {
+  @include settings.size(10px);
   position: relative;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 30px;
-  padding: 0 10px;
   background: var(--bg-active);
   border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-sm);
+  border-radius: settings.$radius;
   color: var(--text-secondary);
   font-size: var(--font-size-xs);
   cursor: pointer;
@@ -2639,18 +2641,9 @@ const openProjectUrl = async () => {
 }
 
 .setting-number-input {
+  @include settings.control;
   width: 64px;
-  padding: 6px 8px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-sm);
-  color: var(--text-primary);
-  font-size: var(--font-size-sm);
-  outline: none;
-
-  &:focus {
-    border-color: var(--accent-primary);
-  }
+  padding-inline: 8px;
 }
 
 .interval-unit {
@@ -2703,13 +2696,13 @@ const openProjectUrl = async () => {
 }
 
 .save-btn {
+  @include settings.button(20px);
   flex-shrink: 0;
   white-space: nowrap;
-  padding: 8px 20px;
   background: var(--bg-active);
   color: var(--text-primary);
   border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-sm);
+  border-radius: settings.$radius;
   font-size: var(--font-size-sm);
   font-weight: 500;
   cursor: pointer;
@@ -2739,6 +2732,7 @@ const openProjectUrl = async () => {
 
 .special-follow-input-row {
   display: flex;
+  align-items: center;
   gap: 8px;
 
   .setting-input {
@@ -2748,10 +2742,10 @@ const openProjectUrl = async () => {
 }
 
 .special-follow-add-btn {
-  padding: 8px 16px;
+  @include settings.button(16px);
   background: var(--accent-primary);
   border: none;
-  border-radius: var(--border-radius-sm);
+  border-radius: settings.$radius;
   color: white;
   font-size: var(--font-size-sm);
   font-weight: 500;
@@ -2916,11 +2910,11 @@ const openProjectUrl = async () => {
 }
 
 .shield-refresh-btn-inline {
-  padding: 8px 12px;
+  @include settings.button;
   background: var(--bg-active);
   color: var(--text-secondary);
   border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-sm);
+  border-radius: settings.$radius;
   font-size: var(--font-size-sm);
   cursor: pointer;
   flex-shrink: 0;
@@ -2995,10 +2989,10 @@ const openProjectUrl = async () => {
 }
 
 .about-check-btn {
-  padding: 8px 20px;
+  @include settings.button(20px);
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-sm);
+  border-radius: settings.$radius;
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
   cursor: pointer;

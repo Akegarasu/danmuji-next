@@ -3,6 +3,8 @@
 import { computed, ref } from 'vue'
 import ContextMenu from '@/components/common/ContextMenu.vue'
 import SilentDialog from '@/components/common/SilentDialog.vue'
+import GiftImageDialog from '@/components/common/GiftImageDialog.vue'
+import type { GiftImageData } from '@/services/gift-image'
 import type { MenuItem } from '@/components/common/ContextMenu.vue'
 import type { ProcessedUser } from '@/types'
 import { useSettingsStore } from '@/stores/settings'
@@ -19,9 +21,10 @@ type MenuUser = Pick<ProcessedUser, 'uid' | 'name' | 'face'>
 
 type CurrentItem =
   | { kind: 'danmaku' | 'superchat'; data: { user: MenuUser; content: string } }
-  | { kind: 'gift'; data: { user: MenuUser } }
+  | { kind: 'gift'; data: GiftImageData }
 
 const currentItem = ref<CurrentItem | null>(null)
+const imageGift = ref<GiftImageData | null>(null)
 const selectedRoomId = ref<number>()
 const targetRoomId = computed(() => selectedRoomId.value ?? parseInt(settingsStore.settings.roomId, 10))
 
@@ -92,6 +95,16 @@ const dynamicMenuItems = computed<MenuItem[]>(() => {
     }
   ]
 
+  if (currentItem.value.kind === 'gift') {
+    items.push({
+      label: '生成礼物图片',
+      icon: '🖼️',
+      action: () => {
+        if (currentItem.value?.kind === 'gift') imageGift.value = currentItem.value.data
+      }
+    })
+  }
+
   // 弹幕和 SC 可以复制内容
   if (currentItem.value.kind === 'danmaku') {
     items.push({
@@ -115,7 +128,7 @@ const dynamicMenuItems = computed<MenuItem[]>(() => {
 const show = (e: MouseEvent, item: CurrentItem, roomId?: number) => {
   e.preventDefault()
   e.stopPropagation()
-  if (showSilentDialog.value) return
+  if (showSilentDialog.value || imageGift.value) return
   selectedRoomId.value = roomId
   currentItem.value = item
   contextMenuRef.value?.show(e.clientX, e.clientY)
@@ -126,6 +139,7 @@ defineExpose({ show })
 
 <template>
   <ContextMenu ref="contextMenuRef" :items="dynamicMenuItems" />
+  <GiftImageDialog v-if="imageGift" :gift="imageGift" @close="imageGift = null" />
 
   <!-- Toast 提示 -->
   <Teleport to="body">

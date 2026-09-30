@@ -631,6 +631,8 @@ onUnmounted(async () => {
 </template>
 
 <style scoped lang="scss">
+@use '@/styles/settings-controls' as controls;
+
 .archive-window {
   display: flex;
   height: 100vh;
@@ -667,9 +669,9 @@ button:disabled { cursor: default; opacity: 0.45; }
 .filter-toolbar { min-width: 0; justify-content: flex-end; }
 .quick-ranges { margin-right: 3px; }
 .quick-ranges button, .apply-date, .pagination button, .refresh-button {
-  padding: 5px 8px;
+  @include controls.button(8px);
   border: 1px solid var(--border-color);
-  border-radius: 4px;
+  border-radius: controls.$radius;
   background: var(--bg-card);
   cursor: pointer;
 }
@@ -677,10 +679,10 @@ button:disabled { cursor: default; opacity: 0.45; }
 .quick-ranges button.active { border-color: rgba(92, 158, 255, 0.55); background: rgba(92, 158, 255, 0.16); color: #a9cbff; }
 .date-filter label span { color: var(--text-muted); font-size: var(--font-size-xs); }
 .date-filter input {
+  @include controls.size(6px);
   width: 116px;
-  padding: 4px 6px;
   border: 1px solid var(--border-color);
-  border-radius: 4px;
+  border-radius: controls.$radius;
   outline: none;
   background: var(--bg-card);
   color: var(--text-primary);
@@ -689,7 +691,7 @@ button:disabled { cursor: default; opacity: 0.45; }
 }
 .date-filter input:focus { border-color: var(--accent-primary); }
 .apply-date { color: var(--accent-primary); font-size: var(--font-size-xs); }
-.refresh-button { display: grid; width: 28px; height: 28px; padding: 5px; place-items: center; }
+.refresh-button { display: grid; width: controls.$height; padding: 5px; place-items: center; }
 .refresh-button svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
 .top-progress { position: sticky; z-index: 6; top: 37px; height: 2px; margin: -14px -16px 12px; overflow: hidden; background: rgba(92, 158, 255, 0.12); }
@@ -714,7 +716,7 @@ button:disabled { cursor: default; opacity: 0.45; }
 
 .search-row, .stacked-search { display: flex; align-items: center; gap: 8px; margin-bottom: 11px; }
 .stacked-search { align-items: stretch; flex-direction: column; }
-.search-box { display: flex; min-width: 160px; flex: 1; align-items: center; gap: 7px; height: 32px; padding: 0 7px 0 9px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-card); }
+.search-box { display: flex; min-width: 160px; flex: 1; align-items: center; gap: 7px; height: controls.$height; padding: 0 7px 0 9px; border: 1px solid var(--border-color); border-radius: controls.$radius; background: var(--bg-card); }
 .search-box:focus-within { border-color: var(--accent-primary); }
 .search-box > svg { width: 15px; height: 15px; flex: 0 0 auto; fill: none; stroke: var(--text-muted); stroke-width: 1.7; stroke-linecap: round; }
 .search-box input { width: 100%; border: 0; outline: 0; background: transparent; color: var(--text-primary); font-size: var(--font-size-sm); }
@@ -722,17 +724,17 @@ button:disabled { cursor: default; opacity: 0.45; }
 .search-box button:hover, .room-filter-wrap button:hover { background: var(--bg-hover); color: var(--text-primary); }
 .search-box input::placeholder, .room-filter::placeholder { color: var(--text-muted); }
 .search-box input::-webkit-search-cancel-button, .room-filter::-webkit-search-cancel-button { display: none; }
-.type-tabs { display: flex; align-items: center; gap: 2px; padding: 2px; border-radius: 6px; background: var(--bg-card); }
-.type-tabs button { padding: 5px 9px; border: 0; border-radius: 4px; background: transparent; color: var(--text-secondary); cursor: pointer; font-size: var(--font-size-xs); }
+.type-tabs { display: flex; align-items: center; gap: 2px; height: controls.$height; border-radius: controls.$radius; background: var(--bg-card); }
+.type-tabs button { @include controls.button(9px); border: 0; border-radius: controls.$radius; background: transparent; color: var(--text-secondary); cursor: pointer; font-size: var(--font-size-xs); }
 .type-tabs button:hover { color: var(--text-primary); }
 .type-tabs button.active { background: var(--accent-primary); color: white; }
 
 .rooms-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
-.prune-button { padding: 6px 9px; border: 1px solid var(--border-color); border-radius: var(--border-radius-sm); background: var(--bg-card); color: var(--text-secondary); cursor: pointer; font-size: var(--font-size-xs); white-space: nowrap; }
+.prune-button { @include controls.button(9px); border: 1px solid var(--border-color); border-radius: controls.$radius; background: var(--bg-card); color: var(--text-secondary); cursor: pointer; font-size: var(--font-size-xs); white-space: nowrap; }
 .prune-button:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
 .sort-select { display: flex; align-items: center; gap: 4px; color: var(--text-muted); font-size: var(--font-size-xs); }
-.sort-select select { height: 29px; padding: 0 6px; border: 1px solid var(--border-color); border-radius: 5px; outline: 0; background: var(--bg-card); color: var(--text-primary); font-size: var(--font-size-xs); }
-.room-filter-wrap { display: flex; width: 205px; height: 30px; align-items: center; padding-right: 4px; border: 1px solid var(--border-color); border-radius: 5px; background: var(--bg-card); }
+.sort-select select { @include controls.size(6px); border: 1px solid var(--border-color); border-radius: controls.$radius; outline: 0; background: var(--bg-card); color: var(--text-primary); font-size: var(--font-size-xs); }
+.room-filter-wrap { display: flex; width: 205px; height: controls.$height; align-items: center; padding-right: 4px; border: 1px solid var(--border-color); border-radius: controls.$radius; background: var(--bg-card); }
 .room-filter-wrap:focus-within { border-color: var(--accent-primary); }
 .room-filter { width: 100%; min-width: 0; padding: 0 8px; border: 0; outline: 0; background: transparent; color: var(--text-primary); font-size: var(--font-size-xs); }
 .room-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; transition: opacity 0.15s; }

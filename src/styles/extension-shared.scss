@@ -25,15 +25,12 @@
 // ==================== 按钮 ====================
 
 .ext-btn {
-  padding: 8px 12px;
+  @include controls.button;
   border: none;
-  border-radius: var(--border-radius-sm);
+  border-radius: controls.$radius;
   background: var(--bg-hover);
   color: var(--text-secondary);
-  font-size: var(--font-size-sm);
   cursor: pointer;
-  font-family: inherit;
-  line-height: 1.5;
   transition: background 0.2s, color 0.2s, transform 0.1s, box-shadow 0.2s;
 
   &:hover:not(:disabled) {
@@ -86,13 +83,12 @@
 
   &--submit {
     width: 100%;
-    padding: 8px 12px;
     background: var(--accent-primary);
     color: white;
     font-size: var(--font-size-sm);
     font-weight: 500;
     margin-top: 4px;
-    border-radius: var(--border-radius-sm);
+    border-radius: controls.$radius;
 
     &:hover:not(:disabled) {
       background: #4a8df0;

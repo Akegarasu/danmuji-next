@@ -104,7 +104,9 @@ onUnmounted(() => {
   </section>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
+@use '@/styles/settings-controls' as controls;
+
 .dump-panel {
   margin-bottom: 24px;
   padding: 16px;
@@ -120,14 +122,12 @@ h4 { margin: 0; font-size: 14px; color: var(--text-primary); }
 .dump-hint, .dump-file { margin: 6px 0; font-size: 12px; line-height: 1.6; color: var(--text-secondary); }
 .dump-actions { margin: 14px 0; }
 .dump-button {
-  padding: 8px 12px;
+  @include controls.button;
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: controls.$radius;
   background: var(--bg-primary);
   color: var(--text-primary);
   cursor: pointer;
-  font: inherit;
-  font-size: 12px;
 }
 .dump-button.primary { background: var(--accent-primary); color: #fff; border-color: transparent; }
 .dump-button:disabled { opacity: 0.5; cursor: not-allowed; }

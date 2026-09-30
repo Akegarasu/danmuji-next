@@ -492,10 +492,9 @@ button:disabled {
 }
 
 .gift-results button {
-  padding: 8px 12px;
-  font: inherit;
+  @include controls.button;
   border: 1px solid var(--border-color);
-  border-radius: 5px;
+  border-radius: controls.$radius;
   color: var(--text-primary);
   background: var(--bg-primary);
   cursor: pointer

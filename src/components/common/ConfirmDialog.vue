@@ -70,6 +70,8 @@ const confirm = () => {
 </template>
 
 <style scoped lang="scss">
+@use '@/styles/settings-controls' as controls;
+
 .confirm-overlay {
   position: fixed;
   inset: 0;
@@ -130,8 +132,8 @@ const confirm = () => {
 }
 
 .confirm-btn {
-  padding: 6px 18px;
-  border-radius: 6px;
+  @include controls.button(18px);
+  border-radius: controls.$radius;
   font-size: var(--font-size-sm, 13px);
   font-weight: 500;
   cursor: pointer;
