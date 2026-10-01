@@ -316,6 +316,7 @@ pub fn run() {
             commands::create_archive_window,
             // 扩展
             commands::create_extension_window,
+            commands::create_extension_settings_window,
             commands::extensions::get_extension_snapshot,
             commands::extensions::extension_request,
             commands::extensions::extension_query,

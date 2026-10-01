@@ -2,6 +2,7 @@
 mod host;
 pub mod overtime;
 pub mod server;
+pub mod song_request;
 mod storage;
 pub mod tasks;
 pub mod video_info;
@@ -48,10 +49,18 @@ pub trait Extension: Send {
     fn browser_visible(&self) -> bool {
         false
     }
+    /// OBS 只返回展示需要的数据；默认沿用桌面快照。
+    fn browser_snapshot(&self, now: Instant) -> Value {
+        self.snapshot(now)
+    }
     fn on_gift(&mut self, _gift: &ReceivedGift, _now: Instant) -> bool {
         false
     }
     fn on_text(&mut self, _text: &ReceivedText, _now: Instant) -> bool {
+        false
+    }
+    /// 同房间重连不重置场次；开播时间仅在收到开播通知时提供。
+    fn on_room(&mut self, _room_id: u64, _streamer_uid: u64, _live_start: Option<i64>) -> bool {
         false
     }
     fn tick(&mut self, _now: Instant) -> bool {

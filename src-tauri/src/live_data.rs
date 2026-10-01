@@ -167,6 +167,12 @@ impl LiveData {
 
     /// 处理弹幕并返回可供扩展消费的文本事件
     pub fn process_danmaku(&mut self, danmaku: Danmaku) -> ReceivedText {
+        let medal_room_id = danmaku
+            .sender
+            .medal
+            .as_ref()
+            .filter(|m| m.level > 0)
+            .map_or(0, |m| m.room_id);
         let processed = ProcessedDanmaku {
             id: format!("dm_{}_{}", danmaku.timestamp, danmaku.sender.uid),
             content: danmaku.content,
@@ -186,9 +192,18 @@ impl LiveData {
         }
 
         let received = ReceivedText {
+            event_id: processed.id.clone(),
             content: processed.content.clone(),
             username: processed.user.name.clone(),
             uid: processed.user.uid,
+            guard_level: processed.user.guard_level,
+            medal_anchor_uid: processed
+                .user
+                .medal
+                .as_ref()
+                .filter(|m| m.level > 0)
+                .map_or(0, |m| m.anchor_uid),
+            medal_room_id,
             timestamp: processed.timestamp,
             source: TextSource::Danmaku,
             sc_price: None,
@@ -214,6 +229,8 @@ impl LiveData {
         }
 
         let received = ReceivedGift {
+            event_id: transaction_key.clone(),
+            sender_uid: gift.sender_uid,
             gift_id: gift.gift_id,
             gift_name: gift.gift_name.clone(),
             sender_name: gift.sender_name.clone(),
@@ -378,6 +395,11 @@ impl LiveData {
 
     /// 处理 SC 并返回可供扩展消费的文本事件
     pub fn process_superchat(&mut self, sc: SuperChat) -> ReceivedText {
+        let medal_room_id = sc
+            .medal
+            .as_ref()
+            .filter(|m| m.level > 0)
+            .map_or(0, |m| m.room_id);
         let price = (sc.price as u64) * 10;
 
         let sender_uid = sc.sender_uid;
@@ -425,9 +447,18 @@ impl LiveData {
         );
 
         let received = ReceivedText {
+            event_id: processed.id.clone(),
             content: processed.content.clone(),
             username: processed.user.name.clone(),
             uid: processed.user.uid,
+            guard_level: processed.user.guard_level,
+            medal_anchor_uid: processed
+                .user
+                .medal
+                .as_ref()
+                .filter(|m| m.level > 0)
+                .map_or(0, |m| m.anchor_uid),
+            medal_room_id,
             timestamp: processed.start_time,
             source: TextSource::Superchat,
             sc_price: Some(price),
@@ -450,6 +481,8 @@ impl LiveData {
         }
 
         let received = ReceivedGift {
+            event_id: toast.payflow_id.as_ref().map(|id| format!("guard:{id}")),
+            sender_uid: toast.uid,
             gift_id: toast.gift_id,
             gift_name: toast.guard_name().to_string(),
             sender_name: toast.username.clone(),

@@ -1,13 +1,17 @@
 /* OBS 独立入口：不加载 Vue 主应用、Tauri、B 站连接或第三方接口。 */
 (() => {
   const room = document.querySelector('.timer-room');
-  const resize = () => { room.style.zoom = Math.min(1, window.innerWidth / 600); };
-  resize();
-  window.addEventListener('resize', resize);
   const clock = document.getElementById('clock');
   const connection = document.getElementById('connection');
   const rules = document.getElementById('rules');
   const noticeText = document.getElementById('notice-text');
+  const resize = () => {
+    room.style.zoom = Math.min(1, window.innerWidth / 600);
+    syncRuleWrapping();
+  };
+  resize();
+  window.addEventListener('resize', resize);
+  document.fonts?.ready.then(syncRuleWrapping);
   let snapshot = null;
   let receivedAt = 0;
   let connected = false;
@@ -35,6 +39,18 @@
       default: return '';
     }
   };
+  function syncRuleWrapping() {
+    const items = Array.from(rules.children);
+    for (const item of items) item.classList.remove('wrap-action');
+    // 先按单行布局测量；同一行任一规则放不下时，左右两侧一起换行。
+    const wrapped = items.map(item => item.children[1].offsetTop > item.children[0].offsetTop);
+    for (let i = 0; i < items.length; i += 2) {
+      if (wrapped[i] || wrapped[i + 1]) {
+        items[i].classList.add('wrap-action');
+        items[i + 1]?.classList.add('wrap-action');
+      }
+    }
+  }
   function clearNotice() {
     queue = [];
     showingNotice = false;
@@ -95,6 +111,7 @@
           }
           rules.append(item);
         }
+        syncRuleWrapping();
       }
     }
     const notices = value.notices || [];

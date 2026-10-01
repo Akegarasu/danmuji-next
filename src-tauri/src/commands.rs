@@ -971,6 +971,30 @@ pub async fn create_archive_window(
 
 // ==================== 扩展窗口 ====================
 
+/// 通用扩展设置窗口，内容由前端注册表按扩展 ID 加载。
+#[tauri::command]
+pub async fn create_extension_settings_window(
+    app: tauri::AppHandle,
+    kv_store: State<'_, KVStore>,
+    host: State<'_, Arc<crate::extensions::ExtensionHost>>,
+    extension_id: String,
+    title: String,
+) -> Result<(), String> {
+    // 仅允许已注册扩展，扩展 ID 也必须可安全用于窗口标签和路由。
+    if extension_id.is_empty() || !extension_id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-') {
+        return Err("扩展标识无效".into());
+    }
+    host.state(&extension_id)?;
+    let config = WindowConfig::extension_settings(&extension_id, &title);
+    if let Some(existing) = app.get_webview_window(&config.label) {
+        focus_existing_window(&existing);
+        return Ok(());
+    }
+    let saved_state = kv_store.get(&window_state_key(&config.label))
+        .and_then(|value| serde_json::from_value::<WindowState>(value).ok());
+    build_window(&app, &config, saved_state.as_ref())
+}
+
 /// 创建扩展窗口
 #[tauri::command]
 pub async fn create_extension_window(

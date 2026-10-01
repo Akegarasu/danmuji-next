@@ -159,10 +159,13 @@ fn router(state: WebState) -> Router {
         .route("/api/extensions", get(catalog))
         .route("/api/extensions/{id}/state", get(snapshot))
         .route("/api/extensions/{id}/events", get(events))
-        .route("/overlays/overtime/", get(|| async { asset("index.html") }))
         .route(
-            "/overlays/overtime/{file}",
-            get(|Path(file): Path<String>| async move { asset(&file) }),
+            "/overlays/{id}/",
+            get(|Path(id): Path<String>| async move { asset(&id, "index.html") }),
+        )
+        .route(
+            "/overlays/{id}/{file}",
+            get(|Path((id, file)): Path<(String, String)>| async move { asset(&id, &file) }),
         )
         .layer(middleware::from_fn_with_state(state.clone(), local_only))
         .with_state(state)
@@ -235,23 +238,35 @@ async fn events(State(state): State<WebState>, Path(id): Path<String>) -> Respon
         .into_response()
 }
 
-fn asset(file: &str) -> Response {
-    let (mime, bytes): (&str, &'static [u8]) = match file {
-        "index.html" => (
+fn asset(id: &str, file: &str) -> Response {
+    let (mime, bytes): (&str, &'static [u8]) = match (id, file) {
+        ("overtime", "index.html") => (
             "text/html; charset=utf-8",
             include_bytes!("../../../public/overlays/overtime/index.html"),
         ),
-        "overlay.js" => (
+        ("overtime", "overlay.js") => (
             "text/javascript; charset=utf-8",
             include_bytes!("../../../public/overlays/overtime/overlay.js"),
         ),
-        "overlay.css" => (
+        ("overtime", "overlay.css") => (
             "text/css; charset=utf-8",
             include_bytes!("../../../public/overlays/overtime/overlay.css"),
         ),
-        "timer-heavy.otf" => (
+        ("overtime", "timer-heavy.otf") => (
             "font/otf",
             include_bytes!("../../../public/overlays/overtime/timer-heavy.otf"),
+        ),
+        ("song-request", "index.html") => (
+            "text/html; charset=utf-8",
+            include_bytes!("../../../public/overlays/song-request/index.html"),
+        ),
+        ("song-request", "overlay.js") => (
+            "text/javascript; charset=utf-8",
+            include_bytes!("../../../public/overlays/song-request/overlay.js"),
+        ),
+        ("song-request", "overlay.css") => (
+            "text/css; charset=utf-8",
+            include_bytes!("../../../public/overlays/song-request/overlay.css"),
         ),
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
@@ -374,7 +389,76 @@ mod tests {
             .json()
             .await
             .unwrap();
-        assert_eq!(catalog["extensions"], json!(["overtime"]));
+        assert_eq!(catalog["extensions"], json!(["overtime", "song-request"]));
+        for file in ["", "overlay.js", "overlay.css"] {
+            assert!(client
+                .get(format!("{base}/overlays/song-request/{file}"))
+                .send()
+                .await
+                .unwrap()
+                .status()
+                .is_success());
+        }
+        assert_eq!(
+            client
+                .get(format!("{base}/overlays/song-request/missing.js"))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+        let song_endpoint = format!("{base}/api/extensions/song-request/events");
+        let mut songs = client.get(&song_endpoint).send().await.unwrap();
+        let initial = songs.chunk().await.unwrap().unwrap();
+        assert!(String::from_utf8_lossy(&initial).contains("\"total\":0"));
+        host.dispatch_text(&crate::live_events::ReceivedText {
+            event_id: "song_event".into(),
+            content: "点歌 晴天".into(),
+            username: "点歌观众".into(),
+            uid: 42,
+            timestamp: 1700000000,
+            source: crate::live_events::TextSource::Superchat,
+            sc_price: Some(300),
+            guard_level: 3,
+            medal_anchor_uid: 0,
+            medal_room_id: 0,
+        });
+        let updated = tokio::time::timeout(Duration::from_secs(2), songs.chunk())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let updated = String::from_utf8_lossy(&updated);
+        assert!(updated.contains("晴天") && updated.contains("点歌观众"));
+        assert!(
+            !updated.contains("uid")
+                && !updated.contains("sc_price")
+                && !updated.contains("priorities")
+        );
+        let song_id = host.state("song-request").unwrap().state["requests"][0]["id"].clone();
+        host.request(
+            "song-request",
+            json!({"type":"mark_sung","request_id":song_id,"sung":true}),
+        )
+        .unwrap();
+        let updated = tokio::time::timeout(Duration::from_secs(2), songs.chunk())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(String::from_utf8_lossy(&updated).contains("\"total\":0"));
+        let mut song_reconnect = client.get(&song_endpoint).send().await.unwrap();
+        assert!(
+            String::from_utf8_lossy(&song_reconnect.chunk().await.unwrap().unwrap())
+                .contains("\"total\":0")
+        );
+        assert_eq!(
+            client.post(&song_endpoint).send().await.unwrap().status(),
+            StatusCode::METHOD_NOT_ALLOWED
+        );
+        drop(songs);
+        drop(song_reconnect);
         for id in ["video-request", "voting"] {
             for route in ["state", "events"] {
                 assert_eq!(
@@ -393,6 +477,8 @@ mod tests {
         let first = stream.chunk().await.unwrap().unwrap();
         assert!(String::from_utf8_lossy(&first).contains("event: snapshot"));
         host.dispatch_gift(&ReceivedGift {
+            event_id: None,
+            sender_uid: 42,
             gift_id: 2,
             gift_name: "无关礼物".into(),
             sender_name: "不应输出".into(),
@@ -400,6 +486,8 @@ mod tests {
             blind_gift: None,
         });
         host.dispatch_gift(&ReceivedGift {
+            event_id: None,
+            sender_uid: 42,
             gift_id: 1,
             gift_name: "小心心".into(),
             sender_name: "测试用户".into(),

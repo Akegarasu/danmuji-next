@@ -12,11 +12,11 @@ import { createLogger } from '@/services/logger'
 let initialized = false
 const logger = createLogger('SettingsApplier')
 
-// 设置、扩展和存档窗口独立调节；拆分的内容窗口继续跟随主窗口。
+// 设置、扩展（含独立设置页）和存档窗口独立调节；拆分的内容窗口继续跟随主窗口。
 const getCurrentWindowOpacity = () => {
   const settingsStore = useSettingsStore()
   const windowLabel = getCurrentWindow().label
-  return ['settings', 'extension', 'archive'].includes(windowLabel)
+  return ['settings', 'extension', 'archive'].includes(windowLabel) || windowLabel.startsWith('extension-settings-')
     ? settingsStore.settings.otherWindowOpacity
     : settingsStore.mainWindowSettings.opacity
 }

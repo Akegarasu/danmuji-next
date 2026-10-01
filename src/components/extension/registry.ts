@@ -11,4 +11,5 @@ export const extensionRegistry: ExtensionDefinition[] = [
   { id: 'video-request', label: '点播', component: defineAsyncComponent(() => import('./VideoRequestTab.vue')) },
   { id: 'voting', label: '投票', component: defineAsyncComponent(() => import('./VotingTab.vue')) },
   { id: 'overtime', label: '加班机', component: defineAsyncComponent(() => import('./OvertimeTab.vue')) },
+  { id: 'song-request', label: '点歌机', component: defineAsyncComponent(() => import('./SongRequestTab.vue')) },
 ]

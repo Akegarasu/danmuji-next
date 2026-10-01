@@ -468,6 +468,41 @@ fn overtime_consumes_deduplicated_deltas_instead_of_combo_snapshots() {
     assert_eq!(timer.snapshot(now)["notices"].as_array().unwrap().len(), 9);
 }
 
+#[test]
+fn song_allowances_consume_gift_deltas_for_the_correct_uid() {
+    use crate::extensions::{song_request::SongRequestManager, Extension};
+    use crate::live_events::{ReceivedText, TextSource};
+    let now = std::time::Instant::now();
+    let mut songs = SongRequestManager::default();
+    songs.request(json!({"type":"configure","config":{
+        "audience":{"normal":{"enabled":true,"limit":1,"cooldown_secs":0}},
+        "gift_bonus_enabled":true,
+        "gift_rules":[{"id":"pillow","gift_id":32128,"gift_name":"爱心抱枕","gifts_required":10,"extra_requests":1}]
+    }}), now).unwrap();
+    let mut data = LiveData::default();
+    for round in 0..2 {
+        for gift in parse(&v1_packet(round, 0, true)) {
+            let duplicate = gift.clone();
+            let received = data.process_gift(gift).unwrap();
+            assert_eq!(received.sender_uid, 42);
+            assert!(songs.on_gift(&received, now));
+            assert!(data.process_gift(duplicate).is_none());
+        }
+    }
+    // 两次通知分别为 4、6 个，合计只兑换一次；不能按连击快照 4+10 重复累计。
+    let saved = songs.checkpoint(now);
+    assert_eq!(saved["allowances"]["42"]["bonus_remaining"], 1);
+    assert_eq!(saved["allowances"]["42"]["gift_progress"]["pillow"], 0);
+    for (index, expected) in [(0, true), (1, true), (2, false)] {
+        let text = ReceivedText {
+            event_id: format!("request{index}"), content: format!("点歌 歌曲{index}"), username: "观众".into(), uid: 42,
+            guard_level: 0, medal_anchor_uid: 0, medal_room_id: 0, timestamp: 1700000000,
+            source: TextSource::Danmaku, sc_price: None,
+        };
+        assert_eq!(songs.on_text(&text, now), expected);
+    }
+}
+
 
 #[test]
 fn overtime_blind_boxes_count_v1_v2_deltas_without_double_triggers() {

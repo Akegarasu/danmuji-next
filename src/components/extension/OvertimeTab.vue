@@ -214,7 +214,7 @@ onBeforeUnmount(stop)
         <SettingsSectionTitle class="section-heading">礼物触发规则 <span>{{ config.rules.length }} / 100</span></SettingsSectionTitle>
         <div class="gift-search">
           <input v-model="giftSearch" placeholder="搜索礼物名称或 ID…" aria-label="搜索礼物">
-          <button class="ext-btn" :disabled="config.rules.length >= 100" @click="addRule()">自定义礼物</button>
+          <button class="ext-btn" :disabled="config.rules.length >= 100" @click="addRule()">+ 自定义礼物</button>
         </div>
         <div class="gift-results" v-if="giftSearch">
           <button v-for="gift in gifts" :key="gift.id" :disabled="config.rules.length >= 100" @click="addRule(gift)">{{

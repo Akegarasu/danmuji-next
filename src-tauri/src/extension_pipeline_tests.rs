@@ -45,9 +45,13 @@ impl Drop for TestDirectory {
 }
 fn text(content: &str, uid: u64) -> ReceivedText {
     ReceivedText {
+        event_id: format!("test_{uid}_{content}"),
         content: content.into(),
         username: format!("用户{uid}"),
         uid,
+        guard_level: 0,
+        medal_anchor_uid: 0,
+        medal_room_id: 0,
         timestamp: 1_700_000_000,
         source: TextSource::Danmaku,
         sc_price: None,
@@ -301,7 +305,7 @@ fn normalized_danmaku_and_sc_keep_live_updates_and_battery_units() {
     let host = dir.host();
     let mut live = LiveData::default();
     let danmaku = Danmaku {
-        content: "av1".into(),
+        content: "点歌 av1".into(),
         timestamp: 1700000000123,
         r#type: DanmakuType::Text,
         emoticon: None,
@@ -311,16 +315,34 @@ fn normalized_danmaku_and_sc_keep_live_updates_and_battery_units() {
             uid: 42,
             name: "用户42".into(),
             face: None,
-            medal: None,
-            guard_level: GuardLevel::None,
+            medal: Some(blivedm::Medal {
+                name: "本房粉丝".into(),
+                level: 1,
+                color: 0xffffff,
+                room_id: 100,
+                anchor_uid: 900,
+                anchor_name: "主播".into(),
+                is_light: true,
+            }),
+            guard_level: GuardLevel::Captain,
             user_level: 0,
             wealth_level: 0,
             is_admin: false,
         },
     };
-    host.dispatch_text(&live.process_danmaku(danmaku));
-    let sc = SuperChat::parse(&json!({"data":{"id":1,"message":"av2","price":30,"uid":43,"user_info":{"uname":"用户43"},"start_time":1700000000,"time":60}})).unwrap();
+    let received = live.process_danmaku(danmaku);
+    assert_eq!(received.medal_anchor_uid, 900);
+    assert_eq!(received.medal_room_id, 100);
+    host.dispatch_text(&received);
+    let sc = SuperChat::parse(&json!({"data":{"id":1,"message":"点歌 av2","price":30,"uid":43,"user_info":{"uname":"用户43","guard_level":1},"start_time":1700000000,"time":60}})).unwrap();
     host.dispatch_text(&live.process_superchat(sc));
+    let songs = host.state("song-request").unwrap().state["requests"].clone();
+    assert_eq!(songs[0]["song_name"], "av2");
+    assert_eq!(songs[0]["guard_level"], 1);
+    assert_eq!(songs[0]["source"], "superchat");
+    assert_eq!(songs[0]["sc_price"], 300);
+    assert_eq!(songs[1]["guard_level"], 3);
+    assert_eq!(songs[1]["username"], "用户42");
     let requests = host.state("video-request").unwrap().state;
     assert_eq!(requests[0]["source"], "superchat");
     assert_eq!(requests[0]["sc_price"], 300);
@@ -358,4 +380,54 @@ fn normalized_danmaku_and_sc_keep_live_updates_and_battery_units() {
     assert_eq!(host.state("video-request").unwrap().state, json!([]));
     host.dispatch_text(&text("av1 av2", 42));
     assert_eq!(host.take_effects().len(), 2);
+}
+
+#[test]
+fn song_order_history_and_replay_filter_survive_host_restart() {
+    let dir = TestDirectory::new();
+    let host = dir.host();
+    host.request("song-request", json!({"type":"configure","config":{"audience":{"normal":{"enabled":true,"limit":10,"cooldown_secs":0}}}})).unwrap();
+    let first = text("点歌 晴天", 42);
+    let second = text("点歌 稻香", 43);
+    host.dispatch_text(&first);
+    host.dispatch_text(&second);
+    let songs = host.state("song-request").unwrap().state["requests"].clone();
+    host.request("song-request", json!({"type":"move","request_id":songs[1]["id"],"target_id":songs[0]["id"],"placement":"before"})).unwrap();
+    let restored = dir.host();
+    assert_eq!(
+        restored.state("song-request").unwrap().state["requests"][0]["song_name"],
+        "稻香"
+    );
+    restored
+        .request(
+            "song-request",
+            json!({"type":"mark_sung","request_id":songs[1]["id"],"sung":true}),
+        )
+        .unwrap();
+    let restored = dir.host();
+    assert_eq!(
+        restored.browser_snapshot("song-request").unwrap()["total"],
+        1
+    );
+    assert_eq!(
+        restored.state("song-request").unwrap().state["requests"][1]["sung"],
+        true
+    );
+    restored
+        .request("song-request", json!({"type":"clear_all"}))
+        .unwrap();
+    let restored = dir.host();
+    restored.dispatch_text(&first);
+    restored.dispatch_text(&second);
+    assert_eq!(
+        restored.browser_snapshot("song-request").unwrap()["total"],
+        0
+    );
+    let mut fresh = first;
+    fresh.event_id = "new_message".into();
+    restored.dispatch_text(&fresh);
+    assert_eq!(
+        restored.browser_snapshot("song-request").unwrap()["total"],
+        1
+    );
 }

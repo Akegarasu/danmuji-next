@@ -31,6 +31,12 @@ const router = createRouter({
       path: '/extension',
       name: 'extension',
       component: () => import('@/views/ExtensionWindow.vue')
+    },
+    {
+      path: '/extension-settings/:extensionId',
+      name: 'extension-settings',
+      component: () => import('@/views/ExtensionSettingsWindow.vue'),
+      props: true
     }
   ]
 })

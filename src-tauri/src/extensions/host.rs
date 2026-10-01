@@ -1,7 +1,7 @@
 //! 扩展注册与生命周期，不持有直播聚合器或桌面窗口。
 use super::{
-    overtime, storage::CheckpointStore, video_request, voting, EffectResult, Extension,
-    ExtensionEffect, ExtensionState,
+    overtime, song_request, storage::CheckpointStore, video_request, voting, EffectResult,
+    Extension, ExtensionEffect, ExtensionState,
 };
 use crate::live_events::{ReceivedGift, ReceivedText};
 use serde_json::json;
@@ -22,7 +22,7 @@ impl Entry {
     fn broadcast(&self, now: Instant) {
         // OBS 无订阅时不生成额外快照；桌面更新每个推送周期合并一次。
         if self.updates.receiver_count() > 0 {
-            self.updates.send_replace(self.plugin.snapshot(now));
+            self.updates.send_replace(self.plugin.browser_snapshot(now));
         }
     }
 }
@@ -43,6 +43,7 @@ impl ExtensionHost {
         for plugin in [
             Box::new(overtime::Overtime::new(Instant::now())) as Box<dyn Extension>,
             Box::new(video_request::VideoRequestManager::default()),
+            Box::new(song_request::SongRequestManager::default()),
             Box::new(voting::VotingManager::default()),
         ] {
             let store = CheckpointStore::new(directory.join(format!("{}.json", plugin.id())));
@@ -62,7 +63,7 @@ impl ExtensionHost {
             store.mark_invalid();
             self.report(format!("读取 {} 配置失败：{error}", plugin.id()));
         }
-        let (updates, _) = watch::channel(plugin.snapshot(Instant::now()));
+        let (updates, _) = watch::channel(plugin.browser_snapshot(Instant::now()));
         self.entries.lock().unwrap().insert(
             plugin.id().into(),
             Entry {
@@ -119,7 +120,7 @@ impl ExtensionHost {
             .get(id)
             .filter(|e| e.plugin.browser_visible())
             .ok_or("扩展不存在")?;
-        Ok(entry.plugin.snapshot(Instant::now()))
+        Ok(entry.plugin.browser_snapshot(Instant::now()))
     }
     pub fn subscribe(&self, id: &str) -> Result<watch::Receiver<Value>, String> {
         let entries = self.entries.lock().unwrap();
@@ -129,7 +130,7 @@ impl ExtensionHost {
             .ok_or("扩展不存在")?;
         entry
             .updates
-            .send_replace(entry.plugin.snapshot(Instant::now()));
+            .send_replace(entry.plugin.browser_snapshot(Instant::now()));
         Ok(entry.updates.subscribe())
     }
     fn publish(&self, entry: &mut Entry, now: Instant, save: bool) {
@@ -174,6 +175,15 @@ impl ExtensionHost {
         let now = Instant::now();
         for entry in entries.values_mut() {
             if entry.plugin.on_text(text, now) {
+                self.publish(entry, now, true);
+            }
+        }
+    }
+    pub fn dispatch_room(&self, room_id: u64, streamer_uid: u64, live_start: Option<i64>) {
+        let mut entries = self.entries.lock().unwrap();
+        let now = Instant::now();
+        for entry in entries.values_mut() {
+            if entry.plugin.on_room(room_id, streamer_uid, live_start) {
                 self.publish(entry, now, true);
             }
         }

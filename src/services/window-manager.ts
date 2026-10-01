@@ -8,6 +8,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import { createLogger } from '@/services/logger'
+import { getExtensionSettings } from '@/components/extension/settings-registry'
 
 // ==================== 类型定义 ====================
 
@@ -312,6 +313,14 @@ export const createExtensionWindow = async (): Promise<void> => {
   }
 }
 
+/** 按扩展 ID 打开独立设置窗口；各扩展分别记忆尺寸位置，重复打开只聚焦。 */
+export const createExtensionSettingsWindow = async (extensionId: string): Promise<void> => {
+  const definition = getExtensionSettings(extensionId)
+  if (!definition) throw new Error('此扩展尚未提供设置页面')
+  await invoke('create_extension_settings_window', { extensionId, title: definition.title })
+  await setWindowOpenState(`extension-settings-${extensionId}`, true)
+}
+
 /**
  * 关闭窗口
  */
@@ -360,6 +369,9 @@ export const restorePreviouslyOpenWindows = async (): Promise<void> => {
       } else if (label === 'extension') {
         await createExtensionWindow()
         logger.debug('Restored extension window')
+      } else if (label.startsWith('extension-settings-')) {
+        const extensionId = label.slice('extension-settings-'.length)
+        if (getExtensionSettings(extensionId)) await createExtensionSettingsWindow(extensionId)
       }
     }
   } catch (e) {

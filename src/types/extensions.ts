@@ -1,4 +1,5 @@
 import type { OvertimeSnapshot, OvertimeRequest } from './overtime'
+import type { SongSnapshot, SongRequest } from './song-request'
 
 /** 视频信息（来自后端） */
 export interface VideoInfo {
@@ -68,6 +69,7 @@ export interface ExtensionStates {
   'video-request': VideoRequestItem[]
   voting: Poll[]
   overtime: OvertimeSnapshot
+  'song-request': SongSnapshot
 }
 export type ExtensionId = keyof ExtensionStates
 
@@ -80,6 +82,7 @@ export interface ExtensionRequests {
     | { type: 'create'; title: string; options: [string, string][]; key_type: VoteKeyType; duration_secs: number | null }
     | { type: 'end' | 'delete'; poll_id: string }
   overtime: OvertimeRequest
+  'song-request': SongRequest
 }
 
 export interface ExtensionState<K extends ExtensionId> {

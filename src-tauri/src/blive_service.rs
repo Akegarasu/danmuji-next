@@ -319,6 +319,11 @@ impl BliveService {
                 state.status = ConnectionStatus::Connected;
             }
             let _ = app_clone.emit("blive-status", ConnectionStatus::Connected);
+            service.extensions.dispatch_room(
+                room_info_for_rank.room_id,
+                room_info_for_rank.uid,
+                None,
+            );
 
             // 启动存档会话
             let archive = app_clone.state::<Arc<ArchiveManager>>().inner().clone();
@@ -514,6 +519,11 @@ impl BliveService {
                     let mut state = self.state.write().await;
                     if let Some(ref mut room_info) = state.room_info {
                         room_info.live_status = 1; // 1 = 直播中
+                        self.extensions.dispatch_room(
+                            room_info.room_id,
+                            room_info.uid,
+                            Some(live_data.live_time),
+                        );
                     }
                 }
                 self.live_data

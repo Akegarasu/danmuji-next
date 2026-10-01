@@ -425,6 +425,8 @@ mod tests {
     }
     fn gift(num: u32) -> ReceivedGift {
         ReceivedGift {
+            event_id: None,
+            sender_uid: 42,
             gift_id: 1,
             gift_name: "小心心".into(),
             sender_name: "测试用户".into(),

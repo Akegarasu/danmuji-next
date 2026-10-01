@@ -98,6 +98,24 @@ impl WindowConfig {
         }
     }
 
+    /// 各扩展共享设置窗口规格，通过 ID 区分内容和持久化状态。
+    pub fn extension_settings(extension_id: &str, title: &str) -> Self {
+        Self {
+            label: format!("extension-settings-{extension_id}"),
+            title: title.into(),
+            url: format!("/#/extension-settings/{extension_id}"),
+            default_width: 760.0,
+            default_height: 800.0,
+            min_width: 420.0,
+            min_height: 480.0,
+            transparent: true,
+            decorations: false,
+            always_on_top: false,
+            resizable: true,
+            shadow: false,
+        }
+    }
+
     /// 创建扩展窗口配置
     pub fn extension() -> Self {
         Self {
