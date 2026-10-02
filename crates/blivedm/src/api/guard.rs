@@ -107,13 +107,14 @@ pub async fn get_guard_top_list(
         .append_pair("page", &page.max(1).to_string())
         .append_pair("ruid", &ruid.to_string())
         .append_pair("page_size", &page_size.clamp(1, 100).to_string())
-        .append_pair("typ", "3")
+        .append_pair("typ", "5")
         .append_pair("platform", "web");
 
     let mut request = client
         .get(url.as_str())
         .header("User-Agent", USER_AGENT)
-        .header("Referer", format!("https://live.bilibili.com/{room_id}"));
+        .header("Accept", "application/json, text/plain, */*")
+        .header("Referer", format!("https://live.bilibili.com/blanc/{room_id}"));
 
     if let Some(cookie) = cookie {
         request = request.header("Cookie", cookie);

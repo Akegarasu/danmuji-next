@@ -127,7 +127,11 @@ impl BliveService {
             !cookie.is_empty()
         );
 
-        let http_client = reqwest::Client::new();
+        let http_client = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(15))
+            .build()
+            .map_err(|error| format!("创建榜单请求客户端失败: {error}"))?;
         match get_contribution_rank_by_type(
             &http_client,
             room_info.room_id,
@@ -147,7 +151,13 @@ impl BliveService {
                     list.first().map(|user| user.uid)
                 );
                 if rank_type == ContributionRankType::Online {
-                    self.live_data.lock().await.set_contribution_rank_full(list);
+                    // 请求期间可能已切换房间；旧榜单不能写入新房间的快照。
+                    let state = self.state.read().await;
+                    if matches!(state.status, ConnectionStatus::Connected | ConnectionStatus::Reconnecting)
+                        && state.room_info.as_ref().map(|info| info.room_id) == Some(room_info.room_id)
+                    {
+                        self.live_data.lock().await.set_contribution_rank_full(list);
+                    }
                 }
                 Ok(rank)
             }
@@ -170,7 +180,11 @@ impl BliveService {
             .room_info
             .clone()
             .ok_or_else(|| "未连接房间".to_string())?;
-        let http_client = reqwest::Client::new();
+        let http_client = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(15))
+            .build()
+            .map_err(|error| format!("创建榜单请求客户端失败: {error}"))?;
 
         get_all_guard_top_list(&http_client, room_info.room_id, room_info.uid, Some(cookie))
             .await

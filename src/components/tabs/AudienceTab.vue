@@ -9,16 +9,10 @@ import type {
   ContributionRankUser,
   GuardTopListUser
 } from '@/types'
-import {
-  refreshContributionRank,
-  refreshGuardTopList
-} from '@/services/blive-client'
-import { createLogger } from '@/services/logger'
+import { useAudienceRanks, type AudienceMode } from '@/composables/useAudienceRanks'
 import EntryPanel from '@/components/common/EntryPanel.vue'
 import ContextMenu from '@/components/common/ContextMenu.vue'
 import type { MenuItem } from '@/components/common/ContextMenu.vue'
-
-type AudienceMode = 'audience' | 'guard'
 
 interface DisplayUser {
   uid: number
@@ -41,54 +35,18 @@ const rankTabs: Array<{ type: ContributionRankType; label: string }> = [
 
 const danmakuStore = useDanmakuStore()
 const settingsStore = useSettingsStore()
-const logger = createLogger('AudienceTab')
 
 const activeMode = ref<AudienceMode>('audience')
 const activeRankType = ref<ContributionRankType>('online')
-const rankCache = ref<Record<ContributionRankType, ContributionRankUser[]>>({
-  online: [],
-  daily: [],
-  weekly: [],
-  monthly: []
-})
-const rankLoaded = ref<Record<ContributionRankType, boolean>>({
-  online: false,
-  daily: false,
-  weekly: false,
-  monthly: false
-})
-const guardUsers = ref<GuardTopListUser[]>([])
-const guardCount = ref(0)
-const guardLoaded = ref(false)
-const isRefreshing = ref(false)
-const needsActiveRefresh = ref(false)
-const loadError = ref('')
+const {
+  rankCache, rankLoaded, guardUsers, guardCount, isRefreshing, loadError,
+  refreshRank, handleRefresh, ensureActiveData
+} = useAudienceRanks(activeMode, activeRankType)
 const isTabActive = ref(true)
 let autoRefreshTimer: number | null = null
 
 const contextMenuRef = ref<InstanceType<typeof ContextMenu>>()
 const currentUser = ref<DisplayUser | null>(null)
-
-watch(
-  () => danmakuStore.contributionRankFull,
-  (rank) => {
-    rankCache.value.online = rank
-    if (rank.length > 0) rankLoaded.value.online = true
-  },
-  { immediate: true }
-)
-
-watch(
-  () => danmakuStore.isConnected,
-  (connected) => {
-    if (connected) return
-    rankCache.value = { online: [], daily: [], weekly: [], monthly: [] }
-    rankLoaded.value = { online: false, daily: false, weekly: false, monthly: false }
-    guardUsers.value = []
-    guardCount.value = 0
-    guardLoaded.value = false
-  }
-)
 
 const normalizeRefreshInterval = (seconds: number) =>
   Math.min(300, Math.max(10, Number.isFinite(seconds) ? Math.round(seconds) : 120))
@@ -148,16 +106,6 @@ const audienceCount = computed(() => Math.max(
   rankCache.value.online.length
 ))
 
-const activeRankLabel = computed(() =>
-  rankTabs.find((tab) => tab.type === activeRankType.value)?.label ?? '贡献榜'
-)
-
-const summaryText = computed(() => activeMode.value === 'guard'
-  ? '榜单每月更新，统计大航海亲密度'
-  : `${activeRankLabel.value} · ${displayList.value.length} 人`
-)
-
-const showScore = computed(() => activeMode.value === 'guard' || activeRankType.value === 'online')
 const scoreLabel = computed(() => activeMode.value === 'guard' ? '陪伴值' : '贡献值')
 
 const audienceStyle = computed(() => ({
@@ -174,78 +122,6 @@ const getGuardName = (level: number) => {
     case 3: return '舰长'
     default: return ''
   }
-}
-
-const refreshRank = async (silent = false, rankType = activeRankType.value) => {
-  const cookie = settingsStore.settings.cookie
-  if (!cookie || isRefreshing.value) return
-
-  isRefreshing.value = true
-  loadError.value = ''
-  try {
-    const response = await refreshContributionRank(cookie, rankType)
-    rankCache.value[rankType] = response.list
-    rankLoaded.value[rankType] = true
-  } catch (error) {
-    loadError.value = '贡献榜加载失败'
-    logger.error(`${silent ? 'auto' : 'manual'} contribution rank refresh failed:`, error)
-  } finally {
-    isRefreshing.value = false
-    if (needsActiveRefresh.value) {
-      needsActiveRefresh.value = false
-      queueMicrotask(ensureActiveData)
-    } else if (
-      rankLoaded.value[rankType] &&
-      activeMode.value === 'audience' &&
-      !guardLoaded.value
-    ) {
-      queueMicrotask(ensureActiveData)
-    }
-  }
-}
-
-const refreshGuards = async (silent = false) => {
-  const cookie = settingsStore.settings.cookie
-  if (!cookie || isRefreshing.value) return
-
-  isRefreshing.value = true
-  loadError.value = ''
-  try {
-    const response = await refreshGuardTopList(cookie)
-    guardUsers.value = response.list
-    guardCount.value = response.count
-    guardLoaded.value = true
-  } catch (error) {
-    if (!silent || activeMode.value === 'guard') loadError.value = '大航海榜加载失败'
-    logger.error(`${silent ? 'auto' : 'manual'} guard rank refresh failed:`, error)
-  } finally {
-    isRefreshing.value = false
-    if (needsActiveRefresh.value) {
-      needsActiveRefresh.value = false
-      queueMicrotask(ensureActiveData)
-    }
-  }
-}
-
-const ensureActiveData = () => {
-  if (!danmakuStore.isConnected || !settingsStore.settings.cookie) return
-  if (isRefreshing.value) {
-    needsActiveRefresh.value = true
-    return
-  }
-  if (activeMode.value === 'guard') {
-    if (!guardLoaded.value) void refreshGuards(true)
-  } else if (!rankLoaded.value[activeRankType.value]) {
-    void refreshRank(true)
-  } else if (!guardLoaded.value) {
-    // 预取大航海总人数，使一级切换栏在房间观众页也能显示准确数量。
-    void refreshGuards(true)
-  }
-}
-
-const handleRefresh = () => {
-  if (activeMode.value === 'guard') void refreshGuards(false)
-  else void refreshRank(false)
 }
 
 const shouldAutoRefresh = computed(() =>
@@ -270,11 +146,6 @@ const resetAutoRefreshTimer = () => {
   }, autoRefreshIntervalSeconds.value * 1000)
 }
 
-watch(
-  [activeMode, activeRankType, () => danmakuStore.isConnected],
-  ensureActiveData,
-  { immediate: true }
-)
 watch([shouldAutoRefresh, autoRefreshIntervalSeconds, activeRankType], resetAutoRefreshTimer, {
   immediate: true
 })
@@ -344,7 +215,7 @@ const handleAvatarError = (event: Event) => {
 
 <template>
   <div class="audience-tab" :style="audienceStyle">
-    <div class="rank-navigation">
+    <div class="rank-navigation" :class="{ 'guard-mode': activeMode === 'guard' }">
       <div class="primary-tabs" role="tablist" aria-label="观众榜单类型">
         <button
           class="primary-tab"
@@ -373,19 +244,15 @@ const handleAvatarError = (event: Event) => {
           type="button"
           @click="activeRankType = tab.type"
         >
-          {{ tab.label }}
+          {{ tab.label }}<span v-if="activeRankType === tab.type && rankLoaded[tab.type]" class="tab-count">({{ rankCache[tab.type].length }})</span>
         </button>
       </div>
-    </div>
-
-    <div class="rank-summary">
-      <span class="summary-text" :title="summaryText">{{ summaryText }}</span>
-      <span v-if="showScore" class="score-heading">{{ scoreLabel }}</span>
       <button
         class="refresh-btn"
         type="button"
-        :disabled="isRefreshing"
+        :disabled="isRefreshing || !danmakuStore.isConnected || !settingsStore.settings.cookie"
         :title="isRefreshing ? '刷新中…' : '刷新当前榜单'"
+        :aria-label="isRefreshing ? '刷新中' : '刷新当前榜单'"
         @click="handleRefresh"
       >
         ↻
@@ -441,7 +308,7 @@ const handleAvatarError = (event: Event) => {
           </div>
         </div>
 
-        <div v-if="user.score" class="user-score">{{ user.score }}</div>
+        <div v-if="user.score" class="user-score" :title="`${scoreLabel}：${user.score}`">{{ user.score }}</div>
       </div>
 
       <div v-if="displayList.length === 0" class="empty-state">
@@ -467,6 +334,10 @@ const handleAvatarError = (event: Event) => {
 }
 
 .rank-navigation {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 23px;
+  align-items: center;
+  gap: 5px 4px;
   padding: 6px 6px 5px;
   background: var(--bg-card);
   border-bottom: 1px solid var(--border-color);
@@ -474,9 +345,11 @@ const handleAvatarError = (event: Event) => {
 }
 
 .primary-tabs {
+  grid-column: 1 / -1;
+  min-width: 0;
   height: 31px;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: stretch;
   padding: 2px;
   border-radius: 12px 12px 7px 7px;
@@ -511,9 +384,8 @@ const handleAvatarError = (event: Event) => {
 
 .secondary-tabs {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(max-content, 1fr));
   gap: 7px;
-  margin-top: 5px;
   padding: 0 4px;
 }
 
@@ -531,33 +403,14 @@ const handleAvatarError = (event: Event) => {
   }
 }
 
-.rank-summary {
-  min-height: 28px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 9px;
-  color: var(--text-muted);
-  background: var(--bg-card);
-  border-bottom: 1px solid var(--border-color);
-  font-size: var(--font-size-xs);
-  flex-shrink: 0;
-}
-
-.summary-text {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.score-heading {
-  margin-left: auto;
-  flex-shrink: 0;
+.guard-mode {
+  .primary-tabs { grid-column: 1; }
+  .refresh-btn { grid-row: 1; }
 }
 
 .refresh-btn {
+  grid-column: 2;
+  grid-row: 2;
   width: 23px;
   height: 22px;
   display: grid;

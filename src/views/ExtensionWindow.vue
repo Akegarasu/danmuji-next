@@ -77,7 +77,7 @@ onUnmounted(async () => {
   min-height: var(--tab-bar-height);
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
-  padding: 8px;
+  padding: 4px;
   gap: 4px;
   overflow-x: auto;
   flex-shrink: 0;
@@ -91,7 +91,7 @@ onUnmounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 8px 12px;
+  padding: 4px 12px;
   background: transparent;
   border: none;
   border-radius: var(--border-radius-sm);
