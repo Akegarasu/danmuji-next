@@ -259,6 +259,13 @@ pub struct LiveStats {
 
 // ==================== 数据更新 ====================
 
+/// 被接受的持久化记录。礼物是累计快照，文本保持逐条记录的语义。
+pub enum LiveRecord {
+    Danmaku(ProcessedDanmaku),
+    Gift(ProcessedGift),
+    SuperChat(ProcessedSuperChat),
+}
+
 /// 数据更新（发送给前端）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]

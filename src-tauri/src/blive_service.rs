@@ -6,84 +6,69 @@
 //! - 数据快照：新窗口可获取当前完整数据
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::StreamExt;
-use tauri::{AppHandle, Emitter, Manager};
-use tokio::sync::{mpsc, Mutex, RwLock};
+use tauri::{AppHandle, Emitter};
+use tokio::sync::{oneshot, Mutex, RwLock};
 use tokio::task::JoinHandle;
 
-use crate::archive::{ArchiveEvent, ArchiveManager};
-use crate::live_data::{LiveData, WindowSubscription};
+use crate::archive::{ArchiveManager, Recording};
+use crate::live_events::LiveEvent;
+use crate::live_session::LiveSession;
 use crate::live_types::*;
 use crate::speech::SpeechService;
 use blivedm::api::{
     get_all_guard_top_list, get_contribution_rank, get_contribution_rank_by_type, get_danmu_info,
     get_room_init, ContributionRankResponse, ContributionRankType, GuardTopListResponse, RoomInfo,
 };
-use blivedm::{parse_notification, BliveDmClient, Error as BliveError, Event};
+use blivedm::{parse_notification, BliveDmClient, CancellationToken, Error as BliveError, Event};
 
-// ==================== 服务状态 ====================
-
-struct ServiceState {
-    status: ConnectionStatus,
-    room_id: u64,
-    room_info: Option<RoomInfo>,
-    stop_tx: Option<mpsc::Sender<()>>,
-    task_handle: Option<JoinHandle<()>>,
-}
-
-impl Default for ServiceState {
-    fn default() -> Self {
-        Self {
-            status: ConnectionStatus::Disconnected,
-            room_id: 0,
-            room_info: None,
-            stop_tx: None,
-            task_handle: None,
-        }
-    }
+/// 控制句柄与对外可观察的状态分离，替换时必须取消并等待旧任务。
+struct ConnectionTask {
+    cancellation: CancellationToken,
+    handle: JoinHandle<()>,
 }
 
 // ==================== 弹幕服务 ====================
 
 pub struct BliveService {
-    state: RwLock<ServiceState>,
-    /// 当前房主 UID 的无锁快照；仅在连接状态切换时更新。
-    streamer_uid: AtomicU64,
-    live_data: Mutex<LiveData>,
+    session: Mutex<LiveSession>,
+    /// 只串行化资源交接，不在此锁内等待网络预检查。
+    connection: Mutex<Option<ConnectionTask>>,
     speech: Arc<SpeechService>,
     extensions: Arc<crate::extensions::ExtensionHost>,
-    /// 串行化批次发布，防止测试事件和周期推送交错。
+    archive: Arc<ArchiveManager>,
+    /// 串行化批次发布；语音提交期间不阻塞直播聚合。
     publish_lock: Mutex<()>,
     /// 窗口订阅: window_label -> subscription
-    subscriptions: RwLock<HashMap<String, WindowSubscription>>,
+    subscriptions: RwLock<HashMap<String, HashSet<EventType>>>,
 }
 
 impl BliveService {
     pub fn new(
         speech: Arc<SpeechService>,
         extensions: Arc<crate::extensions::ExtensionHost>,
+        archive: Arc<ArchiveManager>,
     ) -> Self {
         Self {
-            state: RwLock::new(ServiceState::default()),
-            streamer_uid: AtomicU64::new(0),
-            live_data: Mutex::new(LiveData::default()),
+            session: Mutex::new(LiveSession::default()),
+            connection: Mutex::new(None),
             speech,
             extensions,
+            archive,
             subscriptions: RwLock::new(HashMap::new()),
             publish_lock: Mutex::new(()),
         }
     }
 
     pub async fn get_status(&self) -> ConnectionStatus {
-        self.state.read().await.status.clone()
+        self.session.lock().await.status.clone()
     }
 
     pub async fn get_room_info(&self) -> Option<RoomInfoResponse> {
-        self.state.read().await.room_info.clone().map(Into::into)
+        self.session.lock().await.room_info.clone().map(Into::into)
     }
 
     /// 解析并处理手动输入的原始 B 站通知事件。
@@ -106,9 +91,14 @@ impl BliveService {
         cookie: &str,
         rank_type: ContributionRankType,
     ) -> Result<ContributionRankResponse, String> {
-        let room_info = {
-            let state = self.state.read().await;
-            state.room_info.clone()
+        let (room_info, generation) = {
+            let state = self.session.lock().await;
+            let generation = matches!(
+                state.status,
+                ConnectionStatus::Connected | ConnectionStatus::Reconnecting
+            )
+            .then_some(state.generation);
+            (state.room_info.clone(), generation)
         };
 
         let room_info = match room_info {
@@ -152,11 +142,15 @@ impl BliveService {
                 );
                 if rank_type == ContributionRankType::Online {
                     // 请求期间可能已切换房间；旧榜单不能写入新房间的快照。
-                    let state = self.state.read().await;
-                    if matches!(state.status, ConnectionStatus::Connected | ConnectionStatus::Reconnecting)
-                        && state.room_info.as_ref().map(|info| info.room_id) == Some(room_info.room_id)
+                    let mut state = self.session.lock().await;
+                    if matches!(
+                        state.status,
+                        ConnectionStatus::Connected | ConnectionStatus::Reconnecting
+                    ) && Some(state.generation) == generation
+                        && state.room_info.as_ref().map(|info| info.room_id)
+                            == Some(room_info.room_id)
                     {
-                        self.live_data.lock().await.set_contribution_rank_full(list);
+                        state.data.set_contribution_rank_full(list);
                     }
                 }
                 Ok(rank)
@@ -174,8 +168,8 @@ impl BliveService {
         cookie: &str,
     ) -> Result<GuardTopListResponse, String> {
         let room_info = self
-            .state
-            .read()
+            .session
+            .lock()
             .await
             .room_info
             .clone()
@@ -196,14 +190,15 @@ impl BliveService {
 
     /// 订阅事件
     pub async fn subscribe(&self, window_label: String, event_types: HashSet<EventType>) {
-        let mut subs = self.subscriptions.write().await;
-        let sub = subs.entry(window_label.clone()).or_default();
-        sub.event_types = event_types;
         log::info!(
             "Window {} subscribed to events: {:?}",
             window_label,
-            sub.event_types
+            event_types
         );
+        self.subscriptions
+            .write()
+            .await
+            .insert(window_label, event_types);
     }
 
     /// 取消订阅
@@ -215,369 +210,250 @@ impl BliveService {
 
     /// 获取数据快照
     pub async fn get_snapshot(&self, event_types: HashSet<EventType>) -> DataSnapshot {
-        self.live_data.lock().await.snapshot(&event_types)
+        self.session.lock().await.data.snapshot(&event_types)
     }
 
     pub async fn connect(
-        &self,
+        self: &Arc<Self>,
         app: AppHandle,
         room_id: u64,
         cookie: Option<String>,
     ) -> ConnectResult {
-        // 检查 Cookie
-        if cookie.is_none() || cookie.as_ref().map(|c| c.is_empty()).unwrap_or(true) {
-            return ConnectResult {
-                success: false,
-                message: "请先设置 Cookie".to_string(),
-                room_info: None,
-            };
-        }
-
-        let cookie = cookie.unwrap();
-
-        // 先断开现有连接
-        self.disconnect().await;
-
-        // 清空数据
-        self.live_data.lock().await.clear();
-
-        // 更新状态为连接中
-        {
-            let mut state = self.state.write().await;
-            state.status = ConnectionStatus::Connecting;
-            state.room_id = room_id;
-        }
-
-        let _ = app.emit("blive-status", ConnectionStatus::Connecting);
-
-        // 预检查
-        let http_client = reqwest::Client::new();
-
-        let room_info = match get_room_init(&http_client, room_id).await {
-            Ok(info) => info,
-            Err(e) => {
-                let msg = format!("获取房间信息失败: {}", e);
-                self.set_error(&app, &msg).await;
-                return ConnectResult {
-                    success: false,
-                    message: msg,
-                    room_info: None,
-                };
-            }
+        let Some(cookie) = cookie.filter(|value| !value.is_empty()) else {
+            return connection_failure("请先设置 Cookie");
         };
 
-        let danmu_info = match get_danmu_info(&http_client, room_info.room_id, Some(&cookie)).await
-        {
-            Ok(info) => info,
-            Err(e) => {
-                let msg = format!("获取弹幕服务器失败: {}", e);
-                self.set_error(&app, &msg).await;
-                return ConnectResult {
-                    success: false,
-                    message: msg,
-                    room_info: None,
-                };
-            }
+        let response = {
+            let mut connection = self.connection.lock().await;
+            self.stop_connection(&mut connection).await;
+            self.session.lock().await.status = ConnectionStatus::Connecting;
+            let _ = app.emit("blive-status", ConnectionStatus::Connecting);
+
+            let (sender, receiver) = oneshot::channel();
+            let cancellation = CancellationToken::new();
+            let task_cancellation = cancellation.clone();
+            let service = self.clone();
+            let handle = tokio::spawn(async move {
+                service
+                    .run_connection(app, room_id, cookie, task_cancellation, sender)
+                    .await;
+            });
+            *connection = Some(ConnectionTask {
+                cancellation,
+                handle,
+            });
+            receiver
         };
-
-        if danmu_info.host_list.is_empty() || danmu_info.token.is_empty() {
-            let msg = "Cookie 无效或已过期，无法获取弹幕服务器".to_string();
-            self.set_error(&app, &msg).await;
-            return ConnectResult {
-                success: false,
-                message: msg,
-                room_info: None,
-            };
-        }
-
-        {
-            let mut state = self.state.write().await;
-            state.room_info = Some(room_info.clone());
-        }
-        self.streamer_uid.store(room_info.uid, Ordering::Relaxed);
-
-        let (stop_tx, mut stop_rx) = mpsc::channel::<()>(1);
-
-        let app_clone = app.clone();
-        let service = app.state::<Arc<BliveService>>().inner().clone();
-        let cookie_clone = cookie.clone();
-        let room_info_for_rank = room_info.clone();
-
-        let task = tokio::spawn(async move {
-            let client_builder = BliveDmClient::builder()
-                .room_id(room_id)
-                .cookie(cookie_clone.clone())
-                .auto_reconnect(true)
-                .raw_event_handler(crate::raw_event_dump::dump);
-
-            let client = match client_builder.build().await {
-                Ok(c) => c,
-                Err(e) => {
-                    let msg = format!("创建客户端失败: {}", e);
-                    service.set_error(&app_clone, &msg).await;
-                    return;
-                }
-            };
-
-            let mut stream = match client.connect().await {
-                Ok(s) => s,
-                Err(e) => {
-                    let msg = format!("连接失败: {}", e);
-                    service.set_error(&app_clone, &msg).await;
-                    return;
-                }
-            };
-
-            {
-                let mut state = service.state.write().await;
-                state.status = ConnectionStatus::Connected;
-            }
-            let _ = app_clone.emit("blive-status", ConnectionStatus::Connected);
-            service.extensions.dispatch_room(
-                room_info_for_rank.room_id,
-                room_info_for_rank.uid,
-                None,
-            );
-
-            // 启动存档会话
-            let archive = app_clone.state::<Arc<ArchiveManager>>().inner().clone();
-            let room_title = room_info_for_rank.title.clone();
-            let streamer_uid = room_info_for_rank.uid;
-            let archive_session_id = match archive
-                .start_session(room_id, &room_title, streamer_uid)
-                .await
-            {
-                Ok(id) => {
-                    let (tx, rx) = mpsc::unbounded_channel::<ArchiveEvent>();
-                    // 设置 archive_tx 到 LiveData
-                    service.live_data.lock().await.archive_tx = Some(tx);
-                    // 启动写入任务
-                    let _writer_handle =
-                        crate::archive::spawn_archive_writer(archive.clone(), rx, id);
-                    Some(id)
-                }
-                Err(e) => {
-                    log::error!("Failed to start archive session: {}", e);
-                    None
-                }
-            };
-
-            // 获取贡献排行榜（连接成功后立即获取一次）
-            let http_client = reqwest::Client::new();
-            match get_contribution_rank(
-                &http_client,
-                room_info_for_rank.room_id,
-                room_info_for_rank.uid,
-                Some(&cookie_clone),
-                1,
-                100,
-            )
+        // 保留原有成功返回时机：预检查通过即可返回，实际连接状态继续通过事件发布。
+        response
             .await
-            {
-                Ok(rank) => {
-                    log::info!("获取贡献排行榜成功: {} 人", rank.list.len());
-                    service
-                        .live_data
-                        .lock()
-                        .await
-                        .set_contribution_rank_full(rank.list);
-                }
-                Err(e) => {
-                    log::warn!("获取贡献排行榜失败: {}", e);
-                }
+            .unwrap_or_else(|_| connection_failure("连接任务异常结束"))
+    }
+
+    async fn run_connection(
+        self: Arc<Self>,
+        app: AppHandle,
+        room_id: u64,
+        cookie: String,
+        cancellation: CancellationToken,
+        response: oneshot::Sender<ConnectResult>,
+    ) {
+        let prepared = tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => None,
+            result = prepare_room(room_id, &cookie) => Some(result),
+        };
+        let room_info = match prepared {
+            Some(Ok(info)) => info,
+            Some(Err(message)) => {
+                self.set_error(&app, &message).await;
+                let _ = response.send(connection_failure(&message));
+                return;
             }
-
-            // 事件处理循环
-            loop {
-                tokio::select! {
-                    _ = stop_rx.recv() => {
-                        log::info!("Received stop signal");
-                        break;
-                    }
-                    event = stream.next() => {
-                        match event {
-                            Some(Ok(e)) => {
-                                service.process_event(e).await;
-                            }
-                            Some(Err(e)) => {
-                                log::error!("Event error: {}", e);
-                                if matches!(e, BliveError::ConnectionClosed) {
-                                    let mut state = service.state.write().await;
-                                    state.status = ConnectionStatus::Reconnecting;
-                                    let _ = app_clone.emit("blive-status", ConnectionStatus::Reconnecting);
-                                }
-                            }
-                            None => {
-                                log::info!("Stream ended");
-                                break;
-                            }
-                        }
-                    }
-                }
+            None => {
+                let _ = response.send(connection_failure("连接已取消"));
+                self.finish_connection(&app).await;
+                return;
             }
-
-            service.push_updates(&app_clone).await;
-            service.speech.reset_session();
-
-            // 结束存档会话：先 drop archive_tx 以让 writer flush，再 end_session
-            {
-                let stats = service.live_data.lock().await.stats.clone();
-                service.live_data.lock().await.archive_tx = None; // drop sender, writer will flush & exit
-                if archive_session_id.is_some() {
-                    // 给 writer 一点时间 flush
-                    tokio::time::sleep(Duration::from_millis(200)).await;
-                    if let Err(e) = archive.end_session(&stats).await {
-                        log::error!("Failed to end archive session: {}", e);
-                    }
-                }
-            }
-
-            {
-                let mut state = service.state.write().await;
-                state.status = ConnectionStatus::Disconnected;
-            }
-            let _ = app_clone.emit("blive-status", ConnectionStatus::Disconnected);
-        });
-
+        };
         {
-            let mut state = self.state.write().await;
-            state.stop_tx = Some(stop_tx);
-            state.task_handle = Some(task);
+            let mut state = self.session.lock().await;
+            state.streamer_uid = room_info.uid;
+            state.room_info = Some(room_info.clone());
             state.status = ConnectionStatus::Connected;
         }
-
-        ConnectResult {
+        let _ = response.send(ConnectResult {
             success: true,
-            message: "连接成功".to_string(),
-            room_info: Some(room_info.into()),
+            message: "连接成功".to_owned(),
+            room_info: Some(room_info.clone().into()),
+        });
+
+        let opening = async {
+            let client = BliveDmClient::builder()
+                .room_id(room_id)
+                .cookie(cookie.clone())
+                .auto_reconnect(true)
+                .raw_event_handler(crate::raw_event_dump::dump)
+                .build()
+                .await
+                .map_err(|error| format!("创建客户端失败: {error}"))?;
+            client
+                .connect()
+                .await
+                .map_err(|error| format!("连接失败: {error}"))
+        };
+        let opened = tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => None,
+            result = opening => Some(result),
+        };
+        let mut stream = match opened {
+            Some(Ok(stream)) => stream,
+            Some(Err(message)) => {
+                self.set_error(&app, &message).await;
+                return;
+            }
+            None => {
+                self.finish_connection(&app).await;
+                return;
+            }
+        };
+        self.session.lock().await.status = ConnectionStatus::Connected;
+        let _ = app.emit("blive-status", ConnectionStatus::Connected);
+        self.extensions
+            .dispatch_room(room_info.room_id, room_info.uid, None);
+
+        // 保留存档使用用户输入房号的既有契约。创建和挂接期间不取消，确保资源被接管。
+        match Recording::start(
+            self.archive.clone(),
+            room_id,
+            &room_info.title,
+            room_info.uid,
+        )
+        .await
+        {
+            Ok(recording) => self.session.lock().await.start_recording(recording),
+            Err(error) => log::error!("Failed to start archive session: {error}"),
         }
+
+        let http_client = reqwest::Client::new();
+        tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => {},
+            result = get_contribution_rank(&http_client, room_info.room_id, room_info.uid, Some(&cookie), 1, 100) => {
+                match result {
+                    Ok(rank) => self.session.lock().await.data.set_contribution_rank_full(rank.list),
+                    Err(error) => log::warn!("获取贡献排行榜失败: {error}"),
+                }
+            }
+        }
+
+        loop {
+            tokio::select! {
+                biased;
+                _ = cancellation.cancelled() => break,
+                event = stream.next() => {
+                    match event {
+                        Some(Ok(event)) => self.process_event(event).await,
+                        Some(Err(error)) => {
+                            log::error!("Event error: {error}");
+                            if matches!(error, BliveError::ConnectionClosed) {
+                                self.session.lock().await.status = ConnectionStatus::Reconnecting;
+                                let _ = app.emit("blive-status", ConnectionStatus::Reconnecting);
+                            }
+                        }
+                        None => break,
+                    }
+                }
+            }
+        }
+        // 先释放协议流及其 socket/重连任务，再排空本会话的输出。
+        drop(stream);
+        self.finish_connection(&app).await;
+    }
+
+    async fn finish_connection(&self, app: &AppHandle) {
+        self.push_updates(app).await;
+        self.speech.reset_session();
+        let finished = self.session.lock().await.finish_recording();
+        if let Err(error) = finished.await {
+            log::error!("Failed to end archive session: {error}");
+        }
+        self.session.lock().await.status = ConnectionStatus::Disconnected;
+        let _ = app.emit("blive-status", ConnectionStatus::Disconnected);
     }
 
     pub async fn disconnect(&self) {
-        // 切换房间或断开连接时立即停止并清空旧房间的播报。
-        self.speech.reset_session();
-
-        let (stop_tx, task_handle) = {
-            let mut state = self.state.write().await;
-            state.status = ConnectionStatus::Disconnected;
-            (state.stop_tx.take(), state.task_handle.take())
-        };
-
-        if let Some(tx) = stop_tx {
-            let _ = tx.send(()).await;
-        }
-
-        if let Some(handle) = task_handle {
-            let _ = handle.await;
-        }
-
-        self.streamer_uid.store(0, Ordering::Relaxed);
-        self.live_data.lock().await.clear();
+        let mut connection = self.connection.lock().await;
+        self.stop_connection(&mut connection).await;
     }
 
-    /// 处理事件
-    async fn process_event(&self, event: Event) {
-        let mut data = self.live_data.lock().await;
+    /// 调用方持有资源交接锁；所有旧任务完成后才允许清空聚合状态或开始新会话。
+    async fn stop_connection(&self, connection: &mut Option<ConnectionTask>) {
+        self.speech.reset_session();
+        {
+            let mut state = self.session.lock().await;
+            state.status = ConnectionStatus::Disconnected;
+        }
+        if let Some(task) = connection.as_mut() {
+            task.cancellation.cancel();
+            // 等待被取消时仍将句柄留在槽内，后续命令必须继续等待同一任务。
+            if let Err(error) = (&mut task.handle).await {
+                log::error!("连接任务异常结束: {error}");
+            }
+        }
+        *connection = None;
+        // 任务异常退出也由拥有者完成最后一次录制交接。
+        let finished = self.session.lock().await.finish_recording();
+        if let Err(error) = finished.await {
+            log::error!("Failed to end archive session: {error}");
+        }
+        let _publication = self.publish_lock.lock().await;
+        {
+            let mut session = self.session.lock().await;
+            session.streamer_uid = 0;
+            session.data.clear();
+            session.generation = session.generation.wrapping_add(1);
+            session.status = ConnectionStatus::Disconnected;
+        }
+        self.speech.reset_session();
+    }
 
-        match event {
-            Event::Danmaku(danmaku) => {
-                let received = data.process_danmaku(danmaku);
-                drop(data);
-                self.extensions.dispatch_text(&received);
-            }
-            Event::Gift(gift) => {
-                let received = data.process_gift(*gift);
-                drop(data);
-                if let Some(gift) = received {
-                    self.extensions.dispatch_gift(&gift);
-                }
-            }
-            Event::GiftBatch(gifts) => {
-                let received: Vec<_> = gifts
-                    .into_iter()
-                    .filter_map(|gift| data.process_gift(gift))
-                    .collect();
-                drop(data);
-                for gift in received {
-                    self.extensions.dispatch_gift(&gift);
-                }
-            }
-            Event::SuperChat(sc) => {
-                let received = data.process_superchat(sc);
-                drop(data);
-                self.extensions.dispatch_text(&received);
-            }
-            // GUARD_BUY 中是标准标价（例如舰长固定 198 元），不能用于实际营收。
-            // 同一订单随后下发的 Toast 才包含连续包月/续费后的成交总价。
-            Event::GuardBuy(_) => {}
-            Event::GuardToast(toast) => {
-                let received = data.process_guard_toast(toast);
-                drop(data);
-                if let Some(gift) = received {
-                    self.extensions.dispatch_gift(&gift);
-                }
-            }
-            Event::OnlineRankV2(rank) => data.process_online_rank(rank),
-            Event::OnlineRankV3(rank) => data.process_online_rank_v3(rank),
-            Event::OnlineRankCount(count) => data.process_online_count(count),
-            Event::InteractWord(iw) => data.process_interact_word(iw),
-            Event::LiveStart(live_data) => {
-                log::info!(
-                    "Live started: room_id={}, live_time={}",
-                    live_data.room_id,
-                    live_data.live_time
-                );
-                // 更新 room_info 的 live_status
-                drop(data); // 先释放 live_data 锁，避免死锁
-                {
-                    let mut state = self.state.write().await;
-                    if let Some(ref mut room_info) = state.room_info {
-                        room_info.live_status = 1; // 1 = 直播中
-                        self.extensions.dispatch_room(
-                            room_info.room_id,
-                            room_info.uid,
-                            Some(live_data.live_time),
-                        );
+    /// 一次输入只聚合一次，持久化记录与领域通知在会话内同时产生。
+    async fn process_event(&self, event: Event) {
+        let (events, room) = {
+            let mut session = self.session.lock().await;
+            let events = session.process(event);
+            let room = session
+                .room_info
+                .as_ref()
+                .map(|room| (room.room_id, room.uid));
+            (events, room)
+        };
+        // 扩展自己的状态和持久化不占用直播状态锁。
+        for event in events {
+            match event {
+                LiveEvent::Text(text) => self.extensions.dispatch_text(&text),
+                LiveEvent::Gift(gift) => self.extensions.dispatch_gift(&gift),
+                LiveEvent::Started { room_id, live_time } => {
+                    log::info!("Live started: room_id={}, live_time={}", room_id, live_time);
+                    if let Some((room_id, uid)) = room {
+                        self.extensions.dispatch_room(room_id, uid, Some(live_time));
                     }
                 }
-                self.live_data
-                    .lock()
-                    .await
-                    .pending_updates
-                    .push(DataUpdate::LiveStart);
-            }
-            Event::LiveStop(preparing) => {
-                log::info!(
-                    "Live stopped: room_id={}, round={}",
-                    preparing.room_id,
-                    preparing.round
-                );
-                // 更新 room_info 的 live_status
-                drop(data); // 先释放 live_data 锁，避免死锁
-                {
-                    let mut state = self.state.write().await;
-                    if let Some(ref mut room_info) = state.room_info {
-                        room_info.live_status = if preparing.round == 1 { 2 } else { 0 };
-                        // 0 = 未开播, 2 = 轮播中
-                    }
+                LiveEvent::Stopped { room_id, round } => {
+                    log::info!("Live stopped: room_id={}, round={}", room_id, round);
                 }
-                self.live_data
-                    .lock()
-                    .await
-                    .pending_updates
-                    .push(DataUpdate::LiveStop);
             }
-            Event::Raw { .. } => {} // 忽略未处理的命令
-            _ => {}                 // blivedm 的 Event 可向后扩展
         }
     }
 
     /// 推送更新到前端（按窗口订阅过滤）
     pub(crate) async fn push_updates(&self, app: &AppHandle) {
         let _publication = self.publish_lock.lock().await;
-        let updates = {
-            let mut data = self.live_data.lock().await;
-            data.take_pending_updates()
+        let (updates, streamer_uid) = {
+            let mut session = self.session.lock().await;
+            (session.data.take_pending_updates(), session.streamer_uid)
         };
 
         if updates.is_empty() {
@@ -587,7 +463,6 @@ impl BliveService {
         // 在按窗口订阅分发前只投递一次，避免多窗口重复播报；
         // 语音未启用时跳过事件克隆和通道提交。
         if self.speech.accepts_events() {
-            let streamer_uid = self.streamer_uid.load(Ordering::Relaxed);
             self.speech.enqueue_updates(&updates, streamer_uid);
         }
 
@@ -602,7 +477,7 @@ impl BliveService {
         for (window_label, sub) in subs.iter() {
             let filtered: Vec<_> = updates
                 .iter()
-                .filter(|u| sub.event_types.contains(&u.event_type()))
+                .filter(|u| sub.contains(&u.event_type()))
                 .cloned()
                 .collect();
 
@@ -619,9 +494,225 @@ impl BliveService {
             message: message.to_string(),
         };
         {
-            let mut state = self.state.write().await;
+            let mut state = self.session.lock().await;
             state.status = status.clone();
         }
         let _ = app.emit("blive-status", status);
+    }
+}
+
+fn connection_failure(message: &str) -> ConnectResult {
+    ConnectResult {
+        success: false,
+        message: message.to_owned(),
+        room_info: None,
+    }
+}
+
+/// 预检查的错误文本和返回契约与前端保持兼容。
+async fn prepare_room(room_id: u64, cookie: &str) -> Result<RoomInfo, String> {
+    let client = reqwest::Client::new();
+    let room = get_room_init(&client, room_id)
+        .await
+        .map_err(|error| format!("获取房间信息失败: {error}"))?;
+    let danmu = get_danmu_info(&client, room.room_id, Some(cookie))
+        .await
+        .map_err(|error| format!("获取弹幕服务器失败: {error}"))?;
+    if danmu.host_list.is_empty() || danmu.token.is_empty() {
+        return Err("Cookie 无效或已过期，无法获取弹幕服务器".to_owned());
+    }
+    Ok(room)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{extensions::ExtensionHost, speech::SpeechRuntimeConfig};
+    use serde_json::json;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    struct Fixture {
+        service: Arc<BliveService>,
+        directory: std::path::PathBuf,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            let directory = std::env::temp_dir().join(format!(
+                "danmuji-live-service-{}-{}-{}",
+                std::process::id(),
+                chrono::Utc::now().timestamp_nanos_opt().unwrap(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            std::fs::create_dir_all(&directory).unwrap();
+            let speech = Arc::new(SpeechService::new(SpeechRuntimeConfig::default()));
+            let service = Arc::new(BliveService::new(
+                speech,
+                Arc::new(ExtensionHost::new(directory.clone())),
+                Arc::new(ArchiveManager::new(":memory:".into()).unwrap()),
+            ));
+            Self { service, directory }
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            self.service.speech.shutdown();
+            let _ = std::fs::remove_dir_all(&self.directory);
+        }
+    }
+
+    fn gift_batch() -> Event {
+        parse_notification(
+            include_bytes!("../../crates/blivedm/tests/fixtures/ten_blind_gift_v2.json"),
+            None,
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn service_fans_out_deduplicated_events_to_recording_extensions_and_filtered_snapshot() {
+        let fixture = Fixture::new();
+        let service = &fixture.service;
+        let archive = service.archive.clone();
+        service.session.lock().await.start_recording(
+            Recording::start(archive.clone(), 1, "测试", 900)
+                .await
+                .unwrap(),
+        );
+        service.extensions.request("overtime", json!({"type":"configure","config":{
+            "enabled":true,"initial_seconds":0,"rules":[
+                {"id":"pillow","enabled":true,"gift_id":32128,"gift_name":"爱心抱枕","action":"add","value":10,"per_gift":true}
+            ]
+        }})).unwrap();
+        service
+            .extensions
+            .request("overtime", json!({"type":"reset"}))
+            .unwrap();
+        service.process_event(gift_batch()).await;
+        service.process_event(gift_batch()).await;
+        let gifts = service.get_snapshot(HashSet::from([EventType::Gift])).await;
+        assert_eq!(
+            gifts
+                .gift_list
+                .unwrap()
+                .iter()
+                .map(|gift| gift.num)
+                .sum::<u32>(),
+            10
+        );
+        assert!(gifts.stats.is_none());
+        assert!(gifts.danmaku_list.is_none());
+        assert_eq!(
+            service.extensions.state("overtime").unwrap().state["remaining_ms"].as_f64(),
+            Some(40_000.0)
+        );
+        let stats = service
+            .get_snapshot(HashSet::from([EventType::Stats]))
+            .await
+            .stats
+            .unwrap();
+        assert_eq!(stats.total_revenue, 1110);
+        let finished = service.session.lock().await.finish_recording();
+        finished.await.unwrap();
+        let saved = archive.get_sessions().await.unwrap();
+        assert_eq!((saved[0].gift_count, saved[0].gift_revenue), (3, 1110));
+    }
+
+    #[tokio::test]
+    async fn cancelled_disconnect_keeps_task_owned_and_next_disconnect_drains_before_clearing() {
+        let fixture = Fixture::new();
+        let service = fixture.service.clone();
+        let archive = service.archive.clone();
+        service.session.lock().await.start_recording(
+            Recording::start(archive.clone(), 1, "等待断开", 900)
+                .await
+                .unwrap(),
+        );
+        service.process_event(gift_batch()).await;
+        let cancellation = CancellationToken::new();
+        let task_cancellation = cancellation.clone();
+        let (release, released) = oneshot::channel();
+        let handle = tokio::spawn(async move {
+            task_cancellation.cancelled().await;
+            released.await.unwrap();
+        });
+        *service.connection.lock().await = Some(ConnectionTask {
+            cancellation: cancellation.clone(),
+            handle,
+        });
+        {
+            let disconnect = service.disconnect();
+            tokio::pin!(disconnect);
+            tokio::select! {
+                biased;
+                _ = &mut disconnect => panic!("旧任务仍在退出"),
+                _ = std::future::ready(()) => {},
+            }
+        }
+        assert!(cancellation.is_cancelled());
+        assert!(service.connection.lock().await.is_some());
+        let next_service = service.clone();
+        let next = tokio::spawn(async move { next_service.disconnect().await });
+        tokio::task::yield_now().await;
+        assert!(!next.is_finished());
+        assert_eq!(
+            service
+                .get_snapshot(HashSet::from([EventType::Gift]))
+                .await
+                .gift_list
+                .unwrap()
+                .len(),
+            3
+        );
+        release.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(2), next)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(service.connection.lock().await.is_none());
+        assert!(matches!(
+            service.get_status().await,
+            ConnectionStatus::Disconnected
+        ));
+        assert!(service
+            .get_snapshot(HashSet::from([EventType::Gift]))
+            .await
+            .gift_list
+            .unwrap()
+            .is_empty());
+        let saved = archive.get_sessions().await.unwrap();
+        assert!(saved[0].end_time.is_some());
+        assert_eq!((saved[0].gift_count, saved[0].total_revenue), (3, 1110));
+    }
+
+    #[tokio::test]
+    async fn live_status_updates_room_state_and_keeps_existing_window_protocol() {
+        let fixture = Fixture::new();
+        let service = &fixture.service;
+        service.session.lock().await.room_info = Some(RoomInfo {
+            room_id: 1,
+            short_id: 0,
+            uid: 900,
+            title: "测试".to_owned(),
+            live_status: 0,
+        });
+        for raw in [
+            json!({"cmd":"LIVE","roomid":1,"live_key":"key","live_time":1700000000}),
+            json!({"cmd":"PREPARING","roomid":"1","round":1}),
+        ] {
+            service
+                .process_event(
+                    parse_notification(&serde_json::to_vec(&raw).unwrap(), None).unwrap(),
+                )
+                .await;
+        }
+        assert_eq!(service.get_room_info().await.unwrap().live_status, 2);
+        let updates = service.session.lock().await.data.take_pending_updates();
+        assert_eq!(
+            serde_json::to_value(updates).unwrap(),
+            json!([{"type":"LiveStart"},{"type":"LiveStop"}])
+        );
     }
 }

@@ -23,6 +23,7 @@ mod gift_image;
 mod kv_store;
 mod live_data;
 mod live_events;
+mod live_session;
 mod live_types;
 mod lock_state;
 mod raw_event_dump;
@@ -34,6 +35,8 @@ mod window_topmost;
 mod extension_pipeline_tests;
 #[cfg(test)]
 mod gift_pipeline_tests;
+#[cfg(test)]
+mod recording_pipeline_tests;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -116,6 +119,7 @@ pub fn run() {
     let blive_service = Arc::new(BliveService::new(
         speech_service.clone(),
         extensions.clone(),
+        archive_manager.clone(),
     ));
 
     // 初始化窗口锁定状态管理器，并从 KV 存储加载保存的状态
@@ -346,7 +350,7 @@ pub fn run() {
                     .clone();
                 let background_tasks = app_handle.state::<BackgroundTasks>().take();
                 tauri::async_runtime::block_on(async move {
-                    // 断开连接（会触发 archive end_session）
+                    // 断开连接并等待该会话的存档队列排空、统计结算。
                     service.disconnect().await;
                     for task in &background_tasks {
                         task.abort();

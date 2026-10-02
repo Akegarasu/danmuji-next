@@ -4,8 +4,9 @@
 
 ```text
 blivedm 的弹幕 / SC / 礼物 / 大航海
-  → LiveData：直播统计、礼物交易去重、归档
-  → live_events：ReceivedText / ReceivedGift
+  → LiveSession → LiveData：直播统计、礼物交易去重、窗口更新
+       ├─ LiveRecord → Recording：累计快照写入 SQLite
+       └─ LiveEvent：ReceivedText / ReceivedGift（去重后的增量）
   → ExtensionHost：点播、投票、加班机
        ├─ ExtensionState → extension-state:{id} → 独立扩展客户端
        ├─ ExtensionEffect → tasks → 异步结果回到原扩展
@@ -18,7 +19,8 @@ blivedm 的弹幕 / SC / 礼物 / 大航海
 
 | 模块 | 职责 |
 | --- | --- |
-| `live_events.rs` | 弹幕/SC 文本、单次收礼事件，不传连接、Cookie 或完整原始通知 |
+| `live_events.rs` | 即时领域通知；扩展只接收弹幕/SC 文本和单次收礼事件，不依赖窗口或存储模型 |
+| `live_session.rs` | 一次直播的房间状态、聚合与录制所有权；在同一个状态锁内处理输入并提交存档记录 |
 | `extensions/mod.rs` | 领域接口、统一状态消息与异步任务类型 |
 | `extensions/host.rs` | 内置注册、事件分发、版本、状态合并、只读查询和生命周期 |
 | `extensions/storage.rs` | JSON 检查点、临时文件替换、损坏配置保护、跳过相同检查点 |

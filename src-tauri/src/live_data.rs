@@ -6,26 +6,22 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use tokio::sync::mpsc;
-
-use crate::archive::ArchiveEvent;
-use crate::live_events::{ReceivedBlindGift, ReceivedGift, ReceivedText, TextSource};
+use crate::live_events::{LiveEvent, ReceivedBlindGift, ReceivedGift, ReceivedText, TextSource};
 use crate::live_types::*;
 use blivedm::api::ContributionRankUser;
 use blivedm::{
-    CoinType, Danmaku, DanmakuType, Gift, GuardLevel, GuardToast, InteractWord, OnlineRankCount,
-    OnlineRankUser, OnlineRankV2, OnlineRankV3, SuperChat,
+    CoinType, Danmaku, DanmakuType, Event, Gift, GuardLevel, GuardToast, InteractWord,
+    OnlineRankCount, OnlineRankUser, OnlineRankV2, OnlineRankV3, SuperChat,
 };
 
-// ==================== 窗口订阅 ====================
-
-/// 窗口订阅信息
-#[derive(Debug, Clone, Default)]
-pub struct WindowSubscription {
-    pub event_types: HashSet<EventType>,
-}
-
 // ==================== 数据状态 ====================
+
+/// 一次输入产生的即时输出，与窗口的定时批量更新分开消费。
+#[derive(Default)]
+pub struct LiveEffects {
+    pub records: Vec<LiveRecord>,
+    pub events: Vec<LiveEvent>,
+}
 
 /// 直播数据状态
 pub struct LiveData {
@@ -61,7 +57,7 @@ pub struct LiveData {
     pub(crate) stats: LiveStats,
 
     /// 待发送的更新
-    pub(crate) pending_updates: Vec<DataUpdate>,
+    pending_updates: Vec<DataUpdate>,
     /// 待发送的弹幕（批量）
     pending_danmaku: Vec<ProcessedDanmaku>,
     /// 待发送的礼物更新（批量）
@@ -74,8 +70,6 @@ pub struct LiveData {
     stats_dirty: bool,
     /// 贡献排行是否有变化
     contributions_dirty: bool,
-    /// 存档 channel sender（连接时设置）
-    pub(crate) archive_tx: Option<mpsc::UnboundedSender<ArchiveEvent>>,
 }
 
 impl Default for LiveData {
@@ -103,7 +97,6 @@ impl Default for LiveData {
             pending_interact_words: Vec::new(),
             stats_dirty: false,
             contributions_dirty: false,
-            archive_tx: None,
         }
     }
 }
@@ -165,8 +158,67 @@ impl LiveData {
 
     // ==================== 事件处理 ====================
 
+    /// 所有输入（网络与手动测试）共用同一入口；返回即时输出，保留窗口批量更新。
+    pub fn process(&mut self, event: Event) -> LiveEffects {
+        let mut effects = LiveEffects::default();
+        match event {
+            Event::Danmaku(danmaku) => {
+                let (record, received) = self.process_danmaku(danmaku);
+                effects.records.push(LiveRecord::Danmaku(record));
+                effects.events.push(LiveEvent::Text(received));
+            }
+            Event::Gift(gift) => {
+                if let Some((record, received)) = self.process_gift(*gift) {
+                    effects.records.push(LiveRecord::Gift(record));
+                    effects.events.push(LiveEvent::Gift(received));
+                }
+            }
+            Event::GiftBatch(gifts) => {
+                for gift in gifts {
+                    if let Some((record, received)) = self.process_gift(gift) {
+                        effects.records.push(LiveRecord::Gift(record));
+                        effects.events.push(LiveEvent::Gift(received));
+                    }
+                }
+            }
+            Event::SuperChat(sc) => {
+                let (record, received) = self.process_superchat(sc);
+                effects.records.push(LiveRecord::SuperChat(record));
+                effects.events.push(LiveEvent::Text(received));
+            }
+            // GUARD_BUY 是标准标价，成交总价和数量只以 Toast 为准。
+            Event::GuardBuy(_) => {}
+            Event::GuardToast(toast) => {
+                if let Some((record, received)) = self.process_guard_toast(toast) {
+                    effects.records.push(LiveRecord::Gift(record));
+                    effects.events.push(LiveEvent::Gift(received));
+                }
+            }
+            Event::OnlineRankV2(rank) => self.process_online_rank(rank),
+            Event::OnlineRankV3(rank) => self.process_online_rank_v3(rank),
+            Event::OnlineRankCount(count) => self.process_online_count(count),
+            Event::InteractWord(interaction) => self.process_interact_word(interaction),
+            Event::LiveStart(start) => {
+                self.pending_updates.push(DataUpdate::LiveStart);
+                effects.events.push(LiveEvent::Started {
+                    room_id: start.room_id,
+                    live_time: start.live_time,
+                });
+            }
+            Event::LiveStop(stop) => {
+                self.pending_updates.push(DataUpdate::LiveStop);
+                effects.events.push(LiveEvent::Stopped {
+                    room_id: stop.room_id,
+                    round: stop.round,
+                });
+            }
+            _ => {} // 未支持的原始通知和未来协议不产生领域输出。
+        }
+        effects
+    }
+
     /// 处理弹幕并返回可供扩展消费的文本事件
-    pub fn process_danmaku(&mut self, danmaku: Danmaku) -> ReceivedText {
+    pub(crate) fn process_danmaku(&mut self, danmaku: Danmaku) -> (ProcessedDanmaku, ReceivedText) {
         let medal_room_id = danmaku
             .sender
             .medal
@@ -187,10 +239,6 @@ impl LiveData {
             self.danmaku_list.pop_front();
         }
 
-        if let Some(tx) = &self.archive_tx {
-            let _ = tx.send(ArchiveEvent::Danmaku(processed.clone()));
-        }
-
         let received = ReceivedText {
             event_id: processed.id.clone(),
             content: processed.content.clone(),
@@ -209,12 +257,12 @@ impl LiveData {
             sc_price: None,
         };
 
-        self.pending_danmaku.push(processed);
-        received
+        self.pending_danmaku.push(processed.clone());
+        (processed, received)
     }
 
     /// 处理礼物
-    pub fn process_gift(&mut self, gift: Gift) -> Option<ReceivedGift> {
+    pub(crate) fn process_gift(&mut self, gift: Gift) -> Option<(ProcessedGift, ReceivedGift)> {
         // 一笔盲盒交易可以包含多种结果，不能仅按 tid 丢弃后续礼物。
         let transaction_key = gift.transaction_id.as_deref().map(|transaction_id| {
             format!(
@@ -366,14 +414,9 @@ impl LiveData {
             self.rebuild_gift_index();
         }
 
-        // combo 的每个累计快照都交给归档；归档层按 original_id 原位更新。
-        if let Some(tx) = &self.archive_tx {
-            let _ = tx.send(ArchiveEvent::Gift(processed.clone()));
-        }
-
         self.pending_gift_upserts.push(GiftUpsert {
             merge_key,
-            gift: processed,
+            gift: processed.clone(),
             action,
         });
 
@@ -390,11 +433,14 @@ impl LiveData {
                 &guard_level,
             );
         }
-        Some(received)
+        Some((processed, received))
     }
 
     /// 处理 SC 并返回可供扩展消费的文本事件
-    pub fn process_superchat(&mut self, sc: SuperChat) -> ReceivedText {
+    pub(crate) fn process_superchat(
+        &mut self,
+        sc: SuperChat,
+    ) -> (ProcessedSuperChat, ReceivedText) {
         let medal_room_id = sc
             .medal
             .as_ref()
@@ -430,10 +476,6 @@ impl LiveData {
             self.superchat_list.pop();
         }
 
-        if let Some(tx) = &self.archive_tx {
-            let _ = tx.send(ArchiveEvent::SuperChat(processed.clone()));
-        }
-
         self.stats.sc_revenue += price;
         self.stats.total_revenue += price;
         self.stats_dirty = true;
@@ -465,15 +507,18 @@ impl LiveData {
         };
 
         self.pending_updates
-            .push(DataUpdate::SuperChatAppend(processed));
+            .push(DataUpdate::SuperChatAppend(processed.clone()));
 
-        received
+        (processed, received)
     }
 
     /// 处理大航海成交 Toast。
     ///
     /// Toast 的 price 是已经包含折扣和购买数量的订单总金额，不能再次乘以 num。
-    pub fn process_guard_toast(&mut self, toast: GuardToast) -> Option<ReceivedGift> {
+    pub(crate) fn process_guard_toast(
+        &mut self,
+        toast: GuardToast,
+    ) -> Option<(ProcessedGift, ReceivedGift)> {
         if let Some(payflow_id) = toast.payflow_id.as_deref() {
             if !self.remember_guard_payflow_id(payflow_id) {
                 return None;
@@ -526,10 +571,6 @@ impl LiveData {
             guard_level: Some(guard_level),
         };
 
-        if let Some(tx) = &self.archive_tx {
-            let _ = tx.send(ArchiveEvent::Gift(processed.clone()));
-        }
-
         let index = self.gift_list.len();
         self.gift_list.push_back(processed.clone());
         self.gift_merge_index.insert(merge_key, index);
@@ -541,7 +582,7 @@ impl LiveData {
 
         self.pending_gift_upserts.push(GiftUpsert {
             merge_key: processed.merge_key.clone(),
-            gift: processed,
+            gift: processed.clone(),
             action: UpsertAction::Insert,
         });
 
@@ -558,7 +599,7 @@ impl LiveData {
                 &toast.guard_level,
             );
         }
-        Some(received)
+        Some((processed, received))
     }
 
     /// 处理贡献排行实时更新（ONLINE_RANK_V2）
@@ -779,12 +820,13 @@ mod tests {
     #[test]
     fn v2_ten_draw_keeps_all_results_in_updates_revenue_and_archive() {
         let mut data = LiveData::default();
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        data.archive_tx = Some(tx);
+        let mut archived = Vec::new();
         let gifts = ten_draw_gifts();
         // 重发整个批次，每个结果只能计入一次。
         for gift in gifts.iter().chain(gifts.iter()) {
-            data.process_gift(gift.clone());
+            if let Some((record, _)) = data.process_gift(gift.clone()) {
+                archived.push(record);
+            }
         }
         assert_eq!(data.gift_list.len(), 3);
         assert_eq!(data.gift_list.iter().map(|gift| gift.num).sum::<u32>(), 10);
@@ -793,12 +835,6 @@ mod tests {
         assert_eq!(data.user_contributions[&42].total_value, 1_110);
         assert_eq!(data.pending_gift_upserts.len(), 3);
         assert_eq!(data.pending_gift_effects.len(), 3);
-        let mut archived = Vec::new();
-        while let Ok(event) = rx.try_recv() {
-            if let crate::archive::ArchiveEvent::Gift(gift) = event {
-                archived.push(gift);
-            }
-        }
         assert_eq!(
             archived
                 .iter()
@@ -819,13 +855,11 @@ mod tests {
         next.transaction_id = Some("next-payment".to_owned());
         next.num = 2;
         next.total_coin = 30_000;
-        data.process_gift(next);
+        let (next_record, _) = data.process_gift(next).unwrap();
         assert_eq!(data.gift_list.len(), 3);
         assert_eq!(data.gift_list.back().unwrap().num, 6);
         assert_eq!(data.stats.gift_revenue, 1_430);
-        assert!(
-            matches!(rx.try_recv(), Ok(crate::archive::ArchiveEvent::Gift(gift)) if gift.num == 6)
-        );
+        assert_eq!(next_record.num, 6);
     }
 
     #[test]
@@ -1050,7 +1084,7 @@ mod tests {
             end_time: 1_700_000_000,
         };
 
-        let received = data.process_guard_toast(toast.clone()).unwrap();
+        let (_, received) = data.process_guard_toast(toast.clone()).unwrap();
         assert_eq!(received.num, 3);
         assert_eq!(received.gift_name, "舰长");
         // Bilibili 会为同一订单同时下发 V1 和 V2，二者共享 payflow_id。

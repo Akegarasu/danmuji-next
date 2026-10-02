@@ -5,26 +5,20 @@
 //! - 通过 mpsc channel 异步批量写入
 //! - 提供分页查询、搜索、删除等功能
 
-use std::sync::Arc;
-use std::time::Duration;
+mod recording;
+pub use recording::Recording;
+
+use std::collections::HashSet;
 
 use rusqlite::{named_params, params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::Mutex;
 
 use crate::archive_migrations;
 use crate::live_types::{
     LiveStats, ProcessedBlindGift, ProcessedDanmaku, ProcessedGift, ProcessedGiftCombo,
     ProcessedSuperChat,
 };
-
-// ==================== 存档事件（用于 channel 传输）====================
-
-pub enum ArchiveEvent {
-    Danmaku(ProcessedDanmaku),
-    Gift(ProcessedGift),
-    SuperChat(ProcessedSuperChat),
-}
 
 // ==================== 查询结果类型 ====================
 
@@ -181,8 +175,13 @@ pub struct ArchiveSearchItem {
 // ==================== ArchiveManager ====================
 
 pub struct ArchiveManager {
-    db: Mutex<Connection>,
-    active_session_id: Mutex<Option<i64>>,
+    db: Mutex<ArchiveDatabase>,
+}
+
+/// 连接与录制保护名单在同一锁下修改，查询、删除和恢复使用同一份状态。
+struct ArchiveDatabase {
+    connection: Connection,
+    active_sessions: HashSet<i64>,
 }
 
 impl ArchiveManager {
@@ -198,32 +197,29 @@ impl ArchiveManager {
         archive_migrations::initialize(&mut conn)?;
 
         Ok(Self {
-            db: Mutex::new(conn),
-            active_session_id: Mutex::new(None),
+            db: Mutex::new(ArchiveDatabase {
+                connection: conn,
+                active_sessions: HashSet::new(),
+            }),
         })
     }
 
     // ==================== 会话生命周期 ====================
 
-    pub async fn start_session(
+    async fn start_session(
         &self,
         room_id: u64,
         room_title: &str,
         streamer_uid: u64,
     ) -> Result<i64, String> {
-        let db = self.db.lock().await;
+        let mut database = self.db.lock().await;
         let now = chrono::Utc::now().timestamp();
-
-        db.execute(
+        database.connection.execute(
             "INSERT INTO sessions (room_id, room_title, streamer_uid, start_time) VALUES (?1, ?2, ?3, ?4)",
             params![room_id as i64, room_title, streamer_uid as i64, now],
-        )
-        .map_err(|e| format!("创建存档会话失败: {}", e))?;
-
-        let session_id = db.last_insert_rowid();
-        drop(db);
-
-        *self.active_session_id.lock().await = Some(session_id);
+        ).map_err(|e| format!("创建存档会话失败: {e}"))?;
+        let session_id = database.connection.last_insert_rowid();
+        database.active_sessions.insert(session_id);
         log::info!(
             "Archive session started: id={}, room={}",
             session_id,
@@ -232,163 +228,40 @@ impl ArchiveManager {
         Ok(session_id)
     }
 
-    pub async fn end_session(&self, stats: &LiveStats) -> Result<(), String> {
-        let session_id = self.active_session_id.lock().await.take();
-        let Some(session_id) = session_id else {
-            return Ok(());
-        };
-
-        let db = self.db.lock().await;
-        let now = chrono::Utc::now().timestamp();
-
-        // 统计实际条目数
-        let danmaku_count: i64 = db
-            .query_row(
-                "SELECT COUNT(*) FROM danmaku WHERE session_id = ?1",
-                params![session_id],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-        let gift_count: i64 = db
-            .query_row(
-                "SELECT COUNT(*) FROM gifts WHERE session_id = ?1",
-                params![session_id],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-        let sc_count: i64 = db
-            .query_row(
-                "SELECT COUNT(*) FROM super_chats WHERE session_id = ?1",
-                params![session_id],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-
-        db.execute(
-            "UPDATE sessions SET end_time = ?1, total_revenue = ?2, gift_revenue = ?3, sc_revenue = ?4, guard_revenue = ?5, danmaku_count = ?6, gift_count = ?7, sc_count = ?8 WHERE id = ?9",
-            params![
-                now,
-                stats.total_revenue as i64,
-                stats.gift_revenue as i64,
-                stats.sc_revenue as i64,
-                stats.guard_revenue as i64,
-                danmaku_count,
-                gift_count,
-                sc_count,
-                session_id,
-            ],
-        )
-        .map_err(|e| format!("结束存档会话失败: {}", e))?;
-
-        log::info!(
-            "Archive session ended: id={}, danmaku={}, gifts={}, sc={}",
-            session_id,
-            danmaku_count,
-            gift_count,
-            sc_count,
-        );
-        Ok(())
+    /// 只能由对应的录制任务结束自己的会话，不能隐式结束另一个当前会话。
+    async fn finish_session(
+        &self,
+        session_id: i64,
+        stats: Option<&LiveStats>,
+    ) -> Result<(), String> {
+        let mut database = self.db.lock().await;
+        let result = finalize_session(&database.connection, session_id, stats);
+        // 写入任务已经退出；失败的会话保留 NULL end_time，交给后续恢复。
+        database.active_sessions.remove(&session_id);
+        result
     }
 
-    pub async fn get_active_session_id(&self) -> Option<i64> {
-        *self.active_session_id.lock().await
-    }
-
-    /// 恢复孤立的会话（end_time 为 NULL 的会话）
-    /// 在应用启动时调用，处理上次异常退出未正常关闭的会话
+    /// 启动和退出时恢复孤立会话，永远不触碰本进程仍在写入的会话。
     pub async fn recover_orphaned_sessions(&self) -> Result<u32, String> {
-        let db = self.db.lock().await;
-        let now = chrono::Utc::now().timestamp();
-
-        // 查找所有 end_time 为 NULL 的会话
+        let database = self.db.lock().await;
+        let db = &database.connection;
         let mut stmt = db
             .prepare("SELECT id FROM sessions WHERE end_time IS NULL")
             .map_err(|e| e.to_string())?;
-
-        let orphan_ids: Vec<i64> = stmt
-            .query_map([], |row| row.get(0))
+        let ids = stmt
+            .query_map([], |row| row.get::<_, i64>(0))
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())?;
-
-        if orphan_ids.is_empty() {
-            return Ok(0);
+        let mut recovered = 0;
+        for session_id in ids {
+            if database.active_sessions.contains(&session_id) {
+                continue;
+            }
+            finalize_session(db, session_id, None)?;
+            recovered += 1;
         }
-
-        // 用已写入的数据补全每个孤立会话的统计信息
-        for &session_id in &orphan_ids {
-            let danmaku_count: i64 = db
-                .query_row(
-                    "SELECT COUNT(*) FROM danmaku WHERE session_id = ?1",
-                    params![session_id],
-                    |row| row.get(0),
-                )
-                .unwrap_or(0);
-            let gift_count: i64 = db
-                .query_row(
-                    "SELECT COUNT(*) FROM gifts WHERE session_id = ?1",
-                    params![session_id],
-                    |row| row.get(0),
-                )
-                .unwrap_or(0);
-            let sc_count: i64 = db
-                .query_row(
-                    "SELECT COUNT(*) FROM super_chats WHERE session_id = ?1",
-                    params![session_id],
-                    |row| row.get(0),
-                )
-                .unwrap_or(0);
-
-            // 从 gifts 表计算收入
-            let gift_revenue: i64 = db
-                .query_row(
-                    "SELECT COALESCE(SUM(total_value), 0) FROM gifts WHERE session_id = ?1 AND is_paid = 1 AND guard_level IS NULL",
-                    params![session_id],
-                    |row| row.get(0),
-                )
-                .unwrap_or(0);
-            let guard_revenue: i64 = db
-                .query_row(
-                    "SELECT COALESCE(SUM(total_value), 0) FROM gifts WHERE session_id = ?1 AND guard_level IS NOT NULL",
-                    params![session_id],
-                    |row| row.get(0),
-                )
-                .unwrap_or(0);
-            let sc_revenue: i64 = db
-                .query_row(
-                    "SELECT COALESCE(SUM(price), 0) FROM super_chats WHERE session_id = ?1",
-                    params![session_id],
-                    |row| row.get(0),
-                )
-                .unwrap_or(0);
-            let total_revenue = gift_revenue + guard_revenue + sc_revenue;
-
-            db.execute(
-                "UPDATE sessions SET end_time = ?1, total_revenue = ?2, gift_revenue = ?3, sc_revenue = ?4, guard_revenue = ?5, danmaku_count = ?6, gift_count = ?7, sc_count = ?8 WHERE id = ?9",
-                params![
-                    now,
-                    total_revenue,
-                    gift_revenue,
-                    sc_revenue,
-                    guard_revenue,
-                    danmaku_count,
-                    gift_count,
-                    sc_count,
-                    session_id,
-                ],
-            )
-            .map_err(|e| format!("恢复孤立会话失败: {}", e))?;
-
-            log::info!(
-                "Recovered orphaned archive session: id={}, danmaku={}, gifts={}, sc={}",
-                session_id,
-                danmaku_count,
-                gift_count,
-                sc_count,
-            );
-        }
-
-        Ok(orphan_ids.len() as u32)
+        Ok(recovered)
     }
 
     // ==================== 数据写入 ====================
@@ -401,7 +274,8 @@ impl ArchiveManager {
         if items.is_empty() {
             return Ok(());
         }
-        let db = self.db.lock().await;
+        let database = self.db.lock().await;
+        let db = &database.connection;
         let tx = db
             .unchecked_transaction()
             .map_err(|e| format!("开启事务失败: {}", e))?;
@@ -433,7 +307,8 @@ impl ArchiveManager {
     }
 
     pub async fn save_gift(&self, session_id: i64, gift: &ProcessedGift) -> Result<(), String> {
-        let db = self.db.lock().await;
+        let database = self.db.lock().await;
+        let db = &database.connection;
         let blind_gift = gift.blind_gift.as_ref();
         let combo = gift.combo.as_ref();
         let updated = db
@@ -526,7 +401,8 @@ impl ArchiveManager {
         session_id: i64,
         sc: &ProcessedSuperChat,
     ) -> Result<(), String> {
-        let db = self.db.lock().await;
+        let database = self.db.lock().await;
+        let db = &database.connection;
         db.execute(
             "INSERT INTO super_chats (session_id, original_id, content, price, user_uid, user_name, background_color, duration, start_time) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
@@ -548,7 +424,8 @@ impl ArchiveManager {
     // ==================== 查询方法 ====================
 
     pub async fn get_sessions(&self) -> Result<Vec<ArchiveSession>, String> {
-        let db = self.db.lock().await;
+        let database = self.db.lock().await;
+        let db = &database.connection;
         let mut stmt = db
             .prepare("SELECT id, room_id, room_title, streamer_uid, start_time, end_time, total_revenue, gift_revenue, sc_revenue, guard_revenue, danmaku_count, gift_count, sc_count FROM sessions ORDER BY start_time DESC")
             .map_err(|e| e.to_string())?;
@@ -581,7 +458,8 @@ impl ArchiveManager {
     }
 
     pub async fn get_session_detail(&self, session_id: i64) -> Result<ArchiveSession, String> {
-        let db = self.db.lock().await;
+        let database = self.db.lock().await;
+        let db = &database.connection;
         db.query_row(
             "SELECT id, room_id, room_title, streamer_uid, start_time, end_time, total_revenue, gift_revenue, sc_revenue, guard_revenue, danmaku_count, gift_count, sc_count FROM sessions WHERE id = ?1",
             params![session_id],
@@ -614,8 +492,9 @@ impl ArchiveManager {
         query: &str,
     ) -> Result<ArchiveOverview, String> {
         validate_time_range(from_time, to_time)?;
-        let db = self.db.lock().await;
-        let summary = query_archive_summary(&db, None, from_time, to_time)?;
+        let database = self.db.lock().await;
+        let db = &database.connection;
+        let summary = query_archive_summary(db, None, from_time, to_time)?;
         let query = query.trim();
         let pattern = format!("%{query}%");
 
@@ -713,7 +592,8 @@ ORDER BY MAX(s.start_time) DESC
     ) -> Result<PagedResult<ArchiveSession>, String> {
         validate_time_range(from_time, to_time)?;
         let (page, page_size, offset) = normalize_pagination(page, page_size);
-        let db = self.db.lock().await;
+        let database = self.db.lock().await;
+        let db = &database.connection;
         let room_id = room_id as i64;
         let total = db
             .query_row(
@@ -780,9 +660,10 @@ LIMIT :limit OFFSET :offset
         to_time: Option<i64>,
     ) -> Result<ArchiveStatistics, String> {
         validate_time_range(from_time, to_time)?;
-        let db = self.db.lock().await;
+        let database = self.db.lock().await;
+        let db = &database.connection;
         let room_id = room_id.map(|value| value as i64);
-        let summary = query_archive_summary(&db, room_id, from_time, to_time)?;
+        let summary = query_archive_summary(db, room_id, from_time, to_time)?;
         let mut stmt = db
             .prepare(
                 r#"
@@ -857,7 +738,8 @@ ORDER BY day ASC
         let query = query.trim();
         let pattern = format!("%{query}%");
         let room_id = room_id.map(|value| value as i64);
-        let db = self.db.lock().await;
+        let database = self.db.lock().await;
+        let db = &database.connection;
 
         let total = db
             .query_row(
@@ -949,7 +831,8 @@ LIMIT :limit OFFSET :offset
         page: u32,
         page_size: u32,
     ) -> Result<PagedResult<ArchivedDanmaku>, String> {
-        let db = self.db.lock().await;
+        let database = self.db.lock().await;
+        let db = &database.connection;
         let (page, page_size, offset) = normalize_pagination(page, page_size);
         let query = query.trim();
         let pattern = format!("%{query}%");
@@ -1023,7 +906,8 @@ LIMIT :limit OFFSET :offset
             return Ok(Vec::new());
         }
 
-        let db = self.db.lock().await;
+        let database = self.db.lock().await;
+        let db = &database.connection;
         let mut result = Vec::new();
 
         for uid in uids {
@@ -1067,7 +951,8 @@ LIMIT :limit OFFSET :offset
         page: u32,
         page_size: u32,
     ) -> Result<PagedResult<ArchivedGift>, String> {
-        let db = self.db.lock().await;
+        let database = self.db.lock().await;
+        let db = &database.connection;
         let (page, page_size, offset) = normalize_pagination(page, page_size);
         let query = query.trim();
         let pattern = format!("%{query}%");
@@ -1219,7 +1104,8 @@ LIMIT :limit OFFSET :offset
         page: u32,
         page_size: u32,
     ) -> Result<PagedResult<ArchivedSuperChat>, String> {
-        let db = self.db.lock().await;
+        let database = self.db.lock().await;
+        let db = &database.connection;
         let (page, page_size, offset) = normalize_pagination(page, page_size);
         let query = query.trim();
         let pattern = format!("%{query}%");
@@ -1309,18 +1195,25 @@ LIMIT :limit OFFSET :offset
 
     /// 删除没有任何事件的历史场次，当前正在录制的场次始终保留。
     pub async fn prune_empty_sessions(&self) -> Result<u64, String> {
-        let active_session_id = self.get_active_session_id().await;
-        let db = self.db.lock().await;
+        let database = self.db.lock().await;
+        let db = &database.connection;
+        let active: Vec<_> = database.active_sessions.iter().copied().collect();
+        let exclusion = if active.is_empty() {
+            String::new()
+        } else {
+            format!("AND id NOT IN ({})", vec!["?"; active.len()].join(","))
+        };
+        // 保留单条 DELETE 的原子性，不将历史候选行加载到内存逐个删除。
         let deleted = db
             .execute(
-                r#"
-DELETE FROM sessions
-WHERE (:active_session_id IS NULL OR id <> :active_session_id)
-  AND NOT EXISTS (SELECT 1 FROM danmaku WHERE danmaku.session_id = sessions.id)
-  AND NOT EXISTS (SELECT 1 FROM gifts WHERE gifts.session_id = sessions.id)
-  AND NOT EXISTS (SELECT 1 FROM super_chats WHERE super_chats.session_id = sessions.id)
-"#,
-                named_params! { ":active_session_id": active_session_id },
+                &format!(
+                    "DELETE FROM sessions
+             WHERE NOT EXISTS (SELECT 1 FROM danmaku WHERE danmaku.session_id = sessions.id)
+               AND NOT EXISTS (SELECT 1 FROM gifts WHERE gifts.session_id = sessions.id)
+               AND NOT EXISTS (SELECT 1 FROM super_chats WHERE super_chats.session_id = sessions.id)
+               {exclusion}"
+                ),
+                rusqlite::params_from_iter(active),
             )
             .map_err(|e| format!("清理空归档场次失败: {e}"))?;
         if deleted > 0 {
@@ -1330,10 +1223,11 @@ WHERE (:active_session_id IS NULL OR id <> :active_session_id)
     }
 
     pub async fn delete_session(&self, session_id: i64) -> Result<(), String> {
-        if self.get_active_session_id().await == Some(session_id) {
+        let database = self.db.lock().await;
+        if database.active_sessions.contains(&session_id) {
             return Err("直播进行中，不能删除当前场次".to_string());
         }
-        let db = self.db.lock().await;
+        let db = &database.connection;
         let tx = db
             .unchecked_transaction()
             .map_err(|e| format!("开启删除事务失败: {e}"))?;
@@ -1364,97 +1258,48 @@ WHERE (:active_session_id IS NULL OR id <> :active_session_id)
     }
 }
 
-// ==================== Archive Writer Task ====================
-
-/// 启动存档写入任务，从 channel 接收事件并批量写入 SQLite
-pub fn spawn_archive_writer(
-    archive: Arc<ArchiveManager>,
-    mut rx: mpsc::UnboundedReceiver<ArchiveEvent>,
+/// 正常结束使用直播累计收入；异常释放与启动恢复使用已落盘收入。
+/// 计数总是来自已排空的数据库，保持普通礼物、盲盒和大航海的原有单位。
+fn finalize_session(
+    db: &Connection,
     session_id: i64,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut danmaku_buf: Vec<ProcessedDanmaku> = Vec::new();
-        let mut gift_buf: Vec<ProcessedGift> = Vec::new();
-        let mut sc_buf: Vec<ProcessedSuperChat> = Vec::new();
-
-        let flush_interval = Duration::from_millis(500);
-
-        loop {
-            // 等待事件或超时（用于定期 flush）
-            let event = tokio::time::timeout(flush_interval, rx.recv()).await;
-            let is_timeout = event.is_err();
-
-            match event {
-                Ok(Some(ArchiveEvent::Danmaku(d))) => {
-                    danmaku_buf.push(d);
-                }
-                Ok(Some(ArchiveEvent::Gift(g))) => {
-                    gift_buf.push(g);
-                }
-                Ok(Some(ArchiveEvent::SuperChat(sc))) => {
-                    sc_buf.push(sc);
-                }
-                Ok(None) => {
-                    // Channel closed, flush and exit
-                    flush_buffers(
-                        &archive,
-                        session_id,
-                        &mut danmaku_buf,
-                        &mut gift_buf,
-                        &mut sc_buf,
-                    )
-                    .await;
-                    break;
-                }
-                Err(_) => {
-                    // Timeout, will flush below
-                }
-            }
-
-            // Flush when buffer is large enough or on timeout
-            let reached_batch_size =
-                danmaku_buf.len() >= 100 || gift_buf.len() >= 50 || sc_buf.len() >= 20;
-            let has_buffered_events =
-                !danmaku_buf.is_empty() || !gift_buf.is_empty() || !sc_buf.is_empty();
-            if reached_batch_size || (is_timeout && has_buffered_events) {
-                flush_buffers(
-                    &archive,
-                    session_id,
-                    &mut danmaku_buf,
-                    &mut gift_buf,
-                    &mut sc_buf,
-                )
-                .await;
-            }
-        }
-
-        log::info!("Archive writer task exited for session {}", session_id);
-    })
-}
-
-async fn flush_buffers(
-    archive: &ArchiveManager,
-    session_id: i64,
-    danmaku_buf: &mut Vec<ProcessedDanmaku>,
-    gift_buf: &mut Vec<ProcessedGift>,
-    sc_buf: &mut Vec<ProcessedSuperChat>,
-) {
-    if !danmaku_buf.is_empty() {
-        let items = std::mem::take(danmaku_buf);
-        if let Err(e) = archive.save_danmaku_batch(session_id, &items).await {
-            log::error!("Archive flush danmaku error: {}", e);
-        }
-    }
-    for gift in gift_buf.drain(..) {
-        if let Err(e) = archive.save_gift(session_id, &gift).await {
-            log::error!("Archive flush gift error: {}", e);
-        }
-    }
-    for sc in sc_buf.drain(..) {
-        if let Err(e) = archive.save_superchat(session_id, &sc).await {
-            log::error!("Archive flush SC error: {}", e);
-        }
-    }
+    stats: Option<&LiveStats>,
+) -> Result<(), String> {
+    let (danmaku_count, gift_count, sc_count): (i64, i64, i64) = db
+        .query_row(
+            "SELECT (SELECT COUNT(*) FROM danmaku WHERE session_id = ?1),
+                (SELECT COUNT(*) FROM gifts WHERE session_id = ?1),
+                (SELECT COUNT(*) FROM super_chats WHERE session_id = ?1)",
+            params![session_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(|e| format!("读取存档计数失败: {e}"))?;
+    let (gift_revenue, sc_revenue, guard_revenue) = match stats {
+        Some(stats) => (stats.gift_revenue, stats.sc_revenue, stats.guard_revenue),
+        None => db.query_row(
+            "SELECT
+                (SELECT COALESCE(SUM(total_value), 0) FROM gifts WHERE session_id = ?1 AND is_paid = 1 AND guard_level IS NULL),
+                (SELECT COALESCE(SUM(price), 0) FROM super_chats WHERE session_id = ?1),
+                (SELECT COALESCE(SUM(total_value), 0) FROM gifts WHERE session_id = ?1 AND guard_level IS NOT NULL)",
+            params![session_id], |row| Ok((row.get::<_, u64>(0)?, row.get::<_, u64>(1)?, row.get::<_, u64>(2)?)),
+        ).map_err(|e| format!("恢复存档收入失败: {e}"))?,
+    };
+    let total_revenue = stats.map_or(gift_revenue + sc_revenue + guard_revenue, |stats| {
+        stats.total_revenue
+    });
+    db.execute(
+        "UPDATE sessions SET end_time = ?1, total_revenue = ?2, gift_revenue = ?3, sc_revenue = ?4, guard_revenue = ?5, danmaku_count = ?6, gift_count = ?7, sc_count = ?8 WHERE id = ?9",
+        params![chrono::Utc::now().timestamp(), total_revenue as i64, gift_revenue as i64,
+            sc_revenue as i64, guard_revenue as i64, danmaku_count, gift_count, sc_count, session_id],
+    ).map_err(|e| format!("结束存档会话失败: {e}"))?;
+    log::info!(
+        "Archive session ended: id={}, danmaku={}, gifts={}, sc={}",
+        session_id,
+        danmaku_count,
+        gift_count,
+        sc_count
+    );
+    Ok(())
 }
 
 // ==================== Helper ====================
@@ -1573,10 +1418,11 @@ fn map_danmaku_row(row: &rusqlite::Row) -> rusqlite::Result<ArchivedDanmaku> {
 
 #[cfg(test)]
 mod tests {
-    use super::ArchiveManager;
+    use super::{ArchiveDatabase, ArchiveManager};
     use crate::archive_migrations;
     use crate::live_types::{ProcessedGift, ProcessedGiftCombo, ProcessedUser};
     use rusqlite::{params, Connection};
+    use std::collections::HashSet;
     use tokio::sync::Mutex;
 
     #[tokio::test]
@@ -1589,8 +1435,10 @@ mod tests {
         )
         .expect("archive session");
         let archive = ArchiveManager {
-            db: Mutex::new(conn),
-            active_session_id: Mutex::new(None),
+            db: Mutex::new(ArchiveDatabase {
+                connection: conn,
+                active_sessions: HashSet::new(),
+            }),
         };
 
         let mut gift = ProcessedGift {
@@ -1633,7 +1481,8 @@ mod tests {
         gift.combo.as_mut().unwrap().super_batch_gift_num = Some(2);
         archive.save_gift(1, &gift).await.expect("update gift");
 
-        let db = archive.db.lock().await;
+        let database = archive.db.lock().await;
+        let db = &database.connection;
         let (count, num, revenue): (i64, i64, i64) = db
             .query_row(
                 "SELECT COUNT(*), MAX(num), MAX(revenue_value) FROM gifts WHERE original_id = ?1",
@@ -1667,8 +1516,10 @@ INSERT INTO super_chats (
         )
         .expect("seed unfinished session");
         let archive = ArchiveManager {
-            db: Mutex::new(conn),
-            active_session_id: Mutex::new(None),
+            db: Mutex::new(ArchiveDatabase {
+                connection: conn,
+                active_sessions: HashSet::new(),
+            }),
         };
 
         assert_eq!(archive.recover_orphaned_sessions().await.unwrap(), 1);
@@ -1710,8 +1561,10 @@ INSERT INTO super_chats (
         )
         .expect("seed archive data");
         let archive = ArchiveManager {
-            db: Mutex::new(conn),
-            active_session_id: Mutex::new(None),
+            db: Mutex::new(ArchiveDatabase {
+                connection: conn,
+                active_sessions: HashSet::new(),
+            }),
         };
 
         let overview = archive
@@ -1775,12 +1628,15 @@ INSERT INTO danmaku (
         )
         .expect("seed archive data");
         let archive = ArchiveManager {
-            db: Mutex::new(conn),
-            active_session_id: Mutex::new(Some(3)),
+            db: Mutex::new(ArchiveDatabase {
+                connection: conn,
+                active_sessions: HashSet::from([3]),
+            }),
         };
 
         assert_eq!(archive.prune_empty_sessions().await.expect("prune"), 1);
-        let db = archive.db.lock().await;
+        let database = archive.db.lock().await;
+        let db = &database.connection;
         let ids = db
             .prepare("SELECT id FROM sessions ORDER BY id")
             .expect("session query")

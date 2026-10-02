@@ -1,4 +1,14 @@
-//! 直播聚合向扩展发布的最小事件，不包含窗口、连接或原始通知。
+//! 直播聚合向扩展和连接服务发布的最小通知，不依赖窗口或存储模型。
+
+/// 需要立即分发的领域通知。礼物通知始终使用去重后的本次增量。
+pub enum LiveEvent {
+    Text(ReceivedText),
+    Gift(ReceivedGift),
+    Started { room_id: u64, live_time: i64 },
+    Stopped { room_id: u64, round: i32 },
+}
+
+/// 扩展只消费规范化通知，不接收窗口、连接或原始数据。
 #[derive(Debug, Clone)]
 pub struct ReceivedGift {
     pub event_id: Option<String>,

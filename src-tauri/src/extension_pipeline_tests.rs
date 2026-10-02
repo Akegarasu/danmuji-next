@@ -330,12 +330,12 @@ fn normalized_danmaku_and_sc_keep_live_updates_and_battery_units() {
             is_admin: false,
         },
     };
-    let received = live.process_danmaku(danmaku);
+    let (_, received) = live.process_danmaku(danmaku);
     assert_eq!(received.medal_anchor_uid, 900);
     assert_eq!(received.medal_room_id, 100);
     host.dispatch_text(&received);
     let sc = SuperChat::parse(&json!({"data":{"id":1,"message":"点歌 av2","price":30,"uid":43,"user_info":{"uname":"用户43","guard_level":1},"start_time":1700000000,"time":60}})).unwrap();
-    host.dispatch_text(&live.process_superchat(sc));
+    host.dispatch_text(&live.process_superchat(sc).1);
     let songs = host.state("song-request").unwrap().state["requests"].clone();
     assert_eq!(songs[0]["song_name"], "av2");
     assert_eq!(songs[0]["guard_level"], 1);

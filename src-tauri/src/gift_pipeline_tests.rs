@@ -3,10 +3,11 @@
 
 use blivedm::{parse_notification, Event, Gift};
 use serde_json::{json, Value};
+use std::sync::Arc;
 
-use crate::archive::{ArchiveEvent, ArchiveManager};
+use crate::archive::{ArchiveManager, Recording};
 use crate::live_data::LiveData;
-use crate::live_types::{DataUpdate, ProcessedGift, UpsertAction, MAX_GIFT_LIST};
+use crate::live_types::{DataUpdate, LiveRecord, ProcessedGift, UpsertAction, MAX_GIFT_LIST};
 
 const ITEMS: [(u64, &str, u64); 3] = [
     (32128, "爱心抱枕", 16000),
@@ -54,10 +55,9 @@ fn parse(raw: &Value) -> Vec<Gift> {
     }
 }
 
-fn feed(data: &mut LiveData, raw: &Value) {
-    for gift in parse(raw) {
-        data.process_gift(gift);
-    }
+fn feed(data: &mut LiveData, raw: &Value) -> Vec<LiveRecord> {
+    data.process(parse_notification(&serde_json::to_vec(raw).unwrap(), None).unwrap())
+        .records
 }
 
 fn v1_from_gift(gift: &Gift) -> Value {
@@ -113,14 +113,13 @@ fn summary(gift: &ProcessedGift) -> (u64, u32, u64, u64) {
 #[tokio::test]
 async fn v1_three_ten_draws_keep_counts_in_updates_and_sqlite() {
     let mut data = LiveData::default();
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    data.archive_tx = Some(tx);
+    let mut records = Vec::new();
     let mut update_batches = Vec::new();
     for round in 0..3 {
         for item in 0..3 {
             let raw = v1_packet(round, item, true);
-            feed(&mut data, &raw);
-            feed(&mut data, &raw); // 原包重放不得重复入账。
+            records.extend(feed(&mut data, &raw));
+            records.extend(feed(&mut data, &raw)); // 原包重放不得重复入账。
         }
         update_batches.push(data.take_pending_updates());
     }
@@ -169,14 +168,15 @@ async fn v1_three_ten_draws_keep_counts_in_updates_and_sqlite() {
     });
     assert_eq!(contribution, Some(2910));
 
-    let archive = ArchiveManager::new(":memory:".into()).unwrap();
-    let session_id = archive.start_session(1, "礼物回归", 7).await.unwrap();
-    let mut writes = 0;
-    while let Ok(ArchiveEvent::Gift(gift)) = rx.try_recv() {
-        archive.save_gift(session_id, &gift).await.unwrap();
-        writes += 1;
+    let archive = Arc::new(ArchiveManager::new(":memory:".into()).unwrap());
+    let recording = Recording::start(archive.clone(), 1, "礼物回归", 7).await.unwrap();
+    let session_id = archive.get_sessions().await.unwrap()[0].id;
+    assert_eq!(records.len(), 9);
+    for record in records {
+        assert!(matches!(&record, LiveRecord::Gift(_)));
+        recording.record(record).unwrap();
     }
-    assert_eq!(writes, 9);
+    recording.finish(data.stats.clone()).await.unwrap();
     let saved = archive
         .search_gifts(session_id, "", None, None, 1, 100)
         .await
@@ -203,7 +203,6 @@ async fn v1_three_ten_draws_keep_counts_in_updates_and_sqlite() {
             .sum::<u64>(),
         4500
     );
-    archive.end_session(&data.stats).await.unwrap();
     let session = archive.get_session_detail(session_id).await.unwrap();
     assert_eq!(session.gift_count, 3); // 会话统计为合并后的行数，数量另见每行 num。
     assert_eq!(session.gift_revenue, 2910);
@@ -403,30 +402,31 @@ fn audit_same_tid_split_result_should_keep_both_parts() {
 #[ignore = "失败探针：旧 combo 移出 5000 行缓存后继续收到礼物，归档累计值会回退"]
 async fn audit_evicted_combo_should_not_overwrite_archive_with_partial_count() {
     let mut data = LiveData::default();
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    data.archive_tx = Some(tx);
-    feed(&mut data, &v1_packet(0, 0, true));
+    let mut records = Vec::new();
+    records.extend(feed(&mut data, &v1_packet(0, 0, true)));
     for index in 0..MAX_GIFT_LIST {
         let raw = json!({"cmd": "SEND_GIFT", "data": {
             "giftId": 1, "giftName": "填充礼物", "num": 1, "price": 1000,
             "total_coin": 1000, "coin_type": "gold", "uid": 7,
             "timestamp": 1700000010, "tid": format!("filler-{index}")
         }});
-        feed(&mut data, &raw);
+        records.extend(feed(&mut data, &raw));
         data.take_pending_updates();
     }
     assert!(data.gift_list.iter().all(|gift| gift.gift_id != ITEMS[0].0));
     let mut next = v1_packet(1, 0, true);
     next["data"]["num"] = json!(2);
     next["data"]["total_coin"] = json!(30000);
-    feed(&mut data, &next);
+    records.extend(feed(&mut data, &next));
     assert_eq!(data.stats.gift_revenue, MAX_GIFT_LIST as u64 * 10 + 960);
 
-    let archive = ArchiveManager::new(":memory:".into()).unwrap();
-    let session_id = archive.start_session(1, "缓存淘汰边界", 7).await.unwrap();
-    while let Ok(ArchiveEvent::Gift(gift)) = rx.try_recv() {
-        archive.save_gift(session_id, &gift).await.unwrap();
+    let archive = Arc::new(ArchiveManager::new(":memory:".into()).unwrap());
+    let recording = Recording::start(archive.clone(), 1, "缓存淘汰边界", 7).await.unwrap();
+    let session_id = archive.get_sessions().await.unwrap()[0].id;
+    for record in records {
+        recording.record(record).unwrap();
     }
+    recording.finish(data.stats.clone()).await.unwrap();
     let saved = archive
         .search_gifts(session_id, "爱心抱枕", None, None, 1, 100)
         .await
@@ -457,7 +457,7 @@ fn overtime_consumes_deduplicated_deltas_instead_of_combo_snapshots() {
         for item in 0..3 {
             for gift in parse(&v1_packet(round, item, true)) {
                 let duplicate = gift.clone();
-                let received = data.process_gift(gift).unwrap();
+                let (_, received) = data.process_gift(gift).unwrap();
                 assert_eq!(received.num, ROUNDS[round][item]);
                 timer.on_gift(&received, now);
                 assert!(data.process_gift(duplicate).is_none());
@@ -483,7 +483,7 @@ fn song_allowances_consume_gift_deltas_for_the_correct_uid() {
     for round in 0..2 {
         for gift in parse(&v1_packet(round, 0, true)) {
             let duplicate = gift.clone();
-            let received = data.process_gift(gift).unwrap();
+            let (_, received) = data.process_gift(gift).unwrap();
             assert_eq!(received.sender_uid, 42);
             assert!(songs.on_gift(&received, now));
             assert!(data.process_gift(duplicate).is_none());
@@ -531,7 +531,7 @@ fn overtime_blind_boxes_count_v1_v2_deltas_without_double_triggers() {
                 for gift in parse(raw) {
                     let duplicate = gift.clone();
                     let v1_duplicate = v1_from_gift(&gift);
-                    let received = data.process_gift(gift).unwrap();
+                    let (_, received) = data.process_gift(gift).unwrap();
                     let blind = received.blind_gift.as_ref().unwrap();
                     assert_eq!(blind.gift_id, 32251);
                     assert_eq!(blind.gift_name, "心动盲盒");
