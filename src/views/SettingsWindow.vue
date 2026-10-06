@@ -8,6 +8,7 @@ import UpdateToast from '@/components/common/UpdateToast.vue'
 import RawEventDumpPanel from '@/components/common/RawEventDumpPanel.vue'
 import SettingsSectionTitle from '@/components/common/SettingsSectionTitle.vue'
 import SettingsToggle from '@/components/common/SettingsToggle.vue'
+import ColorPicker from '@/components/common/ColorPicker.vue'
 import { useSettingsStore } from '@/stores/settings'
 import { useDanmakuStore } from '@/stores/danmaku'
 import { applyCurrentSettings, initSettingsApplier } from '@/services/settings-applier'
@@ -369,7 +370,6 @@ const updateDisplayColor = (key: DisplayColorKey, value: string) => {
   settingsStore.updateDisplaySettings({ [key]: value } as Partial<DisplaySettings>)
 }
 
-const getInputValue = (event: Event) => (event.target as HTMLInputElement).value
 
 const fontColorSettings = computed<Array<{
   key: DisplayColorKey
@@ -1402,15 +1402,7 @@ const openProjectUrl = async () => {
                     @click="updateDisplayColor(item.key, color)"
                   />
                 </div>
-                <label class="custom-color-btn" :style="{ '--picked-color': item.value }">
-                  <input
-                    type="color"
-                    :value="item.value"
-                    @input="updateDisplayColor(item.key, getInputValue($event))"
-                  />
-                  <span class="custom-color-swatch" />
-                  <span>自定义</span>
-                </label>
+                <ColorPicker :model-value="item.value" :label="item.label" :presets="item.presets" class="custom-color-picker" @update:model-value="updateDisplayColor(item.key, $event)" />
               </div>
             </div>
           </div>
@@ -2573,44 +2565,7 @@ const openProjectUrl = async () => {
   }
 }
 
-.custom-color-btn {
-  @include settings.size(10px);
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--bg-active);
-  border: 1px solid var(--border-color);
-  border-radius: settings.$radius;
-  color: var(--text-secondary);
-  font-size: var(--font-size-xs);
-  cursor: pointer;
-  overflow: hidden;
-  flex-shrink: 0;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-
-  &:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-    border-color: var(--accent-primary);
-  }
-
-  input {
-    position: absolute;
-    inset: 0;
-    opacity: 0;
-    cursor: pointer;
-  }
-}
-
-.custom-color-swatch {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--picked-color);
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
-}
+.custom-color-picker { flex: 0 1 150px; }
 
 .setting-slider {
   width: 100%;

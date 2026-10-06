@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { runInNewContext } from 'node:vm'
 
-const code = readFileSync(new URL('../public/overlays/song-request/overlay.js', import.meta.url), 'utf8')
+const code = readFileSync(new URL('../public/overlays/shared/style.js', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('../public/overlays/song-request/overlay.js', import.meta.url), 'utf8')
 class Element {
   textContent = ''
   children = []
@@ -17,6 +17,7 @@ class Element {
 function fixture() {
   const elements = { songs: new Element() }
   const events = new Map()
+  const styles = new Map()
   let stream
   class EventSource {
     listeners = new Map()
@@ -25,12 +26,27 @@ function fixture() {
     addEventListener(name, callback) { this.listeners.set(name, callback) }
     close() { this.closed = true }
   }
-  runInNewContext(code, { document: { getElementById: id => elements[id], createElement: () => new Element() }, EventSource,
+  runInNewContext(code, { document: { documentElement: { style: { setProperty: (key, value) => styles.set(key, value), removeProperty: key => styles.delete(key) } }, getElementById: id => elements[id], createElement: () => new Element() }, EventSource,
     window: { addEventListener: (name, callback) => events.set(name, callback) } })
-  return { elements, events, stream, send: value => stream.listeners.get('snapshot')({ data: JSON.stringify(value) }) }
+  return { elements, events, stream, styles, send: value => stream.listeners.get('snapshot')({ data: JSON.stringify(value) }) }
 }
 const state = (requests, overrides = {}) => ({ show_username: true, total: requests.length, requests, ...overrides })
 const song = (id, name) => ({ id, song_name: name, username: `用户${id}` })
+
+test('仅修改外观也即时生效，阴影支持关闭，旧快照清除覆盖样式', () => {
+  const f = fixture()
+  const requests = [song(1, '晴天')]
+  f.send(state(requests))
+  const overlay_style = { font_family: 'KaiTi', font_size: 40, font_weight: 900, text_color: '#fedcba', secondary_color: '#123456', shadow_enabled: true, shadow_color: '#654321', shadow_blur: 5, shadow_offset_x: 2, shadow_offset_y: -3 }
+  f.send(state(requests, { overlay_style }))
+  assert.equal(f.styles.get('--overlay-font-size'), '40px')
+  assert.equal(f.styles.get('--overlay-filter-shadow'), 'drop-shadow(2px -3px 5px #654321) drop-shadow(0 0 10px #6543218c)')
+  assert.equal(f.elements.songs.children[0].children[1].textContent, '晴天')
+  f.send(state(requests, { overlay_style: { ...overlay_style, shadow_enabled: false } }))
+  assert.equal(f.styles.get('--overlay-filter-shadow'), 'none')
+  f.send(state(requests))
+  assert.equal(f.styles.size, 0)
+})
 
 test('仅按后端顺序显示序号、歌名、点歌人，空队列不显示内容', () => {
   const f = fixture()

@@ -1,10 +1,11 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
-body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; color: #fff; }
+:root { --overlay-default-font-family: "Microsoft YaHei", "PingFang SC", sans-serif; --song-font-size: var(--overlay-font-size, 28px); }
+body { font-family: var(--overlay-font-family, var(--overlay-default-font-family)); color: var(--overlay-text-color, #fff); }
 #songs { list-style: none; padding: 8px 12px; margin: 0; }
 /* 在整行完成文字省略后绘制阴影，避免被歌名和用户名的裁切区域截断。 */
-.song { display: flex; align-items: baseline; gap: 14px; padding: 8px 0; line-height: 1.5; filter: drop-shadow(0 1px 2px #000) drop-shadow(0 0 4px rgba(0,0,0,.55)); }
-.number { flex: 0 0 2ch; font-size: 24px; font-variant-numeric: tabular-nums; opacity: .85; }
-.name { min-width: 0; font-size: 28px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.username { min-width: 0; max-width: 32%; flex-shrink: 0; color: rgba(255,255,255,.65); font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-@media (max-width: 400px) { .song { gap: 10px; } .number { font-size: 20px; } .name { font-size: 23px; } .username { font-size: 15px; } }
+.song { display: flex; align-items: baseline; gap: 14px; padding: 8px 0; line-height: 1.5; filter: var(--overlay-filter-shadow, drop-shadow(0 1px 2px #000) drop-shadow(0 0 4px rgba(0,0,0,.55))); }
+.number { flex: 0 0 2ch; color: var(--overlay-secondary-color, #fff); font-size: calc(var(--song-font-size) * .857143); font-variant-numeric: tabular-nums; opacity: .85; }
+.name { min-width: 0; font-size: var(--song-font-size); font-weight: var(--overlay-font-weight, 600); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.username { min-width: 0; max-width: 32%; flex-shrink: 0; color: var(--overlay-secondary-color, #fff); opacity: .65; font-size: calc(var(--song-font-size) * .642857); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 400px) { .song { gap: 10px; } .number { font-size: calc(var(--song-font-size) * .714286); } .name { font-size: calc(var(--song-font-size) * .821429); } .username { font-size: calc(var(--song-font-size) * .535714); } }

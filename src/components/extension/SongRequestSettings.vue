@@ -2,6 +2,7 @@
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import SettingsToggle from '@/components/common/SettingsToggle.vue'
 import ExtensionSettingsLayout from './ExtensionSettingsLayout.vue'
+import OverlayStyleSettings from './OverlayStyleSettings.vue'
 import giftCatalog from '@/assets/gift.json'
 import { createExtensionClient, getOverlayServer, startOverlayServer, type OverlayServerInfo } from '@/services/extensions'
 import type { SongConfig, SongGiftRule, SongPriorities } from '@/types/song-request'
@@ -172,6 +173,9 @@ onBeforeUnmount(() => { active = false; clearInterval(interval); client.disconne
             <h2>OBS 显示</h2>
             <div class="overlay-fields"><label class="field">最多显示几首<input v-model.number="config.overlay_max_rows" type="number" min="1" max="30" step="1" required></label><SettingsToggle v-model="config.overlay_show_username" label="显示点歌人" :disabled="busy" /></div>
             <p>透明背景，仅显示“01 歌名 点歌人”。点歌人使用更小、更浅的文字；空队列不显示内容。</p>
+            <div class="appearance-settings">
+              <OverlayStyleSettings v-model="config.overlay_style" preset="song-request" :disabled="busy" @update:model-value="dirty = true" />
+            </div>
           </section>
         </fieldset>
       </template>
@@ -213,6 +217,7 @@ input { @include controls.control; }
 .url-row input { flex: 1; min-width: 0; }
 iframe { width: 100%; height: 320px; margin-top: 16px; border: 1px solid var(--border-color); border-radius: 8px; background: repeating-conic-gradient(#20242d 0% 25%, #2b303a 0% 50%) 50% / 20px 20px; }
 .loading { padding-top: 24px; }
+.appearance-settings { margin-top: 24px; }
 @media (max-width: 620px) { .audience-row { grid-template-columns: 1fr; gap: 14px; } .allowance-fields { justify-content: space-between; gap: 10px; } }
 @media (max-width: 460px) { .gift-rule { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 24px; .field:first-child { grid-column: 1 / -1; } } .priority-grid { gap: 8px; } }
 </style>

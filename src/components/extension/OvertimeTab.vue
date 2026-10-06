@@ -4,6 +4,7 @@ import giftCatalog from '@/assets/gift.json'
 import ExtSelect from '@/components/common/ExtSelect.vue'
 import SettingsSectionTitle from '@/components/common/SettingsSectionTitle.vue'
 import SettingsToggle from '@/components/common/SettingsToggle.vue'
+import OverlayStyleSettings from './OverlayStyleSettings.vue'
 import { createExtensionClient, getOverlayServer, startOverlayServer, type OverlayServerInfo } from '@/services/extensions'
 import type { GiftRule, OvertimeRequest, OvertimeSnapshot, TimerAction, TimerConfig, RandomAction, AppliedAction } from '@/types/overtime'
 
@@ -190,6 +191,9 @@ onBeforeUnmount(stop)
         </div>
         <details class="help-details"><summary>OBS 接入说明</summary><p>在 OBS 中添加浏览器源并粘贴地址，建议尺寸 600 × 800。使用时保持弹幕姬运行并连接直播间。</p></details>
         <iframe v-if="preview && server?.url" class="overlay-preview" :src="server.url" title="加班机 OBS 预览" />
+        <div class="appearance-settings">
+          <OverlayStyleSettings v-model="config.overlay_style" preset="overtime" :disabled="busy" @update:model-value="dirty = true" />
+        </div>
       </section>
       <section @input="dirty = true" @change="dirty = true">
         <SettingsSectionTitle class="section-heading">基本设置 <span v-if="dirty" class="unsaved">未保存</span></SettingsSectionTitle>
@@ -568,6 +572,8 @@ button:disabled {
   border: 0;
   background: repeating-conic-gradient(#292a2e 0% 25%, #202126 0% 50%) 50%/20px 20px
 }
+
+.appearance-settings { margin-top: 20px; }
 
 .history-row {
   display: flex;

@@ -1,3 +1,5 @@
+import type { OverlayStyle } from './overlay-style'
+
 export interface SongPriorities {
   superchat: number
   governor: number
@@ -6,6 +8,7 @@ export interface SongPriorities {
 }
 
 export interface SongConfig {
+  overlay_style: OverlayStyle
   enabled: boolean
   accept_danmaku: boolean
   accept_superchat: boolean

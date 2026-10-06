@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { runInNewContext } from 'node:vm'
 
-const sourceCode = readFileSync(new URL('../public/overlays/overtime/overlay.js', import.meta.url), 'utf8')
+const sourceCode = readFileSync(new URL('../public/overlays/shared/style.js', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('../public/overlays/overtime/overlay.js', import.meta.url), 'utf8')
 class Element {
   textContent = ''
   children = []
@@ -22,6 +22,7 @@ class Element {
 function page() {
   const elements = Object.fromEntries(['clock', 'connection', 'rules', 'notice-text', 'room'].map(id => [id, new Element()]))
   const intervals = new Map(), timeouts = new Map(), events = new Map()
+  const styles = new Map()
   let now = 0, sequence = 0, stream
   class EventSource {
     listeners = new Map()
@@ -31,14 +32,14 @@ function page() {
     close() { this.closed = true }
   }
   runInNewContext(sourceCode, {
-    document: { getElementById: id => elements[id], createElement: () => new Element(), querySelector: () => elements.room },
+    document: { documentElement: { style: { setProperty: (key, value) => styles.set(key, value), removeProperty: key => styles.delete(key) } }, getElementById: id => elements[id], createElement: () => new Element(), querySelector: () => elements.room },
     window: { innerWidth: 350, addEventListener: (name, fn) => events.set(name, fn), removeEventListener: name => events.delete(name) },
     EventSource, performance: { now: () => now }, console,
     setInterval: fn => { const id = ++sequence; intervals.set(id, fn); return id }, clearInterval: id => intervals.delete(id),
     setTimeout: fn => { const id = ++sequence; timeouts.set(id, fn); return id }, clearTimeout: id => timeouts.delete(id),
   })
   return {
-    elements, stream, intervals, timeouts, events,
+    elements, stream, intervals, timeouts, events, styles,
     nextNotice: () => {
       const next = timeouts.entries().next().value
       assert.ok(next, '应存在提示切换定时器')
@@ -51,6 +52,26 @@ function page() {
 function snapshot(overrides = {}) {
   return { config: { enabled: true, show_rules: true, show_notice: true, rules: [] }, remaining_ms: 10000, running: true, rate: 1, notices: [], ...overrides }
 }
+
+test('外观随快照更新，关闭阴影、清空字体及旧配置恢复均不影响计时', () => {
+  const view = page()
+  const appearance = { font_family: '测试"字体\\名称', font_size: 72, font_weight: 700, text_color: '#123456', secondary_color: '#abcdef', shadow_enabled: true, shadow_color: '#345678', shadow_blur: 4, shadow_offset_x: -2, shadow_offset_y: 3 }
+  const config = { ...snapshot().config, overlay_style: appearance }
+  view.send(snapshot({ config }))
+  assert.equal(view.styles.get('--overlay-font-family'), '"测试\\"字体\\\\名称", var(--overlay-default-font-family)')
+  assert.equal(view.styles.get('--overlay-font-size'), '72px')
+  assert.equal(view.styles.get('--overlay-font-weight'), '700')
+  assert.equal(view.styles.get('--overlay-text-color'), '#123456')
+  assert.equal(view.styles.get('--overlay-secondary-color'), '#abcdef')
+  assert.equal(view.styles.get('--overlay-text-shadow'), '-2px 3px 4px #345678')
+  view.send(snapshot({ config: { ...config, overlay_style: { ...appearance, font_family: '', shadow_enabled: false } } }))
+  assert.equal(view.styles.has('--overlay-font-family'), false)
+  assert.equal(view.styles.get('--overlay-text-shadow'), 'none')
+  view.send(snapshot())
+  assert.equal(view.styles.size, 0)
+  view.advance(1000)
+  assert.equal(view.elements.clock.textContent, '00:00:09')
+})
 
 test('多个快照校准时钟，断线后停止推算，重新连接恢复后端时间', () => {
   const view = page()

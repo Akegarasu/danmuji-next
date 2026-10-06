@@ -261,6 +261,7 @@ pub fn run() {
             commands::kv_remove,
             // 工具
             commands::open_url,
+            commands::fonts::get_system_fonts,
             gift_image::load_gift_image_asset,
             gift_image::save_gift_image,
             commands::exit_app,

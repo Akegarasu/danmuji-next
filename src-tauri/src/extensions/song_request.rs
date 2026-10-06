@@ -102,6 +102,7 @@ impl Default for Priorities {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SongConfig {
+    pub overlay_style: super::overlay_style::OverlayStyle,
     pub enabled: bool,
     pub accept_danmaku: bool,
     pub accept_superchat: bool,
@@ -121,6 +122,7 @@ pub struct SongConfig {
 impl Default for SongConfig {
     fn default() -> Self {
         Self {
+            overlay_style: super::overlay_style::OverlayStyle::song_request(),
             enabled: true,
             accept_danmaku: true,
             accept_superchat: true,
@@ -140,6 +142,7 @@ impl Default for SongConfig {
 }
 impl SongConfig {
     fn validate(&mut self) -> Result<(), String> {
+        self.overlay_style.validate()?;
         self.command = self.command.trim().to_owned();
         if self.command.is_empty()
             || self.command.chars().count() > 20
@@ -464,7 +467,8 @@ impl Extension for SongRequestManager {
         let rows: Vec<_> = self.requests.iter().filter(|r| !r.sung).take(self.config.overlay_max_rows as usize).map(|r| {
             json!({ "id": r.id, "song_name": r.song_name, "username": if self.config.overlay_show_username { &r.username } else { "" } })
         }).collect();
-        json!({ "show_username": self.config.overlay_show_username, "total": self.pending_count(), "requests": rows })
+        json!({ "show_username": self.config.overlay_show_username, "total": self.pending_count(), "requests": rows,
+            "overlay_style": self.config.overlay_style })
     }
     fn checkpoint(&self, _now: Instant) -> Value {
         json!(self)

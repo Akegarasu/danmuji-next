@@ -240,6 +240,10 @@ async fn events(State(state): State<WebState>, Path(id): Path<String>) -> Respon
 
 fn asset(id: &str, file: &str) -> Response {
     let (mime, bytes): (&str, &'static [u8]) = match (id, file) {
+        ("shared", "style.js") => (
+            "text/javascript; charset=utf-8",
+            include_bytes!("../../../public/overlays/shared/style.js"),
+        ),
         ("overtime", "index.html") => (
             "text/html; charset=utf-8",
             include_bytes!("../../../public/overlays/overtime/index.html"),
@@ -372,6 +376,17 @@ mod tests {
             .unwrap();
         assert!(page.status().is_success());
         assert!(page.text().await.unwrap().contains("overlay.js"));
+        let shared = client
+            .get(format!("{base}/overlays/shared/style.js"))
+            .send()
+            .await
+            .unwrap();
+        assert!(shared.status().is_success());
+        assert_eq!(
+            shared.headers()[header::CONTENT_TYPE],
+            "text/javascript; charset=utf-8"
+        );
+        assert!(shared.text().await.unwrap().contains("window.OverlayStyle"));
         for file in ["overlay.js", "overlay.css", "timer-heavy.otf"] {
             assert!(client
                 .get(format!("{base}/overlays/overtime/{file}"))

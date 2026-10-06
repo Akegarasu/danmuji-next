@@ -1,5 +1,6 @@
 //! 内置扩展领域接口。持久化、网络任务和桌面协议由各自的适配层负责。
 mod host;
+mod overlay_style;
 pub mod overtime;
 pub mod server;
 pub mod song_request;

@@ -5,7 +5,7 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::Extension;
+use super::{overlay_style::OverlayStyle, Extension};
 use crate::live_events::ReceivedGift;
 
 // 限制在十年以内，避免恶意数量、倍率溢出和浏览器数值精度问题。
@@ -98,6 +98,7 @@ pub struct TimerConfig {
     pub initial_seconds: f64,
     pub show_rules: bool,
     pub show_notice: bool,
+    pub overlay_style: OverlayStyle,
     pub blind_gift_mode: BlindGiftMode,
     pub rules: Vec<GiftRule>,
 }
@@ -109,6 +110,7 @@ impl Default for TimerConfig {
             initial_seconds: 3600.0,
             show_rules: true,
             show_notice: true,
+            overlay_style: OverlayStyle::overtime(),
             blind_gift_mode: BlindGiftMode::Revealed,
             rules: Vec::new(),
         }
@@ -130,6 +132,7 @@ fn validate_value(action: Action, value: f64) -> Result<(), String> {
 impl TimerConfig {
     fn validate(&self) -> Result<(), String> {
         validate_value(Action::SetTime, self.initial_seconds)?;
+        self.overlay_style.validate()?;
         if self.rules.len() > 100 {
             return Err("最多支持 100 条礼物规则".into());
         }

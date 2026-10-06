@@ -6,6 +6,7 @@
     const signature = JSON.stringify(state)
     if (signature === lastSnapshot) return
     lastSnapshot = signature
+    window.OverlayStyle.apply(state.overlay_style)
     const rows = state.requests.map((song, index) => {
       const row = document.createElement('li')
       row.className = 'song'

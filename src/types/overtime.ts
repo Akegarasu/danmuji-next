@@ -1,3 +1,5 @@
+import type { OverlayStyle } from './overlay-style'
+
 export type TimerAction = 'add' | 'subtract' | 'multiply' | 'divide' | 'set_time' | 'set_rate' | 'clear' | 'random'
 export type RandomAction = 'add' | 'subtract' | 'multiply' | 'divide'
 export interface RandomRange {
@@ -23,6 +25,7 @@ export interface GiftRule {
   random_ranges: RandomRange[]
 }
 export interface TimerConfig {
+  overlay_style: OverlayStyle
   enabled: boolean
   initial_seconds: number
   show_rules: boolean

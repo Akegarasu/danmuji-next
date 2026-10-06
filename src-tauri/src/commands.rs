@@ -2,6 +2,7 @@
 //! 所有暴露给前端的命令
 
 pub mod extensions;
+pub mod fonts;
 
 use serde_json::Value;
 use std::collections::HashSet;

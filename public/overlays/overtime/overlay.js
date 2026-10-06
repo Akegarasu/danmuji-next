@@ -8,10 +8,13 @@
   const resize = () => {
     room.style.zoom = Math.min(1, window.innerWidth / 600);
     syncRuleWrapping();
+    fitClock();
   };
   resize();
   window.addEventListener('resize', resize);
-  document.fonts?.ready.then(syncRuleWrapping);
+  const fontsLoaded = () => { syncRuleWrapping(); fitClock(); };
+  document.fonts?.addEventListener('loadingdone', fontsLoaded);
+  document.fonts?.ready.then(fontsLoaded);
   let snapshot = null;
   let receivedAt = 0;
   let connected = false;
@@ -51,6 +54,14 @@
       }
     }
   }
+  function fitClock() {
+    clock.style.fontSize = '';
+    // 自定义字体及较大字号仍需完整显示倒计时，不能裁掉末尾秒数。
+    for (let attempt = 0; attempt < 3 && clock.clientWidth > 40 && clock.scrollWidth > clock.clientWidth; attempt++) {
+      const size = parseFloat(getComputedStyle(clock).fontSize);
+      clock.style.fontSize = `${size * (clock.clientWidth - 40) / clock.scrollWidth}px`;
+    }
+  }
   function clearNotice() {
     queue = [];
     showingNotice = false;
@@ -86,6 +97,8 @@
     const nextKey = JSON.stringify(value.config);
     if (nextKey !== configKey) {
       configKey = nextKey;
+      window.OverlayStyle.apply(value.config.overlay_style);
+      fitClock();
       rules.replaceChildren();
       if (value.config.show_rules) {
         for (const rule of value.config.rules.filter(rule => rule.enabled)) {
@@ -140,8 +153,11 @@
     const seconds = Math.ceil(Math.max(0, snapshot.remaining_ms - elapsed) / 1000);
     const hours = Math.floor(seconds / 3600);
     const display = `${String(hours).padStart(2, '0')}:${String(Math.floor(seconds / 60) % 60).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
-    clock.textContent = seconds === 0 ? '下班啦！' : display;
+    const text = seconds === 0 ? '下班啦！' : display;
+    const changed = clock.textContent !== text;
+    if (changed) clock.textContent = text;
     clock.classList.toggle('long', hours > 99);
+    if (changed) fitClock();
     connection.textContent = stale ? '连接已断开，正在重连…' : !snapshot.config.enabled ? '加班机未启用' : !snapshot.running ? '已暂停' : snapshot.rate !== 1 ? `倒计时速度 ×${snapshot.rate}` : '';
   }
   const source = new EventSource('/api/extensions/overtime/events');
@@ -156,5 +172,6 @@
   const renderInterval = setInterval(render, 100);
   window.addEventListener('pagehide', () => {
     source.close(); clearInterval(renderInterval); clearTimeout(noticeTimeout); window.removeEventListener('resize', resize);
+    document.fonts?.removeEventListener('loadingdone', fontsLoaded);
   }, { once: true });
 })();

@@ -11,6 +11,7 @@
   --bg-card: rgba(40, 40, 40, var(--window-opacity));
   --bg-hover: rgba(55, 55, 55, var(--window-opacity));
   --bg-active: rgba(65, 65, 65, var(--window-opacity));
+  --bg-popover: #202020;
   
   --text-primary: #ebebeb;
   --text-secondary: #9b9b9b;
@@ -78,6 +79,12 @@ html, body, #app {
 }
 
 // ==================== Scrollbar ====================
+// 数字输入保持键盘操作，隐藏平台自带的亮色步进箭头。
+input[type=number] {
+  appearance: textfield;
+  &::-webkit-inner-spin-button, &::-webkit-outer-spin-button { appearance: none; margin: 0; }
+}
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
