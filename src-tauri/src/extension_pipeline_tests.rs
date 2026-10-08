@@ -383,6 +383,25 @@ fn normalized_danmaku_and_sc_keep_live_updates_and_battery_units() {
 }
 
 #[test]
+fn wish_machine_host_persists_gifts_and_css_without_resetting_goals() {
+    let dir = TestDirectory::new();
+    let host = dir.host();
+    host.dispatch_gift(&crate::live_events::ReceivedGift {
+        event_id: None, sender_uid: 1, gift_id: 10003, gift_name: "舰长".into(),
+        sender_name: "测试用户".into(), num: 2, blind_gift: None,
+    });
+    host.request("wish-machine", json!({"type":"configure","config":{
+        "enabled":true,"theme":"custom","custom_css":"#wish-machine { color: blue; }"
+    }})).unwrap();
+    let restored = dir.host();
+    let snapshot = restored.state("wish-machine").unwrap().state;
+    assert_eq!(snapshot["goals"][0]["current"], 2);
+    assert_eq!(snapshot["config"]["custom_css"], "#wish-machine { color: blue; }");
+    assert_eq!(dir.read("wish-machine.json")["goals"][0]["current"], 2);
+    assert_eq!(host.state("overtime").unwrap().state["remaining_ms"], 3_600_000.0);
+}
+
+#[test]
 fn song_order_history_and_replay_filter_survive_host_restart() {
     let dir = TestDirectory::new();
     let host = dir.host();

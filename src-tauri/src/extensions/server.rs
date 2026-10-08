@@ -194,8 +194,9 @@ async fn local_only(State(state): State<WebState>, request: Request, next: Next)
     let headers = response.headers_mut();
     headers.insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
     headers.insert(header::X_CONTENT_TYPE_OPTIONS, "nosniff".parse().unwrap());
+    // 允许所有扩展通过 OBS 自定义 CSS 覆盖内联样式。
     headers.insert(header::CONTENT_SECURITY_POLICY,
-        "default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; object-src 'none'".parse().unwrap());
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; object-src 'none'".parse().unwrap());
     response
 }
 
@@ -271,6 +272,22 @@ fn asset(id: &str, file: &str) -> Response {
         ("song-request", "overlay.css") => (
             "text/css; charset=utf-8",
             include_bytes!("../../../public/overlays/song-request/overlay.css"),
+        ),
+        ("wish-machine", "index.html") => (
+            "text/html; charset=utf-8",
+            include_bytes!("../../../public/overlays/wish-machine/index.html"),
+        ),
+        ("wish-machine", "overlay.js") => (
+            "text/javascript; charset=utf-8",
+            include_bytes!("../../../public/overlays/wish-machine/overlay.js"),
+        ),
+        ("wish-machine", "overlay.css") => (
+            "text/css; charset=utf-8",
+            include_bytes!("../../../public/overlays/wish-machine/overlay.css"),
+        ),
+        ("wish-machine", "theme-test-a.css") => (
+            "text/css; charset=utf-8",
+            include_bytes!("../../../public/overlays/wish-machine/theme-test-a.css"),
         ),
         _ => return StatusCode::NOT_FOUND.into_response(),
     };
@@ -375,6 +392,10 @@ mod tests {
             .await
             .unwrap();
         assert!(page.status().is_success());
+        assert!(page.headers()[header::CONTENT_SECURITY_POLICY]
+            .to_str()
+            .unwrap()
+            .contains("style-src 'self' 'unsafe-inline'"));
         assert!(page.text().await.unwrap().contains("overlay.js"));
         let shared = client
             .get(format!("{base}/overlays/shared/style.js"))
@@ -404,7 +425,50 @@ mod tests {
             .json()
             .await
             .unwrap();
-        assert_eq!(catalog["extensions"], json!(["overtime", "song-request"]));
+        assert_eq!(
+            catalog["extensions"],
+            json!(["overtime", "song-request", "wish-machine"])
+        );
+        for file in ["", "overlay.js", "overlay.css", "theme-test-a.css"] {
+            assert!(client
+                .get(format!("{base}/overlays/wish-machine/{file}"))
+                .send()
+                .await
+                .unwrap()
+                .status()
+                .is_success());
+        }
+        let wish_endpoint = format!("{base}/api/extensions/wish-machine/events");
+        let mut wishes = client.get(&wish_endpoint).send().await.unwrap();
+        assert!(String::from_utf8_lossy(&wishes.chunk().await.unwrap().unwrap()).contains("舰长"));
+        host.dispatch_gift(&ReceivedGift {
+            event_id: None,
+            sender_uid: 42,
+            gift_id: 10003,
+            gift_name: "舰长".into(),
+            sender_name: "不公开的送礼用户".into(),
+            num: 2,
+            blind_gift: None,
+        });
+        let wish_update = tokio::time::timeout(Duration::from_secs(2), wishes.chunk())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let wish_update = String::from_utf8_lossy(&wish_update);
+        assert!(wish_update.contains("\"current\":2"));
+        assert!(!wish_update.contains("送礼用户") && !wish_update.contains("config"));
+        let mut wish_reconnect = client.get(&wish_endpoint).send().await.unwrap();
+        assert!(
+            String::from_utf8_lossy(&wish_reconnect.chunk().await.unwrap().unwrap())
+                .contains("\"current\":2")
+        );
+        assert_eq!(
+            client.post(&wish_endpoint).send().await.unwrap().status(),
+            StatusCode::METHOD_NOT_ALLOWED
+        );
+        drop(wishes);
+        drop(wish_reconnect);
         for file in ["", "overlay.js", "overlay.css"] {
             assert!(client
                 .get(format!("{base}/overlays/song-request/{file}"))

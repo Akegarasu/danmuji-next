@@ -9,6 +9,7 @@ pub mod tasks;
 pub mod video_info;
 pub mod video_request;
 pub mod voting;
+pub mod wish_machine;
 pub use host::ExtensionHost;
 
 use crate::live_events::{ReceivedGift, ReceivedText};

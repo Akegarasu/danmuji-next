@@ -1,0 +1,32 @@
+/* 测试主题 A · 建议 OBS 浏览器源 400 × 200，按目标数量调整高度。
+   整段复制到 OBS「浏览器源 → 属性 → 自定义 CSS」。 */
+html, body { background: transparent !important; margin: 0 !important; overflow: hidden !important; }
+#wish-machine {
+  width: 100%;
+  padding: 4px;
+  color: #fff;
+  font-family: WishHeavy, "Microsoft YaHei", sans-serif;
+  font-size: 28px;
+  font-weight: 400;
+  line-height: 1.15;
+  text-shadow: none;
+}
+#wish-list { gap: 4px; }
+#wish-list .wish-row {
+  min-height: 56px;
+  padding: 4px 7px 4px 10px;
+  gap: 10px;
+  background: #6978ff;
+  border: none;
+  border-radius: 5px;
+  box-shadow: none;
+}
+#wish-list .wish-name { color: #fff; }
+#wish-list .wish-count {
+  padding: 3px 5px;
+  color: #6978ff;
+  background: #fff;
+  border-radius: 2px;
+  line-height: 1;
+}
+#wish-list .wish-separator { padding: 0 1px; }

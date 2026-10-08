@@ -554,3 +554,28 @@ fn overtime_blind_boxes_count_v1_v2_deltas_without_double_triggers() {
         }
     }
 }
+
+#[test]
+fn wish_machine_counts_ten_blind_gifts_once_across_v1_v2_and_restores_progress() {
+    use crate::extensions::{wish_machine::WishMachine, Extension};
+    let now = std::time::Instant::now();
+    let raw: Value = serde_json::from_str(include_str!(
+        "../../crates/blivedm/tests/fixtures/ten_blind_gift_v2.json"
+    )).unwrap();
+    let mut wishes = WishMachine::default();
+    let mut data = LiveData::default();
+    for gift in parse(&raw) {
+        let v1_duplicate = v1_from_gift(&gift);
+        let duplicate = gift.clone();
+        let (_, received) = data.process_gift(gift).unwrap();
+        assert!(wishes.on_gift(&received, now));
+        assert!(data.process_gift(duplicate).is_none());
+        for duplicate in parse(&v1_duplicate) {
+            assert!(data.process_gift(duplicate).is_none());
+        }
+    }
+    assert_eq!(wishes.snapshot(now)["goals"][1]["current"], 10);
+    let mut restored = WishMachine::default();
+    restored.restore(wishes.checkpoint(now), now).unwrap();
+    assert_eq!(restored.snapshot(now), wishes.snapshot(now));
+}

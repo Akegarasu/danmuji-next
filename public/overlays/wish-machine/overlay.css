@@ -1,0 +1,22 @@
+@font-face {
+  font-family: WishHeavy;
+  src: url('../overtime/timer-heavy.otf') format('opentype');
+  font-display: swap;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; background: transparent; overflow: hidden; }
+#wish-machine {
+  width: 100%;
+  padding: 6px;
+  color: #fff;
+  font-family: WishHeavy, "Microsoft YaHei", sans-serif;
+  font-size: 28px;
+  font-weight: 400;
+  line-height: 1.35;
+  text-shadow: 0 1px 4px #000, 0 0 8px #0008;
+}
+#wish-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+#wish-list .wish-row { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 4px 6px; }
+#wish-list .wish-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+#wish-list .wish-count { display: inline-flex; align-items: baseline; flex-shrink: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
+#wish-list .wish-separator { padding: 0 2px; }

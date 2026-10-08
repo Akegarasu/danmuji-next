@@ -12,4 +12,5 @@ export const extensionRegistry: ExtensionDefinition[] = [
   { id: 'voting', label: '投票', component: defineAsyncComponent(() => import('./VotingTab.vue')) },
   { id: 'overtime', label: '加班机', component: defineAsyncComponent(() => import('./OvertimeTab.vue')) },
   { id: 'song-request', label: '点歌机', component: defineAsyncComponent(() => import('./SongRequestTab.vue')) },
+  { id: 'wish-machine', label: '心愿机', component: defineAsyncComponent(() => import('./WishMachineTab.vue')) },
 ]

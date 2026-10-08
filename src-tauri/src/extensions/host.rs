@@ -1,7 +1,7 @@
 //! 扩展注册与生命周期，不持有直播聚合器或桌面窗口。
 use super::{
-    overtime, song_request, storage::CheckpointStore, video_request, voting, EffectResult,
-    Extension, ExtensionEffect, ExtensionState,
+    overtime, song_request, storage::CheckpointStore, video_request, voting, wish_machine,
+    EffectResult, Extension, ExtensionEffect, ExtensionState,
 };
 use crate::live_events::{ReceivedGift, ReceivedText};
 use serde_json::json;
@@ -45,6 +45,7 @@ impl ExtensionHost {
             Box::new(video_request::VideoRequestManager::default()),
             Box::new(song_request::SongRequestManager::default()),
             Box::new(voting::VotingManager::default()),
+            Box::new(wish_machine::WishMachine::default()),
         ] {
             let store = CheckpointStore::new(directory.join(format!("{}.json", plugin.id())));
             host.register(plugin, store);
