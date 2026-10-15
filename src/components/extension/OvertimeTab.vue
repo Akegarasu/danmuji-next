@@ -115,10 +115,10 @@ function save() {
   value.rules.forEach(rule => { if (rule.action === 'random') rule.value = 0 })
   return execute({ type: 'configure', config: value })
 }
-function addRule(gift?: { id: number; name: string }) {
+function addRule(gift?: { name: string }) {
   if (!config.value || config.value.rules.length >= 100) return
   config.value.rules.push({
-    id: crypto.randomUUID(), enabled: true, gift_id: gift?.id ?? null,
+    id: crypto.randomUUID(), enabled: true, gift_id: null,
     gift_name: gift?.name ?? '', action: 'add', value: 60, per_gift: true, random_ranges: []
   })
   giftSearch.value = ''; dirty.value = true
@@ -128,6 +128,11 @@ function changeGiftId(rule: GiftRule, event: Event) {
   const input = (event.target as HTMLInputElement).value.trim()
   rule.gift_id = input ? Number(input) : null
   dirty.value = true
+}
+function preventNumberScroll(event: WheelEvent) {
+  const input = event.target
+  // 滚动前移开数字输入焦点，保留页面滚动和键盘步进。
+  if (input instanceof HTMLInputElement && input.type === 'number' && input === document.activeElement) input.blur()
 }
 async function restartServer() {
   busy.value = true; error.value = ''; message.value = ''
@@ -152,140 +157,145 @@ onBeforeUnmount(stop)
 </script>
 
 <template>
-  <div class="overtime-panel">
-    <div v-if="error" class="feedback error" role="alert">{{ error }}</div>
-    <div v-if="message" class="feedback success" role="status">{{ message }}</div>
-    <div v-if="server?.persistence_error" class="feedback error">状态保存异常：{{ server.persistence_error }}</div>
-    <template v-if="config && state">
-      <section class="clock-panel">
-        <div class="clock-caption">加班机 <span>{{ statusText }}</span></div>
-        <div class="clock-value">{{ timeText }}</div>
-        <div class="button-row">
-          <button class="ext-btn ext-btn--primary" :disabled="busy || !state.config.enabled"
-            @click="execute({ type: state.running ? 'pause' : 'start' })">{{ state.running ? '暂停' : '开始 / 继续'
-            }}</button>
-          <button class="ext-btn" :disabled="busy" @click="execute({ type: 'reset' })">重置为初始时间</button>
-          <button class="ext-btn ext-btn--danger" :disabled="busy"
-            @click="execute({ type: 'apply', action: 'clear', value: 0 })">清空</button>
-        </div>
-        <div class="manual-row">
-          <ExtSelect v-model="manualAction" :options="fixedActions" class="manual-select" aria-label="手动操作" />
-          <input v-if="manualAction !== 'clear'" v-model.number="manualValue" type="number" min="0" step="any"
-            aria-label="手动操作数值">
-          <button class="ext-btn" :disabled="busy"
-            @click="execute({ type: 'apply', action: manualAction, value: manualAction === 'clear' ? 0 : Number(manualValue) })">执行</button>
-        </div>
-      </section>
-      <section>
-        <SettingsSectionTitle class="section-heading">OBS 浏览器源</SettingsSectionTitle>
-        <div class="feedback error" v-if="server?.error">{{ server.error }}</div>
-        <input class="url-input" :value="server?.url ?? '服务尚未启动'" readonly aria-label="OBS 浏览器源地址"
-          @focus="($event.target as HTMLInputElement).select()">
-        <div class="button-row">
-          <button class="ext-btn ext-btn--primary" :disabled="!server?.url" @click="copyUrl">复制地址</button>
-          <button class="ext-btn" :disabled="!server?.url" @click="preview = !preview">{{ preview ? '收起预览' : '预览皮肤'
-            }}</button>
-          <label class="port-label">端口 <input v-model.number="port" type="number" min="1024" max="65535"
-              aria-label="服务端口"></label>
-          <button class="ext-btn" :disabled="busy" @click="restartServer">应用端口 / 重试</button>
-        </div>
-        <details class="help-details"><summary>OBS 接入说明</summary><p>在 OBS 中添加浏览器源并粘贴地址，建议尺寸 600 × 800。首次添加或清除缓存后，请在弹幕姬运行时成功加载一次；之后先开 OBS 也会在弹幕姬启动后自动恢复。使用时保持弹幕姬运行并连接直播间。</p></details>
-        <iframe v-if="preview && server?.url" class="overlay-preview" :src="server.url" title="加班机 OBS 预览" />
-        <div class="appearance-settings">
+  <div class="overtime-panel" @wheel.capture.passive="preventNumberScroll">
+    <div class="overtime-scroll">
+      <div v-if="error" class="feedback error" role="alert">{{ error }}</div>
+      <div v-if="message" class="feedback success" role="status">{{ message }}</div>
+      <div v-if="server?.persistence_error" class="feedback error">状态保存异常：{{ server.persistence_error }}</div>
+      <template v-if="config && state">
+        <section class="clock-panel">
+          <div class="clock-caption">加班机 <span>{{ statusText }}</span></div>
+          <div class="clock-value">{{ timeText }}</div>
+          <div class="button-row">
+            <button class="ext-btn ext-btn--primary" :disabled="busy || !state.config.enabled"
+              @click="execute({ type: state.running ? 'pause' : 'start' })">{{ state.running ? '暂停' : '开始 / 继续'
+              }}</button>
+            <button class="ext-btn" :disabled="busy" @click="execute({ type: 'reset' })">重置为初始时间</button>
+            <button class="ext-btn ext-btn--danger" :disabled="busy"
+              @click="execute({ type: 'apply', action: 'clear', value: 0 })">清空</button>
+          </div>
+          <div class="manual-row">
+            <ExtSelect v-model="manualAction" :options="fixedActions" class="manual-select" aria-label="手动操作" />
+            <input v-if="manualAction !== 'clear'" v-model.number="manualValue" type="number" min="0" step="any"
+              aria-label="手动操作数值">
+            <button class="ext-btn" :disabled="busy"
+              @click="execute({ type: 'apply', action: manualAction, value: manualAction === 'clear' ? 0 : Number(manualValue) })">执行</button>
+          </div>
+        </section>
+        <section @input="dirty = true" @change="dirty = true">
+          <SettingsSectionTitle class="section-heading">基本设置 <span v-if="dirty" class="unsaved">未保存</span></SettingsSectionTitle>
+          <div class="settings-row">
+            <SettingsToggle v-model="config.enabled" class="toggle-setting" label="启用加班机" @change="dirty = true" />
+            <label class="field-setting">初始时间（分钟）<input v-model.number="initialMinutes" type="number" min="0" max="5256000" step="any"></label>
+          </div>
+          <div class="settings-row">
+            <SettingsToggle v-model="config.show_rules" class="toggle-setting" label="显示礼物规则" @change="dirty = true" />
+            <SettingsToggle v-model="config.show_notice" class="toggle-setting" label="显示投喂提示" @change="dirty = true" />
+          </div>
+          <div class="settings-row">
+            <div class="field-setting"><span>盲盒处理方式</span>
+              <ExtSelect :model-value="config.blind_gift_mode" :options="blindGiftModes" aria-label="盲盒处理方式"
+                @update:model-value="changeBlindGiftMode" />
+            </div>
+          </div>
+          <p v-if="config.blind_gift_mode === 'original'">按“心动盲盒”等盲盒本身匹配，不触发爆出礼物规则。</p>
+          <p v-else>按“棉花糖”等爆出礼物匹配，不触发盲盒本身的规则。</p>
+        </section>
+        <section>
+          <SettingsSectionTitle class="section-heading">礼物触发规则 <span>{{ config.rules.length }} / 100</span></SettingsSectionTitle>
+          <div class="gift-search">
+            <input v-model="giftSearch" placeholder="搜索礼物名称或 ID…" aria-label="搜索礼物">
+            <button class="ext-btn" :disabled="config.rules.length >= 100" @click="addRule()">+ 自定义礼物</button>
+          </div>
+          <div class="gift-results" v-if="giftSearch">
+            <button v-for="gift in gifts" :key="gift.id" :disabled="config.rules.length >= 100" @click="addRule(gift)">{{
+              gift.name }} <span class="gift-id">#{{ gift.id }}</span></button>
+            <p v-if="!gifts.length">未找到礼物，可添加自定义规则；大航海可填写“舰长 / 提督 / 总督”。</p>
+          </div>
+          <details class="help-details">
+            <summary>规则与计时说明</summary>
+            <p>搜索选择礼物默认只填写名称。填写 ID 时只匹配 ID；留空则匹配完整名称。同一礼物的多条规则按列表顺序执行。</p>
+            <p>按个执行时使用本次通知的数量，例如 3 个 ×2 会执行 ×8；取消则每条通知执行一次。十连盲盒可能分成多条通知。设置时间、速度和清空操作始终执行一次。</p>
+            <p>随机规则每条通知抽取一次操作和数值，按个执行时复用结果。加减为整数秒，乘除保留两位小数，范围包含两端。</p>
+            <p>暂停时仍接收礼物，禁用后忽略礼物。初始时间在重置后应用，重置会暂停并恢复 1 倍速；重启后保留剩余时间并暂停。</p>
+          </details>
+          <div v-if="!config.rules.length" class="empty-rules">还没有规则，搜索或添加礼物开始配置。</div>
+          <article v-for="(rule, index) in config.rules" :key="rule.id" class="rule-card" @input="dirty = true"
+            @change="dirty = true">
+            <div class="rule-heading">
+              <label><input v-model="rule.enabled" type="checkbox">规则 {{ index + 1 }}</label>
+              <button class="ext-btn ext-btn--danger" @click="removeRule(index)">删除</button>
+            </div>
+            <div class="rule-grid">
+              <label>礼物名称<input v-model="rule.gift_name" maxlength="80" placeholder="如：小心心、舰长"></label>
+              <label>礼物 ID（选填）<input :value="rule.gift_id ?? ''" type="number" min="1" step="1" placeholder="留空按名称匹配"
+                  @input="changeGiftId(rule, $event)"></label>
+              <div class="field-setting"><span>触发操作</span>
+                <ExtSelect :model-value="rule.action" :options="actions" :aria-label="`规则 ${index + 1} 触发操作`"
+                  @update:model-value="changeRuleAction(rule, $event)" />
+              </div>
+              <label v-if="!['clear', 'random'].includes(rule.action)">数值<input v-model.number="rule.value" type="number"
+                  min="0" step="any"></label>
+            </div>
+            <div v-if="rule.action === 'random'" class="random-settings">
+              <div class="random-choices">
+                <label v-for="action in randomActions" :key="action.value">
+                  <input type="checkbox" :checked="rule.random_ranges.some(range => range.action === action.value)"
+                    @change="toggleRandomAction(rule, action.value, ($event.target as HTMLInputElement).checked)">{{
+                  action.label }}
+                </label>
+              </div>
+              <div v-for="range in rule.random_ranges" :key="range.action" class="random-range">
+                <span>{{randomActions.find(action => action.value === range.action)?.label}}（{{randomActions.find(action => action.value === range.action)?.unit}}）</span>
+                <label>最小<input v-model.number="range.min" type="number"
+                    :min="['add', 'subtract'].includes(range.action) ? 0 : 0.01"
+                    :max="['add', 'subtract'].includes(range.action) ? 315360000 : 100"
+                    :step="['add', 'subtract'].includes(range.action) ? 1 : 0.01"></label>
+                <label>最大<input v-model.number="range.max" type="number"
+                    :min="['add', 'subtract'].includes(range.action) ? 0 : 0.01"
+                    :max="['add', 'subtract'].includes(range.action) ? 315360000 : 100"
+                    :step="['add', 'subtract'].includes(range.action) ? 1 : 0.01"></label>
+              </div>
+            </div>
+            <label v-if="!['set_time', 'set_rate', 'clear'].includes(rule.action)" class="count-mode"><input v-model="rule.per_gift" type="checkbox">按礼物个数执行</label>
+          </article>
+        </section>
+        <section v-if="state.notices.length">
+          <SettingsSectionTitle class="section-heading">最近触发</SettingsSectionTitle>
+          <div class="history-row" v-for="notice in [...state.notices].reverse().slice(0, 5)" :key="notice.id">
+            <span>{{ notice.sender_name }} · {{ notice.gift_name }} ×{{ notice.num }}<span class="history-result"
+                v-for="(result, index) in notice.results.filter(result => result.random)" :key="index">{{
+                  resultLabel(result) }}</span></span>
+            <strong>{{ notice.delta_ms >= 0 ? '+' : '-' }}{{ Math.round(Math.abs(notice.delta_ms) / 1000) }} 秒</strong>
+          </div>
+        </section>
+        <section>
+          <SettingsSectionTitle class="section-heading">外观设置</SettingsSectionTitle>
           <OverlayStyleSettings v-model="config.overlay_style" preset="overtime" :disabled="busy" @update:model-value="dirty = true" />
-        </div>
-      </section>
-      <section @input="dirty = true" @change="dirty = true">
-        <SettingsSectionTitle class="section-heading">基本设置 <span v-if="dirty" class="unsaved">未保存</span></SettingsSectionTitle>
-        <div class="settings-row">
-          <SettingsToggle v-model="config.enabled" class="toggle-setting" label="启用加班机" @change="dirty = true" />
-          <label class="field-setting">初始时间（分钟）<input v-model.number="initialMinutes" type="number" min="0" max="5256000" step="any"></label>
-        </div>
-        <div class="settings-row">
-          <SettingsToggle v-model="config.show_rules" class="toggle-setting" label="显示礼物规则" @change="dirty = true" />
-          <SettingsToggle v-model="config.show_notice" class="toggle-setting" label="显示投喂提示" @change="dirty = true" />
-        </div>
-        <div class="settings-row">
-          <div class="field-setting"><span>盲盒处理方式</span>
-            <ExtSelect :model-value="config.blind_gift_mode" :options="blindGiftModes" aria-label="盲盒处理方式"
-              @update:model-value="changeBlindGiftMode" />
+        </section>
+        <section>
+          <SettingsSectionTitle class="section-heading">OBS 浏览器源</SettingsSectionTitle>
+          <div class="feedback error" v-if="server?.error">{{ server.error }}</div>
+          <input class="url-input" :value="server?.url ?? '服务尚未启动'" readonly aria-label="OBS 浏览器源地址"
+            @focus="($event.target as HTMLInputElement).select()">
+          <div class="button-row">
+            <button class="ext-btn ext-btn--primary" :disabled="!server?.url" @click="copyUrl">复制地址</button>
+            <button class="ext-btn" :disabled="!server?.url" @click="preview = !preview">{{ preview ? '收起预览' : '预览皮肤'
+              }}</button>
+            <label class="port-label">端口 <input v-model.number="port" type="number" min="1024" max="65535"
+                aria-label="服务端口"></label>
+            <button class="ext-btn" :disabled="busy" @click="restartServer">应用端口 / 重试</button>
           </div>
-        </div>
-        <p v-if="config.blind_gift_mode === 'original'">按“心动盲盒”等盲盒本身匹配，不触发爆出礼物规则。</p>
-        <p v-else>按“棉花糖”等爆出礼物匹配，不触发盲盒本身的规则。</p>
-      </section>
-      <section>
-        <SettingsSectionTitle class="section-heading">礼物触发规则 <span>{{ config.rules.length }} / 100</span></SettingsSectionTitle>
-        <div class="gift-search">
-          <input v-model="giftSearch" placeholder="搜索礼物名称或 ID…" aria-label="搜索礼物">
-          <button class="ext-btn" :disabled="config.rules.length >= 100" @click="addRule()">+ 自定义礼物</button>
-        </div>
-        <div class="gift-results" v-if="giftSearch">
-          <button v-for="gift in gifts" :key="gift.id" :disabled="config.rules.length >= 100" @click="addRule(gift)">{{
-            gift.name }} <span class="gift-id">#{{ gift.id }}</span></button>
-          <p v-if="!gifts.length">未找到礼物，可添加自定义规则；大航海可填写“舰长 / 提督 / 总督”。</p>
-        </div>
-        <details class="help-details">
-          <summary>规则与计时说明</summary>
-          <p>填写 ID 时只匹配 ID；留空则匹配完整名称。同一礼物的多条规则按列表顺序执行。</p>
-          <p>按个执行时使用本次通知的数量，例如 3 个 ×2 会执行 ×8；取消则每条通知执行一次。十连盲盒可能分成多条通知。设置时间、速度和清空操作始终执行一次。</p>
-          <p>随机规则每条通知抽取一次操作和数值，按个执行时复用结果。加减为整数秒，乘除保留两位小数，范围包含两端。</p>
-          <p>暂停时仍接收礼物，禁用后忽略礼物。初始时间在重置后应用，重置会暂停并恢复 1 倍速；重启后保留剩余时间并暂停。</p>
-        </details>
-        <div v-if="!config.rules.length" class="empty-rules">还没有规则，搜索或添加礼物开始配置。</div>
-        <article v-for="(rule, index) in config.rules" :key="rule.id" class="rule-card" @input="dirty = true"
-          @change="dirty = true">
-          <div class="rule-heading">
-            <label><input v-model="rule.enabled" type="checkbox">规则 {{ index + 1 }}</label>
-            <button class="ext-btn ext-btn--danger" @click="removeRule(index)">删除</button>
-          </div>
-          <div class="rule-grid">
-            <label>礼物名称<input v-model="rule.gift_name" maxlength="80" placeholder="如：小心心、舰长"></label>
-            <label>礼物 ID（选填）<input :value="rule.gift_id ?? ''" type="number" min="1" step="1" placeholder="留空按名称匹配"
-                @input="changeGiftId(rule, $event)"></label>
-            <div class="field-setting"><span>触发操作</span>
-              <ExtSelect :model-value="rule.action" :options="actions" :aria-label="`规则 ${index + 1} 触发操作`"
-                @update:model-value="changeRuleAction(rule, $event)" />
-            </div>
-            <label v-if="!['clear', 'random'].includes(rule.action)">数值<input v-model.number="rule.value" type="number"
-                min="0" step="any"></label>
-          </div>
-          <div v-if="rule.action === 'random'" class="random-settings">
-            <div class="random-choices">
-              <label v-for="action in randomActions" :key="action.value">
-                <input type="checkbox" :checked="rule.random_ranges.some(range => range.action === action.value)"
-                  @change="toggleRandomAction(rule, action.value, ($event.target as HTMLInputElement).checked)">{{
-                action.label }}
-              </label>
-            </div>
-            <div v-for="range in rule.random_ranges" :key="range.action" class="random-range">
-              <span>{{randomActions.find(action => action.value === range.action)?.label}}（{{randomActions.find(action => action.value === range.action)?.unit}}）</span>
-              <label>最小<input v-model.number="range.min" type="number"
-                  :min="['add', 'subtract'].includes(range.action) ? 0 : 0.01"
-                  :max="['add', 'subtract'].includes(range.action) ? 315360000 : 100"
-                  :step="['add', 'subtract'].includes(range.action) ? 1 : 0.01"></label>
-              <label>最大<input v-model.number="range.max" type="number"
-                  :min="['add', 'subtract'].includes(range.action) ? 0 : 0.01"
-                  :max="['add', 'subtract'].includes(range.action) ? 315360000 : 100"
-                  :step="['add', 'subtract'].includes(range.action) ? 1 : 0.01"></label>
-            </div>
-          </div>
-          <label v-if="!['set_time', 'set_rate', 'clear'].includes(rule.action)" class="count-mode"><input v-model="rule.per_gift" type="checkbox">按礼物个数执行</label>
-        </article>
-      </section>
-      <div class="save-bar"><button class="ext-btn ext-btn--primary" :disabled="busy || !dirty" @click="save">{{ busy ?
-        '处理中…' : '保存设置与规则' }}</button></div>
-      <section v-if="state.notices.length">
-        <SettingsSectionTitle class="section-heading">最近触发</SettingsSectionTitle>
-        <div class="history-row" v-for="notice in [...state.notices].reverse().slice(0, 5)" :key="notice.id">
-          <span>{{ notice.sender_name }} · {{ notice.gift_name }} ×{{ notice.num }}<span class="history-result"
-              v-for="(result, index) in notice.results.filter(result => result.random)" :key="index">{{
-                resultLabel(result) }}</span></span>
-          <strong>{{ notice.delta_ms >= 0 ? '+' : '-' }}{{ Math.round(Math.abs(notice.delta_ms) / 1000) }} 秒</strong>
-        </div>
-      </section>
-    </template>
-    <p v-else>正在加载加班机…</p>
+          <details class="help-details"><summary>OBS 接入说明</summary><p>在 OBS 中添加浏览器源并粘贴地址，建议尺寸 600 × 800。首次添加或清除缓存后，请在弹幕姬运行时成功加载一次；之后先开 OBS 也会在弹幕姬启动后自动恢复。使用时保持弹幕姬运行并连接直播间。</p></details>
+          <iframe v-if="preview && server?.url" class="overlay-preview" :src="server.url" title="加班机 OBS 预览" />
+        </section>
+      </template>
+      <p v-else>正在加载加班机…</p>
+    </div>
+    <footer v-if="config && state" class="save-bar">
+      <span>{{ dirty ? '有未保存的修改' : '设置已保存' }}</span>
+      <button class="ext-btn ext-btn--primary" :disabled="busy || !dirty" @click="save">{{ busy ? '处理中…' : '保存设置与规则' }}</button>
+    </footer>
   </div>
 </template>
 
@@ -294,18 +304,35 @@ onBeforeUnmount(stop)
 @use '@/styles/settings-controls' as controls;
 
 .overtime-panel {
+  display: flex;
+  flex-direction: column;
   height: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
-  container-type: inline-size;
-  padding: 16px;
+  min-height: 0;
+  overflow: hidden;
   color: var(--text-primary);
   font-size: var(--font-size-sm);
   line-height: 1.5
 }
 
+.overtime-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  container-type: inline-size;
+  padding: 16px
+}
+
 section {
-  margin-bottom: 24px
+  margin-bottom: 18px;
+  padding: 18px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-secondary)
+}
+
+section:last-child {
+  margin-bottom: 0
 }
 
 .section-heading {
@@ -362,11 +389,7 @@ button:disabled {
 }
 
 .clock-panel {
-  text-align: center;
-  padding: 16px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius);
-  background: var(--bg-secondary)
+  text-align: center
 }
 
 .clock-caption {
@@ -519,7 +542,7 @@ button:disabled {
   margin-top: 12px;
   padding: 16px;
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--bg-primary)
 }
 
@@ -532,7 +555,7 @@ button:disabled {
 
 .rule-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px
 }
 
@@ -540,6 +563,7 @@ button:disabled {
   display: flex;
   flex-direction: column;
   align-items: stretch;
+  min-width: 0;
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
   gap: 6px
@@ -552,16 +576,21 @@ button:disabled {
 }
 
 .save-bar {
-  position: sticky;
-  bottom: -16px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
   gap: 10px;
-  padding: 12px;
-  margin: 0 -16px 16px;
+  padding: 12px 16px;
   background: var(--bg-secondary);
   border-top: 1px solid var(--border-color);
   z-index: 1
+}
+
+.save-bar span {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs)
 }
 
 .overlay-preview {
@@ -572,8 +601,6 @@ button:disabled {
   border: 0;
   background: repeating-conic-gradient(#292a2e 0% 25%, #202126 0% 50%) 50%/20px 20px
 }
-
-.appearance-settings { margin-top: 20px; }
 
 .history-row {
   display: flex;
@@ -639,9 +666,12 @@ button:disabled {
 }
 
 @container (max-width: 460px) {
-  .settings-row,
-  .rule-grid {
+  .settings-row {
     grid-template-columns: 1fr
+  }
+
+  .rule-grid {
+    gap: 12px
   }
 
   .clock-value {
