@@ -402,6 +402,42 @@ fn wish_machine_host_persists_gifts_and_css_without_resetting_goals() {
 }
 
 #[test]
+fn wish_machine_new_session_resets_all_counts_and_persists_without_changing_settings() {
+    let dir = TestDirectory::new();
+    let host = dir.host();
+    host.request("wish-machine", json!({"type":"configure","config":{
+        "enabled":false,"theme":"test-a","theme_a_font_family":"楷体"
+    }})).unwrap();
+    let goals = host.state("wish-machine").unwrap().state["goals"].clone();
+    for (index, goal) in goals.as_array().unwrap().iter().enumerate() {
+        let mut update = goal.clone();
+        update["type"] = json!("update_goal");
+        update["current"] = json!(index + 3);
+        update["target"] = json!(index + 10);
+        host.request("wish-machine", update).unwrap();
+    }
+    let mut expected = host.state("wish-machine").unwrap().state;
+    for goal in expected["goals"].as_array_mut().unwrap() {
+        goal["current"] = json!(0);
+    }
+    let mut overlay = host.subscribe("wish-machine").unwrap();
+    host.request("wish-machine", json!({"type":"new_session"})).unwrap();
+    assert_eq!(host.state("wish-machine").unwrap().state, expected);
+    assert!(overlay.has_changed().unwrap());
+    assert!(overlay.borrow_and_update()["goals"].as_array().unwrap()
+        .iter().all(|goal| goal["current"] == 0));
+    let restored = dir.host();
+    assert_eq!(restored.state("wish-machine").unwrap().state, expected);
+    expected["config"]["enabled"] = json!(true);
+    restored.request("wish-machine", json!({"type":"configure","config":expected["config"]})).unwrap();
+    restored.dispatch_gift(&crate::live_events::ReceivedGift {
+        event_id: None, sender_uid: 1, gift_id: 10003, gift_name: "舰长".into(),
+        sender_name: "测试用户".into(), num: 2, blind_gift: None,
+    });
+    assert_eq!(restored.state("wish-machine").unwrap().state["goals"][0]["current"], 2);
+}
+
+#[test]
 fn song_order_history_and_replay_filter_survive_host_restart() {
     let dir = TestDirectory::new();
     let host = dir.host();

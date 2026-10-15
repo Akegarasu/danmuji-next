@@ -133,6 +133,7 @@ enum WishRequest {
     Configure {
         config: WishConfig,
     },
+    NewSession,
     AddGoal {
         gift_id: Option<u64>,
         gift_name: String,
@@ -188,6 +189,11 @@ impl Extension for WishMachine {
             WishRequest::Configure { config } => {
                 config.validate()?;
                 self.config = config;
+            }
+            WishRequest::NewSession => {
+                for goal in &mut self.goals {
+                    goal.current = 0;
+                }
             }
             WishRequest::AddGoal {
                 gift_id,

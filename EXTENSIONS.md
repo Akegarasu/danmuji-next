@@ -68,7 +68,7 @@ blivedm 的弹幕 / SC / 礼物 / 大航海
 1. 在 `src-tauri/src/extensions/` 实现 `Extension` 的固定 ID、`snapshot`、`checkpoint`、`restore`、`request`，在 `ExtensionHost::new` 注册。存储路径自动由 ID 生成，操作应先校验再修改。
 2. 按需实现 `on_text`、`on_gift`、`tick`、`query`。异步工作通过 `take_effects` 与 `complete_effect` 交给任务层，不依赖直播连接或 UI。
 3. 在 `src/types/extensions.ts` 声明状态/请求类型，在 `src/components/extension/registry.ts` 注册设置面板，通过 `createExtensionClient` 读取状态与执行操作，无需修改直播订阅枚举或添加专用 Tauri 命令。
-4. 如需 OBS 展示，显式开启 `browser_visible`，提供独立 HTML / CSS / JS 并在 `extensions/server.rs` 静态资源表注册。默认扩展不可经 HTTP 读取；目前仅加班机对 OBS 开放。
+4. 如需 OBS 展示，显式开启 `browser_visible`，提供独立 HTML / CSS / JS，在 `extensions/overlay_assets.rs` 静态资源表注册，并接入 `shared/connection.js`。默认扩展不可经 HTTP 读取；目前加班机、点歌机和心愿机对 OBS 开放。
 
 目前为编译期注册的内置扩展，不执行外部下载的任意插件代码。新增事件继续使用最小化标准类型，扩展领域模块不构造桌面 `DataUpdate`。
 
@@ -80,12 +80,25 @@ blivedm 的弹幕 / SC / 礼物 / 大航海
 | --- | --- |
 | `GET /api/extensions` | 协议版本 1 与允许浏览器读取的扩展 ID |
 | `GET /api/extensions/{id}/state` | 完整状态 JSON |
-| `GET /api/extensions/{id}/events` | SSE，事件名 `snapshot` |
+| `GET /api/extensions/{id}/events` | SSE，事件名 `snapshot`，空闲时每 10 秒发送 `heartbeat` |
 | `GET /overlays/overtime/` | 加班机 OBS 页面 |
+| `GET /overlays/song-request/` | 点歌机 OBS 页面 |
+| `GET /overlays/wish-machine/` | 心愿机 OBS 页面 |
+| `GET /overlays/sw.js` | 根据全部静态资源内容生成版本的 Service Worker |
 
 SSE 首次连接和重连均发送完整状态。`watch` 合并慢客户端积压，避免无限队列。加班机状态包含 `config`、`remaining_ms`、`running`、`rate` 和最近 20 条命中规则的礼物 `notices`。未命中礼物不会输出，礼物提示序号仅在本次应用运行期间有效。客户端初始连接、重连恢复状态及最新一条投喂提示，不逐条重放历史；连续连接期间用序号识别新提示。提示按原页面的 10 秒循环动画展示，队列每隔至少 11.5 秒切换；队列清空后最后一条继续循环。显示循环不修改后端时间，也不重新抽签。
 
 HTTP 不提供控制写接口；配置和开始、暂停、清空等操作只能通过 Tauri IPC。Host 与 Origin 校验阻止外部页面读取本地接口，不开放 CORS。输出没有 Cookie、UID、头像或原始 Bilibili 消息。服务换端口或退出时通知 SSE 连接结束，再关闭监听。
+
+### 离线启动、重连与资源升级
+
+三个页面通过 `shared/connection.js` 统一订阅 SSE。错误（包括进入 CLOSED）会关闭原连接，按 1、2、4、5 秒退避，之后持续每 5 秒重试；收到完整快照后重置退避。快照或心跳校准 25 秒看门狗，握手卡住、无错误回调的失联也会重建连接。旧连接的迟到回调不再生效，销毁页面时释放连接与定时器。加班机断线后停止推算；点歌和心愿在当前页面内保留最后有效显示，恢复后使用完整快照替换，不重放操作。
+
+Service Worker 仅控制 `/overlays/`，安装时预取资源表中的全部 HTML、JS、CSS 与字体，逐个验证响应成功且 `X-Danmuji-Overlay-Version` 与安装版本一致。全部写入 Cache Storage 后才 `skipWaiting` 并接管页面；下载失败或服务升级途中混入其他版本时，不替换已有缓存。资源表、MIME、资源内容和 Worker 源码共同参与版本计算，无需手动递增版本。激活时只删除本功能的旧版本缓存。
+
+已安装的资源优先从完整版本缓存读取，支持服务离线时新建浏览器源页面以及重启 OBS。API、SSE 和未知资源均不拦截、不落缓存；HTTP 动态响应使用 `no-store`，静态资源与 Worker 使用 `no-cache`，Worker 安装及更新请求绕过 HTTP 缓存。页面每 30 秒及连接恢复时检查 Worker 更新，新版安装成功并替换控制器后自动刷新一次；首次接管和相同版本重连均不刷新。OBS 自定义 CSS 仍由浏览器源设置应用。
+
+首次启用此功能必须在弹幕姬运行时成功加载一次。清除站点缓存、更换端口（不同来源）或不支持 Service Worker 的浏览器无法依赖离线缓存；从未加载过的页面没有可执行的恢复代码。各来源、浏览器配置的缓存互相独立，桌面预览的缓存不能代替 OBS 的缓存。已有旧版 OBS 页面需要加载一次新版以安装此功能。
 
 ## 加班机请求示例
 
@@ -134,9 +147,11 @@ HTTP 不提供控制写接口；配置和开始、暂停、清空等操作只能
 ```sh
 pnpm build
 cargo test --manifest-path src-tauri/Cargo.toml
-node --test scripts/test_extension_client.mjs scripts/test_overtime_overlay.mjs
+node --test scripts/test_extension_client.mjs scripts/test_*overlay*.mjs
 ```
 
 Rust 测试覆盖单调计时、暂停、倍率、边界值、数量及规则过滤、重启恢复、连击去重到计时器的管线、HTTP 静态资源、SSE 重连和本机访问限制。随机规则测试覆盖边界、四种运算、数量、旧配置与具体抽签结果。Node 测试验证 OBS 入口的断线显示、快照校准、循环提示和队列切换、随机范围与结果展示、规则渲染和资源清理，不需要浏览器自动化。
+
+`test_overlay_connection.mjs` 与 `test_overlay_cache.mjs` 额外覆盖离线启动重试、心跳超时、旧连接回调隔离、完整预缓存、下载失败保留旧版和实时接口不落缓存。可选运行 `node scripts/check_overlay_browser.mjs` 做 Chromium 持久配置集成检查，需要 Playwright；可通过 `PLAYWRIGHT_MODULE_PATH` 指定其模块入口、`BROWSER_EXECUTABLE_PATH` 指定 Chrome / Edge 路径。脚本使用正式网页资源和本地 HTTP 替身，验证退出浏览器后离线重开、服务稍后启动、升级下载失败及周期检查后的自动刷新，不启动 Tauri 或访问用户配置。OBS 自身的缓存设置与 CEF 版本仍需实机验证。
 
 扩展管线回归额外覆盖直接 JSON 检查点、待抓取任务恢复、删除后的过期回包、SC 金额与时间单位、并行投票与 UID 去重、断开后的到期检查、状态版本与合并、损坏文件保护，以及点播/投票不暴露给 HTTP。客户端测试覆盖查询/推送竞态、注册监听时关闭页面、重新连接、只读查询与保存失败后的状态刷新。

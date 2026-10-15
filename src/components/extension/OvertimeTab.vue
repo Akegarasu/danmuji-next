@@ -189,7 +189,7 @@ onBeforeUnmount(stop)
               aria-label="服务端口"></label>
           <button class="ext-btn" :disabled="busy" @click="restartServer">应用端口 / 重试</button>
         </div>
-        <details class="help-details"><summary>OBS 接入说明</summary><p>在 OBS 中添加浏览器源并粘贴地址，建议尺寸 600 × 800。使用时保持弹幕姬运行并连接直播间。</p></details>
+        <details class="help-details"><summary>OBS 接入说明</summary><p>在 OBS 中添加浏览器源并粘贴地址，建议尺寸 600 × 800。首次添加或清除缓存后，请在弹幕姬运行时成功加载一次；之后先开 OBS 也会在弹幕姬启动后自动恢复。使用时保持弹幕姬运行并连接直播间。</p></details>
         <iframe v-if="preview && server?.url" class="overlay-preview" :src="server.url" title="加班机 OBS 预览" />
         <div class="appearance-settings">
           <OverlayStyleSettings v-model="config.overlay_style" preset="overtime" :disabled="busy" @update:model-value="dirty = true" />

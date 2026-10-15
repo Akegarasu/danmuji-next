@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { runInNewContext } from 'node:vm'
+import { rendererConnection } from './helpers/overlay-renderer.mjs'
 
 const code = readFileSync(new URL('../public/overlays/wish-machine/overlay.js', import.meta.url), 'utf8')
 class Element {
@@ -24,7 +25,7 @@ function fixture() {
   }
   runInNewContext(code, {
     document: { getElementById(id) { assert.equal(id, 'wish-list'); return list }, createElement: () => new Element() },
-    EventSource, window: { addEventListener: (name, handler) => events.set(name, handler) },
+    EventSource, window: { OverlayConnection: rendererConnection(EventSource), addEventListener: (name, handler) => events.set(name, handler) },
   })
   return { list, events, stream, send: goals => stream.listeners.get('snapshot')({ data: JSON.stringify({ goals }) }) }
 }

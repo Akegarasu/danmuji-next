@@ -21,12 +21,6 @@
     })
     songs.replaceChildren(...rows)
   }
-  const source = new EventSource('/api/extensions/song-request/events')
-  source.addEventListener('snapshot', event => {
-    try { render(JSON.parse(event.data)) }
-    catch { /* 保留上一份有效队列，避免向直播画面显示诊断信息。 */ }
-  })
-  source.onerror = () => { /* 静默自动重连，覆盖层只展示歌曲。 */ }
-  // EventSource 自动重连，服务端在每次连接时发送完整队列。
-  window.addEventListener('pagehide', () => source.close())
+  const disconnect = window.OverlayConnection.subscribe('song-request', render)
+  window.addEventListener('pagehide', disconnect)
 })()

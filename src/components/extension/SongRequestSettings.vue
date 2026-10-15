@@ -182,7 +182,7 @@ onBeforeUnmount(() => { active = false; clearInterval(interval); client.disconne
       <p v-else class="loading">正在加载设置…</p>
       <section class="obs-section">
         <h2>OBS 浏览器源</h2>
-        <p>添加 OBS“浏览器”源并粘贴地址，建议宽度 600、高度 600。请保持弹幕姬运行。</p>
+        <p>添加 OBS“浏览器”源并粘贴地址，建议宽度 600、高度 600。首次添加或清除缓存后，请在弹幕姬运行时成功加载一次；之后先开 OBS 也会自动等待弹幕姬启动。</p>
         <div v-if="server?.error || server?.persistence_error" class="extension-error" role="alert">{{ server.error || server.persistence_error }}</div>
         <div class="url-row"><input :value="overlayUrl" readonly aria-label="点歌机 OBS 地址" placeholder="本地服务尚未启动" @focus="($event.target as HTMLInputElement).select()"><button type="button" class="ext-btn" :disabled="!overlayUrl" @click="copyUrl">复制地址</button></div>
         <div class="server-row"><label>端口<input v-model.number="port" :disabled="busy" type="number" min="1024" max="65535" step="1" @input="portDirty = true"></label><button type="button" class="ext-btn" :disabled="busy" @click="startServer">启动 / 应用端口</button><button type="button" class="ext-btn" :disabled="!overlayUrl" @click="preview = !preview">{{ preview ? '收起预览' : '预览' }}</button></div>

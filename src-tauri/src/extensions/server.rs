@@ -1,11 +1,14 @@
 //! 本地只读 OBS 服务。控制入口仅存在于 Tauri IPC 中。
-use super::ExtensionHost;
+use super::{
+    overlay_assets::{asset, worker},
+    ExtensionHost,
+};
 use axum::{
     extract::{Path, Request, State},
     http::{header, StatusCode},
     middleware::{self, Next},
     response::{
-        sse::{Event, KeepAlive, Sse},
+        sse::{Event, Sse},
         IntoResponse, Response,
     },
     routing::get,
@@ -156,6 +159,7 @@ impl OverlayServer {
 
 fn router(state: WebState) -> Router {
     Router::new()
+        .route("/overlays/sw.js", get(worker))
         .route("/api/extensions", get(catalog))
         .route("/api/extensions/{id}/state", get(snapshot))
         .route("/api/extensions/{id}/events", get(events))
@@ -190,13 +194,21 @@ async fn local_only(State(state): State<WebState>, request: Request, next: Next)
     {
         return StatusCode::FORBIDDEN.into_response();
     }
+    let dynamic = request.uri().path().starts_with("/api/");
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
-    headers.insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
+    if dynamic {
+        // Axum SSE 自带 no-cache，这里也要明确禁止持久化实时状态。
+        headers.insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
+    } else {
+        headers
+            .entry(header::CACHE_CONTROL)
+            .or_insert("no-store".parse().unwrap());
+    }
     headers.insert(header::X_CONTENT_TYPE_OPTIONS, "nosniff".parse().unwrap());
     // 允许所有扩展通过 OBS 自定义 CSS 覆盖内联样式。
     headers.insert(header::CONTENT_SECURITY_POLICY,
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; object-src 'none'".parse().unwrap());
+        "default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; object-src 'none'".parse().unwrap());
     response
 }
 
@@ -227,6 +239,11 @@ async fn events(State(state): State<WebState>, Path(id): Path<String>) -> Respon
                 tokio::select! {
                     changed = receiver.changed() => { if changed.is_err() { return None; } }
                     _ = shutdown.changed() => return None,
+                    _ = tokio::time::sleep(Duration::from_secs(10)) => {
+                        // 显式事件可被页面观察，静止的队列也能识别连接假死。
+                        let event = Event::default().event("heartbeat").data("");
+                        return Some((Ok::<_, Infallible>(event), (receiver, shutdown, false)));
+                    }
                 }
             }
             let value = receiver.borrow_and_update().clone();
@@ -234,64 +251,7 @@ async fn events(State(state): State<WebState>, Path(id): Path<String>) -> Respon
             Some((Ok::<_, Infallible>(event), (receiver, shutdown, false)))
         },
     );
-    Sse::new(stream)
-        .keep_alive(KeepAlive::default())
-        .into_response()
-}
-
-fn asset(id: &str, file: &str) -> Response {
-    let (mime, bytes): (&str, &'static [u8]) = match (id, file) {
-        ("shared", "style.js") => (
-            "text/javascript; charset=utf-8",
-            include_bytes!("../../../public/overlays/shared/style.js"),
-        ),
-        ("overtime", "index.html") => (
-            "text/html; charset=utf-8",
-            include_bytes!("../../../public/overlays/overtime/index.html"),
-        ),
-        ("overtime", "overlay.js") => (
-            "text/javascript; charset=utf-8",
-            include_bytes!("../../../public/overlays/overtime/overlay.js"),
-        ),
-        ("overtime", "overlay.css") => (
-            "text/css; charset=utf-8",
-            include_bytes!("../../../public/overlays/overtime/overlay.css"),
-        ),
-        ("overtime", "timer-heavy.otf") => (
-            "font/otf",
-            include_bytes!("../../../public/overlays/overtime/timer-heavy.otf"),
-        ),
-        ("song-request", "index.html") => (
-            "text/html; charset=utf-8",
-            include_bytes!("../../../public/overlays/song-request/index.html"),
-        ),
-        ("song-request", "overlay.js") => (
-            "text/javascript; charset=utf-8",
-            include_bytes!("../../../public/overlays/song-request/overlay.js"),
-        ),
-        ("song-request", "overlay.css") => (
-            "text/css; charset=utf-8",
-            include_bytes!("../../../public/overlays/song-request/overlay.css"),
-        ),
-        ("wish-machine", "index.html") => (
-            "text/html; charset=utf-8",
-            include_bytes!("../../../public/overlays/wish-machine/index.html"),
-        ),
-        ("wish-machine", "overlay.js") => (
-            "text/javascript; charset=utf-8",
-            include_bytes!("../../../public/overlays/wish-machine/overlay.js"),
-        ),
-        ("wish-machine", "overlay.css") => (
-            "text/css; charset=utf-8",
-            include_bytes!("../../../public/overlays/wish-machine/overlay.css"),
-        ),
-        ("wish-machine", "theme-test-a.css") => (
-            "text/css; charset=utf-8",
-            include_bytes!("../../../public/overlays/wish-machine/theme-test-a.css"),
-        ),
-        _ => return StatusCode::NOT_FOUND.into_response(),
-    };
-    ([(header::CONTENT_TYPE, mime)], bytes).into_response()
+    Sse::new(stream).into_response()
 }
 
 #[cfg(test)]
@@ -392,11 +352,67 @@ mod tests {
             .await
             .unwrap();
         assert!(page.status().is_success());
+        assert_eq!(page.headers()[header::CACHE_CONTROL], "no-cache");
         assert!(page.headers()[header::CONTENT_SECURITY_POLICY]
             .to_str()
             .unwrap()
             .contains("style-src 'self' 'unsafe-inline'"));
         assert!(page.text().await.unwrap().contains("overlay.js"));
+        // 预缓存清单必须与实际可读取资源一致，所有响应属于同一个内容版本。
+        let worker = client
+            .get(format!("{base}/overlays/sw.js"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(worker.headers()[header::CACHE_CONTROL], "no-cache");
+        assert_eq!(
+            worker.headers()[header::CONTENT_TYPE],
+            "text/javascript; charset=utf-8"
+        );
+        let worker = worker.text().await.unwrap();
+        let mut declarations = worker.lines();
+        let version: String = serde_json::from_str(
+            declarations
+                .next()
+                .unwrap()
+                .strip_prefix("const VERSION = ")
+                .unwrap()
+                .trim_end_matches(';'),
+        )
+        .unwrap();
+        let assets: Vec<String> = serde_json::from_str(
+            declarations
+                .next()
+                .unwrap()
+                .strip_prefix("const ASSETS = ")
+                .unwrap()
+                .trim_end_matches(';'),
+        )
+        .unwrap();
+        for id in ["overtime", "song-request", "wish-machine"] {
+            assert!(assets.contains(&format!("/overlays/{id}/")));
+        }
+        assert!(assets.contains(&"/overlays/shared/connection.js".into()));
+        for path in assets {
+            assert!(path.starts_with("/overlays/"));
+            let response = client.get(format!("{base}{path}")).send().await.unwrap();
+            assert!(response.status().is_success(), "{path}");
+            assert_eq!(response.headers()["x-danmuji-overlay-version"], version);
+            assert_eq!(response.headers()[header::CACHE_CONTROL], "no-cache");
+            if path.ends_with('/') {
+                assert!(response
+                    .text()
+                    .await
+                    .unwrap()
+                    .contains("../shared/connection.js"));
+            }
+        }
+        let snapshot = client
+            .get(format!("{base}/api/extensions/wish-machine/state"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(snapshot.headers()[header::CACHE_CONTROL], "no-store");
         let shared = client
             .get(format!("{base}/overlays/shared/style.js"))
             .send()
@@ -440,7 +456,14 @@ mod tests {
         }
         let wish_endpoint = format!("{base}/api/extensions/wish-machine/events");
         let mut wishes = client.get(&wish_endpoint).send().await.unwrap();
+        assert_eq!(wishes.headers()[header::CACHE_CONTROL], "no-store");
         assert!(String::from_utf8_lossy(&wishes.chunk().await.unwrap().unwrap()).contains("舰长"));
+        let heartbeat = tokio::time::timeout(Duration::from_secs(12), wishes.chunk())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(String::from_utf8_lossy(&heartbeat).contains("event: heartbeat"));
         host.dispatch_gift(&ReceivedGift {
             event_id: None,
             sender_uid: 42,

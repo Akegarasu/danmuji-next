@@ -160,18 +160,13 @@
     if (changed) fitClock();
     connection.textContent = stale ? '连接已断开，正在重连…' : !snapshot.config.enabled ? '加班机未启用' : !snapshot.running ? '已暂停' : snapshot.rate !== 1 ? `倒计时速度 ×${snapshot.rate}` : '';
   }
-  const source = new EventSource('/api/extensions/overtime/events');
-  source.addEventListener('snapshot', event => {
-    try { update(JSON.parse(event.data)); }
-    catch (error) { console.error('加班机状态解析失败', error); }
-  });
-  source.onerror = () => {
+  const disconnect = window.OverlayConnection.subscribe('overtime', update, () => {
     connected = false; lastNotice = null; queue = []; showingNotice = false;
     clearTimeout(noticeTimeout); render();
-  };
+  });
   const renderInterval = setInterval(render, 100);
   window.addEventListener('pagehide', () => {
-    source.close(); clearInterval(renderInterval); clearTimeout(noticeTimeout); window.removeEventListener('resize', resize);
+    disconnect(); clearInterval(renderInterval); clearTimeout(noticeTimeout); window.removeEventListener('resize', resize);
     document.fonts?.removeEventListener('loadingdone', fontsLoaded);
   }, { once: true });
 })();

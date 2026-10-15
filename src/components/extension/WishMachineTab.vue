@@ -46,7 +46,8 @@ async function execute(request: WishRequest) {
       message.value = '设置已保存。样式修改请复制 CSS 到 OBS。'
     } else {
       editingId.value = null; adding.value = false; confirmRemove.value = false
-      message.value = request.type === 'remove_goal' ? '心愿已删除' : request.type === 'move_goal' ? '顺序已更新' : '心愿已保存，OBS 已同步'
+      message.value = request.type === 'new_session' ? '已开始新一场，当前计数已清零，OBS 已同步'
+        : request.type === 'remove_goal' ? '心愿已删除' : request.type === 'move_goal' ? '顺序已更新' : '心愿已保存，OBS 已同步'
     }
   } catch (cause) { error.value = String(cause) }
   finally { busy.value = false }
@@ -95,7 +96,13 @@ onBeforeUnmount(stop)
     <template v-if="state && config">
       <section>
         <div class="heading"><div><h2>心愿机</h2><p>把直播里的每一份心意，变成看得见的小目标。</p></div><span class="status" :class="{ enabled: state.config.enabled }">{{ state.config.enabled ? '正在累计' : '累计已暂停' }}</span></div>
-        <div class="goal-summary"><span>{{ state.goals.length }} 个心愿 · 已达成 {{ completed }} 个</span><button class="ext-btn ext-btn--primary" :disabled="busy || adding || editingId !== null || state.goals.length >= 20" @click="adding = true">+ 添加心愿</button></div>
+        <div class="goal-summary">
+          <span>{{ state.goals.length }} 个心愿 · 已达成 {{ completed }} 个</span>
+          <div class="summary-actions">
+            <button class="ext-btn ext-btn--primary" :disabled="busy || adding || editingId !== null || state.goals.length >= 20" @click="adding = true">+ 添加心愿</button>
+            <button class="ext-btn" :disabled="busy || adding || editingId !== null || !state.goals.length" title="清零所有心愿的已获得数量，保留礼物、目标数量和设置" @click="execute({ type: 'new_session' })">新一场</button>
+          </div>
+        </div>
         <WishGoalEditor v-if="adding" :busy="busy" @save="execute" @cancel="adding = false" />
         <p v-if="!state.goals.length && !adding" class="empty">还没有心愿，添加一个目标礼物开始吧。</p>
         <article v-for="(goal, index) in state.goals" :key="goal.id" class="goal-card">
@@ -120,7 +127,7 @@ onBeforeUnmount(stop)
       </section>
       <section>
         <SettingsSectionTitle>OBS 浏览器源</SettingsSectionTitle>
-        <p>在 OBS 中添加「浏览器源」并粘贴下面的地址。使用时保持弹幕姬运行并连接直播间。</p>
+        <p>在 OBS 中添加「浏览器源」并粘贴下面的地址。首次添加或清除缓存后，请在弹幕姬运行时成功加载一次；之后先开 OBS 也会自动等待弹幕姬启动。使用时保持弹幕姬运行并连接直播间。</p>
         <div v-if="server?.error" class="feedback error">{{ server.error }}</div>
         <input class="url" :value="url || '服务尚未启动'" readonly aria-label="心愿机 OBS 地址" @focus="($event.target as HTMLInputElement).select()">
         <div class="server-actions"><button class="ext-btn ext-btn--primary" :disabled="!url" @click="copyUrl">复制 OBS 地址</button><form @submit.prevent="restartServer"><label class="port-field">端口<input v-model.number="port" type="number" required min="1024" max="65535" step="1" aria-label="OBS 服务端口"></label><button class="ext-btn" :disabled="busy">应用端口 / 重试</button></form></div>
@@ -146,6 +153,7 @@ p { @include controls.hint; margin: 10px 0; }
 .status { color: var(--text-muted); font-size: var(--font-size-xs); border-radius: 20px; padding: 5px 10px; background: var(--bg-primary); }
 .status.enabled { color: #8edda9; }
 .goal-summary { margin: 18px 0 12px; font-size: var(--font-size-sm); color: var(--text-secondary); }
+.summary-actions { display: flex; align-items: center; gap: 8px; }
 .goal-card { margin: 10px 0; padding: 14px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-primary); }
 .goal-row { display: flex; align-items: center; gap: 12px; }
 .goal-index { color: var(--text-muted); font-size: var(--font-size-sm); }

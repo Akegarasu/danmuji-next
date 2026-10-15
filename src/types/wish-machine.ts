@@ -16,6 +16,7 @@ export interface WishConfig {
 export interface WishSnapshot { config: WishConfig; goals: WishGoal[] }
 export type WishRequest =
   | { type: 'configure'; config: WishConfig }
+  | { type: 'new_session' }
   | ({ type: 'add_goal' } & Omit<WishGoal, 'id'>)
   | ({ type: 'update_goal'; current?: number } & Omit<WishGoal, 'current'>)
   | { type: 'remove_goal'; id: string }

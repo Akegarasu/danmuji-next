@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { runInNewContext } from 'node:vm'
+import { rendererConnection } from './helpers/overlay-renderer.mjs'
 
 const sourceCode = readFileSync(new URL('../public/overlays/shared/style.js', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('../public/overlays/overtime/overlay.js', import.meta.url), 'utf8')
 class Element {
@@ -33,7 +34,7 @@ function page() {
   }
   runInNewContext(sourceCode, {
     document: { documentElement: { style: { setProperty: (key, value) => styles.set(key, value), removeProperty: key => styles.delete(key) } }, getElementById: id => elements[id], createElement: () => new Element(), querySelector: () => elements.room },
-    window: { innerWidth: 350, addEventListener: (name, fn) => events.set(name, fn), removeEventListener: name => events.delete(name) },
+    window: { OverlayConnection: rendererConnection(EventSource), innerWidth: 350, addEventListener: (name, fn) => events.set(name, fn), removeEventListener: name => events.delete(name) },
     EventSource, performance: { now: () => now }, console,
     setInterval: fn => { const id = ++sequence; intervals.set(id, fn); return id }, clearInterval: id => intervals.delete(id),
     setTimeout: fn => { const id = ++sequence; timeouts.set(id, fn); return id }, clearTimeout: id => timeouts.delete(id),

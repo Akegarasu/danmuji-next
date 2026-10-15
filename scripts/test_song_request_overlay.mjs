@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { runInNewContext } from 'node:vm'
+import { rendererConnection } from './helpers/overlay-renderer.mjs'
 
 const code = readFileSync(new URL('../public/overlays/shared/style.js', import.meta.url), 'utf8') + '\n' + readFileSync(new URL('../public/overlays/song-request/overlay.js', import.meta.url), 'utf8')
 class Element {
@@ -27,7 +28,7 @@ function fixture() {
     close() { this.closed = true }
   }
   runInNewContext(code, { document: { documentElement: { style: { setProperty: (key, value) => styles.set(key, value), removeProperty: key => styles.delete(key) } }, getElementById: id => elements[id], createElement: () => new Element() }, EventSource,
-    window: { addEventListener: (name, callback) => events.set(name, callback) } })
+    window: { OverlayConnection: rendererConnection(EventSource), addEventListener: (name, callback) => events.set(name, callback) } })
   return { elements, events, stream, styles, send: value => stream.listeners.get('snapshot')({ data: JSON.stringify(value) }) }
 }
 const state = (requests, overrides = {}) => ({ show_username: true, total: requests.length, requests, ...overrides })

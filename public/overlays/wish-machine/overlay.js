@@ -33,11 +33,6 @@
     list.replaceChildren(...rows)
     lastSnapshot = signature
   }
-  const source = new EventSource('/api/extensions/wish-machine/events')
-  source.addEventListener('snapshot', event => {
-    try { render(JSON.parse(event.data)) }
-    catch { /* 保留最后的有效心愿，不将诊断信息显示到直播中。 */ }
-  })
-  source.onerror = () => { /* 自动重连后会收到完整快照。 */ }
-  window.addEventListener('pagehide', () => source.close())
+  const disconnect = window.OverlayConnection.subscribe('wish-machine', render)
+  window.addEventListener('pagehide', disconnect)
 })()
