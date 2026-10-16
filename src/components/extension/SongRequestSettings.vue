@@ -118,7 +118,7 @@ onBeforeUnmount(() => { active = false; clearInterval(interval); client.disconne
 
           <section>
             <div class="section-heading"><h2>点歌次数</h2><button type="button" class="text-button" @click="resetAudience">恢复初始设置</button></div>
-            <p>按当前身份计算，大航海优先于本直播间粉丝团。次数填 0 表示不能点；冷却填 0 表示不限。SC 不占普通次数，也不受冷却限制。</p>
+            <p>按当前身份计算，大航海优先于本直播间粉丝团。次数填 0 表示没有基础次数，仍可使用送礼获得的次数；关闭身份开关才会禁止该身份弹幕点歌。冷却填 0 表示不限。SC 不占普通次数，也不受冷却限制。</p>
             <div v-for="role in roles" :key="role.key" class="audience-row">
               <SettingsToggle v-model="config.audience[role.key].enabled" :label="role.label" :disabled="busy" />
               <div class="allowance-fields">

@@ -410,10 +410,12 @@ impl SongRequestManager {
         }
         if !is_sc {
             let rule = self.audience_rule(text).clone();
-            if !rule.enabled || rule.limit == 0 {
+            if !rule.enabled {
                 return false;
             }
-            let allowance = self.allowances.entry(text.uid).or_default();
+            // 基础次数为 0 时仍可使用礼物兑换次数，检查通过后才记录消耗。
+            let empty_allowance = UserAllowance::default();
+            let allowance = self.allowances.get(&text.uid).unwrap_or(&empty_allowance);
             if (rule.cooldown_secs > 0
                 && allowance.last_request_ms.is_some_and(|last| {
                     now_ms.saturating_sub(last) < i64::from(rule.cooldown_secs) * 1000
@@ -422,6 +424,7 @@ impl SongRequestManager {
             {
                 return false;
             }
+            let allowance = self.allowances.entry(text.uid).or_default();
             if allowance.used < rule.limit {
                 allowance.used += 1;
             } else {
@@ -1064,7 +1067,10 @@ mod tests {
             assert_eq!(restored.allowances[&1].gift_progress["blind"], 0);
 
             // 未配置盲盒时不回退到爆出礼物，直接赠送普通礼物仍正常兑换。
-            restored.config.gift_rules.retain(|rule| rule.id == "revealed");
+            restored
+                .config
+                .gift_rules
+                .retain(|rule| rule.id == "revealed");
             gift.event_id = Some("blind3".into());
             assert!(!restored.on_gift(&gift, now));
             assert_eq!(restored.allowances[&1].bonus_remaining, 2);
@@ -1072,6 +1078,205 @@ mod tests {
             assert!(restored.on_gift(&gift, now));
             assert_eq!(restored.allowances[&1].bonus_remaining, 101);
         }
+    }
+
+    #[test]
+    fn gift_bonus_with_zero_base_quota_respects_identity_and_cooldown() {
+        use crate::live_events::ReceivedBlindGift;
+
+        for (role, guard, medal) in [
+            ("normal", 0, 0),
+            ("fans", 0, 900),
+            ("captain", 3, 900),
+            ("admiral", 2, 900),
+            ("governor", 1, 900),
+        ] {
+            for blind in [false, true] {
+                let now = Instant::now();
+                let gift_name = if blind { "波仔盲盒" } else { "玫瑰" };
+                let mut manager = SongRequestManager::default();
+                manager.on_room(100, 900, None);
+                let mut config = json!({
+                    "audience": {}, "gift_bonus_enabled": true,
+                    "gift_rules": [{"id":"bonus", "gift_id":null, "gift_name":gift_name,
+                        "gifts_required":1, "extra_requests":1}]
+                });
+                config["audience"][role] = json!({"enabled":true, "limit":0, "cooldown_secs":60});
+                request(&mut manager, json!({"type":"configure", "config":config}));
+                let mut song = text("点歌 第一首", 42, TextSource::Danmaku, guard);
+                song.medal_anchor_uid = medal;
+                assert!(!manager.accept_text(&song, 0));
+                let gift = ReceivedGift {
+                    event_id: Some("gift-bonus".into()),
+                    sender_uid: 42,
+                    sender_name: "观众".into(),
+                    gift_id: if blind { 20 } else { 10 },
+                    gift_name: if blind { "棉花糖" } else { gift_name }.into(),
+                    num: 2,
+                    blind_gift: blind.then(|| ReceivedBlindGift {
+                        gift_id: 10,
+                        gift_name: "波仔盲盒".into(),
+                    }),
+                };
+                assert!(manager.on_gift(&gift, now));
+                assert_eq!(manager.allowances[&42].bonus_remaining, 2);
+
+                // 关闭身份仍然禁止弹幕点歌，不能因有赠送次数而绕过。
+                config["audience"][role]["enabled"] = json!(false);
+                request(&mut manager, json!({"type":"configure", "config":config}));
+                assert!(!manager.accept_text(&song, 1000));
+                assert_eq!(manager.allowances[&42].bonus_remaining, 2);
+                config["audience"][role]["enabled"] = json!(true);
+                request(&mut manager, json!({"type":"configure", "config":config}));
+
+                assert!(
+                    manager.accept_text(&song, 1000),
+                    "role={role}, blind={blind}"
+                );
+                assert_eq!(manager.allowances[&42].bonus_remaining, 1);
+                song.content = "点歌 第二首".into();
+                assert!(!manager.accept_text(&song, 60999));
+                assert_eq!(manager.allowances[&42].bonus_remaining, 1);
+                assert!(manager.accept_text(&song, 61000));
+                song.content = "点歌 第三首".into();
+                assert!(!manager.accept_text(&song, 121000));
+                assert_eq!(manager.allowances[&42].used, 0);
+                assert_eq!(manager.allowances[&42].bonus_remaining, 0);
+            }
+        }
+    }
+
+    #[test]
+    fn rejected_requests_do_not_spend_bonus_or_start_cooldown() {
+        let mut manager = SongRequestManager::default();
+        manager.config.audience.normal.limit = 0;
+        manager.allowances.insert(
+            42,
+            UserAllowance {
+                bonus_remaining: 2,
+                ..Default::default()
+            },
+        );
+        let first = text("点歌 第一首", 42, TextSource::Danmaku, 0);
+        assert!(manager.accept_text(&first, 1000));
+        let second = text("点歌 第二首", 42, TextSource::Danmaku, 0);
+        let before = manager.checkpoint(Instant::now());
+        assert!(!manager.accept_text(&first, 61000));
+        assert!(!manager.accept_text(&text("点歌 第一首", 42, TextSource::Danmaku, 0), 61000));
+        assert!(!manager.accept_text(&text("点歌：", 42, TextSource::Danmaku, 0), 61000));
+        assert!(!manager.accept_text(&second, 60999));
+        assert_eq!(manager.checkpoint(Instant::now()), before);
+
+        // 队列满时拒绝请求；腾出位置后，同一条请求仍可正常消耗最后一次赠送次数。
+        let mut filler = manager.requests[0].clone();
+        filler.uid = 99;
+        for index in 1..MAX_PENDING {
+            filler.id = format!("filler-{index}");
+            manager.requests.push(filler.clone());
+        }
+        let before = manager.checkpoint(Instant::now());
+        assert!(!manager.accept_text(&second, 61000));
+        assert_eq!(manager.checkpoint(Instant::now()), before);
+        manager.requests.pop();
+        assert!(manager.accept_text(&second, 61000));
+        assert_eq!(manager.allowances[&42].bonus_remaining, 0);
+        assert_eq!(manager.allowances[&42].last_request_ms, Some(61000));
+    }
+
+    #[test]
+    fn identity_changes_share_used_quota_and_keep_gift_bonus_separate() {
+        let mut manager = SongRequestManager::default();
+        manager.on_room(100, 900, None);
+        manager.config.audience.normal = AudienceRule {
+            enabled: true,
+            limit: 1,
+            cooldown_secs: 0,
+        };
+        manager.config.audience.fans = AudienceRule {
+            enabled: true,
+            limit: 2,
+            cooldown_secs: 0,
+        };
+        manager.config.audience.captain = AudienceRule {
+            enabled: true,
+            limit: 3,
+            cooldown_secs: 0,
+        };
+        manager.allowances.insert(
+            42,
+            UserAllowance {
+                bonus_remaining: 1,
+                ..Default::default()
+            },
+        );
+        let mut song = text("点歌 普通身份", 42, TextSource::Danmaku, 0);
+        assert!(manager.accept_text(&song, 0));
+        song.medal_anchor_uid = 900;
+        song.content = "点歌 加入粉丝团".into();
+        assert!(manager.accept_text(&song, 1));
+        assert_eq!(manager.allowances[&42].used, 2);
+        assert_eq!(manager.allowances[&42].bonus_remaining, 1);
+        song.medal_anchor_uid = 901;
+        song.content = "点歌 换成外房勋章".into();
+        assert!(manager.accept_text(&song, 2));
+        assert_eq!(manager.allowances[&42].used, 2);
+        assert_eq!(manager.allowances[&42].bonus_remaining, 0);
+        song.medal_anchor_uid = 900;
+        song.content = "点歌 换回本房勋章".into();
+        assert!(!manager.accept_text(&song, 3));
+        song.guard_level = 3;
+        assert!(manager.accept_text(&song, 3));
+        assert_eq!(manager.allowances[&42].used, 3);
+        song.content = "点歌 舰长超限".into();
+        assert!(!manager.accept_text(&song, 4));
+    }
+
+    #[test]
+    fn changing_gift_rules_clears_only_affected_progress_and_keeps_earned_bonus() {
+        let now = Instant::now();
+        let mut manager = SongRequestManager::default();
+        let mut config = json!({"gift_bonus_enabled":true, "gift_rules":[
+            {"id":"rose", "gift_id":7, "gift_name":"玫瑰", "gifts_required":3, "extra_requests":1},
+            {"id":"candy", "gift_id":8, "gift_name":"棉花糖", "gifts_required":3, "extra_requests":1}
+        ]});
+        request(&mut manager, json!({"type":"configure", "config":config}));
+        let rose = ReceivedGift {
+            event_id: Some("rose1".into()),
+            sender_uid: 42,
+            sender_name: "观众".into(),
+            gift_id: 7,
+            gift_name: "玫瑰".into(),
+            num: 4,
+            blind_gift: None,
+        };
+        let mut candy = ReceivedGift {
+            event_id: Some("candy1".into()),
+            gift_id: 8,
+            gift_name: "棉花糖".into(),
+            num: 2,
+            ..rose.clone()
+        };
+        assert!(manager.on_gift(&rose, now));
+        assert!(manager.on_gift(&candy, now));
+        let before = json!(manager.allowances);
+        config["overlay_max_rows"] = json!(10);
+        request(&mut manager, json!({"type":"configure", "config":config}));
+        assert_eq!(json!(manager.allowances), before);
+
+        config["gift_rules"][0]["gifts_required"] = json!(2);
+        request(&mut manager, json!({"type":"configure", "config":config}));
+        assert_eq!(manager.allowances[&42].bonus_remaining, 1);
+        assert!(!manager.allowances[&42].gift_progress.contains_key("rose"));
+        assert_eq!(manager.allowances[&42].gift_progress["candy"], 2);
+        let mut restored = SongRequestManager::default();
+        restored.restore(manager.checkpoint(now), now).unwrap();
+        assert!(!restored.on_gift(&rose, now));
+        assert!(!restored.on_gift(&candy, now));
+        candy.event_id = Some("candy2".into());
+        candy.num = 1;
+        assert!(restored.on_gift(&candy, now));
+        assert_eq!(restored.allowances[&42].bonus_remaining, 2);
+        assert_eq!(restored.allowances[&42].gift_progress["candy"], 0);
     }
 
     #[test]

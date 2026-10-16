@@ -481,7 +481,10 @@ fn song_allowances_consume_gift_deltas_for_the_correct_uid() {
     }}), now).unwrap();
     let mut data = LiveData::default();
     for round in 0..2 {
-        for gift in parse(&v1_packet(round, 0, true)) {
+        // 此用例验证直接赠送的普通礼物；盲盒应按原盲盒而非爆出礼物兑换。
+        let mut raw = v1_packet(round, 0, true);
+        raw["data"]["blind_gift"] = Value::Null;
+        for gift in parse(&raw) {
             let duplicate = gift.clone();
             let (_, received) = data.process_gift(gift).unwrap();
             assert_eq!(received.sender_uid, 42);
@@ -503,6 +506,67 @@ fn song_allowances_consume_gift_deltas_for_the_correct_uid() {
     }
 }
 
+
+#[test]
+fn song_blind_gifts_by_name_or_id_grant_usable_bonus_after_base_quota() {
+    use crate::extensions::{song_request::SongRequestManager, Extension};
+    use crate::live_events::{LiveEvent, ReceivedText, TextSource};
+
+    let now = std::time::Instant::now();
+    // 按截图构造名称匹配和 1 换 1 配置，不依赖现场 dump。
+    let mut named = v1_packet(0, 0, true);
+    named["data"]["blind_gift"]["original_gift_name"] = json!("波仔盲盒");
+    named["data"]["num"] = json!(1);
+    let v2: Value = serde_json::from_str(include_str!(
+        "../../crates/blivedm/tests/fixtures/ten_blind_gift_v2.json"
+    )).unwrap();
+    for (raw, name, count) in [(named, "波仔盲盒", 1), (v2, "心动盲盒", 10)] {
+        for by_id in [false, true] {
+            for base_limit in [1, 0] {
+                let mut songs = SongRequestManager::default();
+                songs.on_room(100, 900, None);
+                songs.request(json!({"type":"configure","config":{
+                    "audience":{"normal":{"enabled":true,"limit":base_limit,"cooldown_secs":0}},
+                    "gift_bonus_enabled":true,
+                    "gift_rules":[{"id":"blind","gift_id":by_id.then_some(32251),"gift_name":name,
+                        "gifts_required":1,"extra_requests":1}]
+                }}), now).unwrap();
+                let song = |uid, index| ReceivedText {
+                    event_id: format!("request-{uid}-{index}"), content: format!("点歌 歌曲{index}"),
+                    username: "观众".into(), uid, guard_level: 0, medal_anchor_uid: 0,
+                    medal_room_id: 0, timestamp: 1700000000, source: TextSource::Danmaku, sc_price: None,
+                };
+                for index in 0..base_limit {
+                    assert!(songs.on_text(&song(42, index), now));
+                    assert!(songs.on_text(&song(43, index), now));
+                }
+                assert!(!songs.on_text(&song(42, base_limit), now));
+
+                let mut data = LiveData::default();
+                let effects = data.process(parse_notification(&serde_json::to_vec(&raw).unwrap(), None).unwrap());
+                for event in effects.events {
+                    let LiveEvent::Gift(gift) = event else { panic!("expected gift"); };
+                    assert!(songs.on_gift(&gift, now));
+                    assert!(!songs.on_gift(&gift, now));
+                }
+                assert_eq!(data.gift_list.iter().map(|gift| gift.num).sum::<u32>(), count);
+                assert!(data.process(parse_notification(&serde_json::to_vec(&raw).unwrap(), None).unwrap()).events.is_empty());
+                assert_eq!(songs.checkpoint(now)["allowances"]["42"]["bonus_remaining"], count);
+
+                let mut restored = SongRequestManager::default();
+                restored.restore(songs.checkpoint(now), now).unwrap();
+                assert!(!restored.on_room(100, 900, None));
+                assert!(!restored.on_text(&song(43, base_limit), now));
+                for index in base_limit..base_limit + count {
+                    assert!(restored.on_text(&song(42, index), now),
+                        "gift={name}, by_id={by_id}, base_limit={base_limit}, index={index}");
+                }
+                assert!(!restored.on_text(&song(42, base_limit + count), now));
+                assert_eq!(restored.checkpoint(now)["allowances"]["42"]["bonus_remaining"], 0);
+            }
+        }
+    }
+}
 
 #[test]
 fn overtime_blind_boxes_count_v1_v2_deltas_without_double_triggers() {
