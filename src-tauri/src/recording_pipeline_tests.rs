@@ -14,6 +14,86 @@ fn parse(raw: serde_json::Value) -> blivedm::Event {
 }
 
 #[tokio::test]
+async fn mirror_danmaku_reaches_windows_snapshots_and_recording() {
+    use crate::live_types::{EventType, ProcessedDanmaku};
+
+    let archive = Arc::new(ArchiveManager::new(":memory:".into()).unwrap());
+    let mut session = LiveSession::default();
+    session.start_recording(
+        Recording::start(archive.clone(), 123, "跨房弹幕", 900)
+            .await
+            .unwrap(),
+    );
+    let session_id = archive.get_sessions().await.unwrap()[0].id;
+    let messages: Vec<serde_json::Value> = serde_json::from_str(include_str!(
+        "../../crates/blivedm/tests/fixtures/mirror_danmaku.json"
+    ))
+    .unwrap();
+    for message in messages {
+        assert!(matches!(
+            &session.process(parse(message))[..],
+            [LiveEvent::Text(text)] if text.source == TextSource::Danmaku
+        ));
+    }
+    session.process(parse(json!({"cmd":"DANMU_MSG","info":[
+        [0,1,25,16777215,1793022291000i64], "本房弹幕", [44,"本房观众",0], []
+    ]})));
+
+    let updates = serde_json::to_value(session.data.take_pending_updates()).unwrap();
+    let items = updates
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|update| update["type"] == "DanmakuAppend")
+        .unwrap()["data"]
+        .as_array()
+        .unwrap();
+    assert_eq!(items.len(), 3);
+    assert_eq!(
+        items
+            .iter()
+            .map(|item| item["is_mirror"].as_bool().unwrap())
+            .collect::<Vec<_>>(),
+        vec![true, true, false]
+    );
+    let snapshot = session
+        .data
+        .snapshot(&[EventType::Danmaku].into_iter().collect());
+    assert_eq!(
+        serde_json::to_value(snapshot.danmaku_list.unwrap()).unwrap(),
+        json!(items)
+    );
+
+    // 旧版本数据没有跨房标记时仍能正常反序列化。
+    let mut legacy = items[2].clone();
+    legacy.as_object_mut().unwrap().remove("is_mirror");
+    assert!(
+        !serde_json::from_value::<ProcessedDanmaku>(legacy)
+            .unwrap()
+            .is_mirror
+    );
+
+    session.finish_recording().await.unwrap();
+    assert_eq!(
+        archive
+            .get_session_detail(session_id)
+            .await
+            .unwrap()
+            .danmaku_count,
+        3
+    );
+    let saved = archive
+        .search_danmaku(session_id, "", 1, 100)
+        .await
+        .unwrap();
+    assert_eq!(saved.total, 3);
+    assert!(saved
+        .items
+        .iter()
+        .any(|item| item.content == "怒放的生命了属于是"));
+}
+
+#[tokio::test]
 async fn records_mixed_notifications_and_finalizes_queryable_totals() {
     let archive = Arc::new(ArchiveManager::new(":memory:".into()).unwrap());
     let recording = Recording::start(archive.clone(), 123, "录制契约", 900)

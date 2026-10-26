@@ -288,6 +288,8 @@ export interface ProcessedDanmaku {
   content: string
   user: ProcessedUser
   timestamp: number
+  /** 是否为跨房弹幕 */
+  is_mirror: boolean
   is_emoticon: boolean
   emoticon_url?: string
 }

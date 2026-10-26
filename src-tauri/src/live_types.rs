@@ -98,6 +98,9 @@ pub struct ProcessedDanmaku {
     pub content: String,
     pub user: ProcessedUser,
     pub timestamp: i64,
+    /// 是否为跨房弹幕
+    #[serde(default)]
+    pub is_mirror: bool,
     pub is_emoticon: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub emoticon_url: Option<String>,

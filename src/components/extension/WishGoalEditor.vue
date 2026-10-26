@@ -6,7 +6,7 @@ import type { WishGoal, WishRequest } from '@/types/wish-machine'
 const props = defineProps<{ goal?: WishGoal; busy: boolean }>()
 const emit = defineEmits<{ save: [request: WishRequest]; cancel: [] }>()
 const name = ref(props.goal?.gift_name ?? '')
-const giftId = ref(String(props.goal?.gift_id ?? ''))
+const giftId = ref<string | number>(props.goal?.gift_id ?? '')
 const current = ref(props.goal?.current ?? 0)
 const target = ref(props.goal?.target ?? 100)
 const countEdited = ref(false)
@@ -21,7 +21,9 @@ function selectGift(gift: { id: number | null; name: string }) {
   name.value = gift.name; giftId.value = String(gift.id ?? ''); search.value = ''
 }
 function save() {
-  const fields = { gift_name: name.value.trim(), gift_id: giftId.value.trim() ? Number(giftId.value) : null, target: Number(target.value) }
+  // number 输入的 v-model 会自动转成数字，清空时才返回空字符串。
+  const id = String(giftId.value).trim()
+  const fields = { gift_name: name.value.trim(), gift_id: id ? Number(id) : null, target: Number(target.value) }
   emit('save', props.goal
     ? { type: 'update_goal', id: props.goal.id, ...fields, ...(countEdited.value ? { current: Number(current.value) } : {}) }
     : { type: 'add_goal', ...fields, current: Number(current.value) })

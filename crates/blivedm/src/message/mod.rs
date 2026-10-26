@@ -85,8 +85,9 @@ pub fn parse_notification(
     let cmd_base = cmd.split(':').next().unwrap_or(cmd);
 
     match cmd_base {
-        "DANMU_MSG" => {
-            let danmaku = parse_required(cmd_base, Danmaku::parse(&value))?;
+        "DANMU_MSG" | "DANMU_MSG_MIRROR" => {
+            let mut danmaku = parse_required(cmd_base, Danmaku::parse(&value))?;
+            danmaku.is_mirror = cmd_base == "DANMU_MSG_MIRROR";
             Ok(Event::Danmaku(danmaku))
         }
         "SEND_GIFT" => {
@@ -177,6 +178,86 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+
+    // 基于 2026-10-26 的跨房 dump，替换用户身份并裁剪无关字段。
+    fn mirror_messages() -> Vec<Value> {
+        serde_json::from_str(include_str!("../../tests/fixtures/mirror_danmaku.json")).unwrap()
+    }
+
+    fn parse_danmaku(value: &Value) -> Danmaku {
+        let Event::Danmaku(danmaku) =
+            parse_notification(&serde_json::to_vec(value).unwrap(), None).unwrap()
+        else {
+            panic!("expected typed danmaku event");
+        };
+        danmaku
+    }
+
+    #[test]
+    fn parses_mirror_notifications_with_and_without_medals() {
+        let messages = mirror_messages();
+        for message in &messages {
+            let danmaku = parse_danmaku(message);
+            assert!(danmaku.is_mirror);
+            assert_eq!(danmaku.content, message["info"][1].as_str().unwrap());
+            assert_eq!(danmaku.sender.uid, message["info"][2][0].as_u64().unwrap());
+            assert_eq!(danmaku.timestamp, message["info"][0][4].as_i64().unwrap());
+        }
+        let with_medal = parse_danmaku(&messages[0]);
+        assert_eq!(with_medal.sender.guard_level, GuardLevel::Captain);
+        assert_eq!(with_medal.sender.wealth_level, 32);
+        assert_eq!(with_medal.sender.medal.unwrap().room_id, 100);
+        assert!(parse_danmaku(&messages[1]).sender.medal.is_none());
+    }
+
+    #[test]
+    fn mirror_command_remains_authoritative_without_valid_extra() {
+        let mut message = mirror_messages().remove(0);
+        for cmd in ["DANMU_MSG_MIRROR", "DANMU_MSG_MIRROR:4:0:2:2:2:0"] {
+            message["cmd"] = cmd.into();
+            for extra in [
+                Value::Null,
+                "invalid json".into(),
+                r#"{"is_mirror":false}"#.into(),
+            ] {
+                message["info"][0][15]["extra"] = extra;
+                assert!(parse_danmaku(&message).is_mirror);
+            }
+        }
+    }
+
+    #[test]
+    fn ordinary_command_ignores_mirror_flag_in_extra() {
+        let mut message = mirror_messages().remove(0);
+        for cmd in ["DANMU_MSG", "DANMU_MSG:4:0:2:2:2:0"] {
+            message["cmd"] = cmd.into();
+            for extra in [
+                Value::Null,
+                "invalid json".into(),
+                r#"{"is_mirror":true}"#.into(),
+                r#"{"is_mirror":false}"#.into(),
+            ] {
+                message["info"][0][15]["extra"] = extra;
+                assert!(!parse_danmaku(&message).is_mirror);
+            }
+        }
+    }
+
+    #[test]
+    fn mirror_emoticons_keep_the_existing_emoticon_payload() {
+        let mut message = mirror_messages().remove(0);
+        message["info"][0][12] = 1.into();
+        message["info"][0][13] = serde_json::json!({
+            "emoticon_unique": "test", "url": "https://example.com/emoticon.png", "width": 40, "height": 40
+        });
+        let danmaku = parse_danmaku(&message);
+        assert!(danmaku.is_mirror);
+        assert_eq!(danmaku.r#type, DanmakuType::Emoticon);
+        assert_eq!(
+            danmaku.emoticon.unwrap().url,
+            "https://example.com/emoticon.png"
+        );
+    }
 
     #[test]
     fn parses_every_result_in_a_ten_draw_notification_and_observes_raw_once() {

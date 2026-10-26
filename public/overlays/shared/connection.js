@@ -18,7 +18,11 @@
     try {
       if (registration) await registration.update()
       else registration = await workers.register('/overlays/sw.js', { scope: '/overlays/', updateViaCache: 'none' })
-    } catch { /* 弹幕姬尚未启动或更新下载失败，继续使用已完整安装的资源。 */ }
+    } catch {
+      // 首次安装失败可能已移除注册；不能永远对失效对象调用 update()。
+      // 下次重新注册，不注销当前 Worker，已有完整离线资源仍可使用。
+      registration = undefined
+    }
     finally { updating = false }
   }
   const controllerChanged = () => {

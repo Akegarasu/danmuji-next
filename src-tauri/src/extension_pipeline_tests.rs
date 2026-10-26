@@ -307,6 +307,7 @@ fn normalized_danmaku_and_sc_keep_live_updates_and_battery_units() {
     let danmaku = Danmaku {
         content: "点歌 av1".into(),
         timestamp: 1700000000123,
+        is_mirror: false,
         r#type: DanmakuType::Text,
         emoticon: None,
         color: 0xffffff,
@@ -399,6 +400,54 @@ fn wish_machine_host_persists_gifts_and_css_without_resetting_goals() {
     assert_eq!(snapshot["config"]["custom_css"], "#wish-machine { color: blue; }");
     assert_eq!(dir.read("wish-machine.json")["goals"][0]["current"], 2);
     assert_eq!(host.state("overtime").unwrap().state["remaining_ms"], 3_600_000.0);
+}
+
+#[test]
+fn wish_machine_manual_count_survives_obs_refresh_and_restart_with_live_combo() {
+    let dir = TestDirectory::new();
+    let host = dir.host();
+    let mut live = LiveData::default();
+    let feed = |live: &mut LiveData, host: &ExtensionHost, tid: &str, num: u32| {
+        let raw = json!({"cmd":"SEND_GIFT","data":{
+            "giftId":32125,"giftName":"电影票","num":num,"uid":42,"uname":"测试用户",
+            "tid":tid,"batch_combo_id":"same-combo","timestamp":1700000000,
+            "coin_type":"gold","price":2000,"total_coin":15000 * num,
+            "blind_gift":{"blind_gift_config_id":139,"from":0,"gift_action":"爆出","gift_tip_price":2000,
+                "original_gift_id":32251,"original_gift_name":"心动盲盒","original_gift_price":15000}
+        }});
+        let event = blivedm::parse_notification(&serde_json::to_vec(&raw).unwrap(), None).unwrap();
+        for event in live.process(event).events {
+            if let crate::live_events::LiveEvent::Gift(gift) = event {
+                host.dispatch_gift(&gift);
+            }
+        }
+    };
+    feed(&mut live, &host, "before-edit", 4);
+    let mut goal = host.state("wish-machine").unwrap().state["goals"][1].clone();
+    assert_eq!(goal["current"], 4);
+    goal["type"] = json!("update_goal");
+    goal["current"] = json!(7);
+    host.request("wish-machine", goal).unwrap();
+    assert_eq!(dir.read("wish-machine.json")["goals"][1]["current"], 7);
+
+    // OBS 刷新仅重新订阅快照，不重放历史连击或清空手动校准。
+    let overlay = host.subscribe("wish-machine").unwrap();
+    assert_eq!(overlay.borrow()["goals"][1]["current"], 7);
+    drop(overlay);
+    let overlay = host.subscribe("wish-machine").unwrap();
+    feed(&mut live, &host, "before-edit", 4);
+    feed(&mut live, &host, "after-edit", 3);
+    assert_eq!(overlay.borrow()["goals"][1]["current"], 10);
+    assert_eq!(host.state("wish-machine").unwrap().state["goals"][1]["current"], 10);
+    drop(overlay);
+    drop(host);
+
+    let restored = dir.host();
+    let overlay = restored.subscribe("wish-machine").unwrap();
+    assert_eq!(overlay.borrow()["goals"][1]["current"], 10);
+    feed(&mut LiveData::default(), &restored, "after-restart", 2);
+    assert_eq!(overlay.borrow()["goals"][1]["current"], 12);
+    assert_eq!(dir.read("wish-machine.json")["goals"][1]["current"], 12);
 }
 
 #[test]

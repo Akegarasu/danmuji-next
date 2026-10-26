@@ -91,6 +91,11 @@ const getUserColor = () => {
       {{ message.user.medal.name }} {{ message.user.medal.level }}
     </span>
     
+    <!-- 跨房标识 -->
+    <span v-if="message.is_mirror" class="mirror-icon" title="跨房弹幕" aria-label="跨房弹幕">
+      <span>跨</span>
+    </span>
+
     <!-- 房管图标 -->
     <img 
       v-if="showAdmin && message.user.is_admin" 
@@ -225,11 +230,29 @@ const getUserColor = () => {
   line-height: 1.2;
 }
 
-.admin-icon {
+.admin-icon,
+.mirror-icon {
   width: 1.15em;
   height: 1.15em;
   margin-right: 0.35em;
   flex-shrink: 0;
+}
+
+.mirror-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  color: #8ab4ff;
+  font-family: var(--font-family);
+  font-weight: 500;
+  line-height: 1;
+
+  > span {
+    font-size: 0.8em;
+  }
 }
 
 .username {

@@ -1338,6 +1338,7 @@ mod tests {
             content: "测试弹幕".to_owned(),
             user,
             timestamp: 0,
+            is_mirror: false,
             is_emoticon: false,
             emoticon_url: None,
         }
@@ -1453,6 +1454,7 @@ mod tests {
                     content: "测试弹幕".to_owned(),
                     user: user("测试用户"),
                     timestamp: 0,
+                    is_mirror: false,
                     is_emoticon: false,
                     emoticon_url: None,
                 },

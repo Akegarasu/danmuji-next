@@ -157,3 +157,26 @@ test('更新失败不刷新已有缓存页面，页面隐藏后不再更新，�
   f.window.emit('pageshow', { persisted: true })
   assert.equal(f.reloads, 1)
 })
+
+test('首次注册成功但安装失败后，自动重新注册并继续同步实时数量', async () => {
+  let registrations = 0, updates = 0
+  // 首次安装失败会移除注册，旧对象的 update() 永久拒绝。
+  const failed = { async update() { throw Object.assign(new Error('注册已失效'), { name: 'InvalidStateError' }) } }
+  const workers = { ...events(), controller: null, async register() {
+    registrations++
+    return registrations === 1 ? failed : { async update() { updates++ } }
+  } }
+  const f = fixture(workers)
+  await settle()
+  f.send({ goals: [{ id: 'captain', current: 7 }] })
+  await settle()
+  f.advance(30000)
+  await settle()
+  assert.equal(registrations, 2)
+  f.advance(30000)
+  await settle()
+  assert.ok(updates > 0)
+  f.send({ goals: [{ id: 'captain', current: 8 }] })
+  assert.deepEqual(f.snapshots.map(state => state.goals[0].current), [7, 8])
+  assert.equal(f.reloads, 0)
+})

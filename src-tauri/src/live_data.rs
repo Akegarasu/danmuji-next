@@ -230,6 +230,7 @@ impl LiveData {
             content: danmaku.content,
             user: convert_user(&danmaku.sender),
             timestamp: danmaku.timestamp,
+            is_mirror: danmaku.is_mirror,
             is_emoticon: danmaku.r#type == DanmakuType::Emoticon,
             emoticon_url: danmaku.emoticon.map(|e| e.url),
         };

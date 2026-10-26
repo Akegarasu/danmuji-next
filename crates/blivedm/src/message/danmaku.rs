@@ -14,6 +14,9 @@ pub struct Danmaku {
     pub sender: User,
     /// 时间戳（毫秒）
     pub timestamp: i64,
+    /// 是否为跨房弹幕
+    #[serde(default)]
+    pub is_mirror: bool,
     /// 弹幕类型
     pub r#type: DanmakuType,
     /// 表情信息（如果是表情弹幕）
@@ -58,7 +61,7 @@ pub struct Emoticon {
 }
 
 impl Danmaku {
-    /// 从 JSON 解析弹幕
+    /// 从 JSON 解析弹幕正文，跨房标记由通知分发层设置
     pub fn parse(value: &Value) -> Option<Self> {
         let info = value.get("info")?;
 
@@ -189,6 +192,7 @@ impl Danmaku {
                 is_admin,
             },
             timestamp,
+            is_mirror: false,
             r#type: dm_type,
             emoticon,
             color,

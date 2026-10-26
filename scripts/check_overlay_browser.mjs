@@ -19,7 +19,7 @@ const workerCode = await readFile(new URL('../public/overlays/sw.js', import.met
 const profile = await mkdtemp(join(tmpdir(), 'danmuji-overlay-browser-'))
 const ids = ['overtime', 'song-request', 'wish-machine']
 let server, context, port = 0, version = 'test-v1', phase = 1, failedDownloads = 0, breakDownload = false
-const streams = new Set(), errors = []
+const streams = new Map(), errors = []
 const state = id => id === 'wish-machine' ? { goals: [{ id: 'gift', gift_name: '测试心愿', current: phase, target: 10 }] }
   : id === 'song-request' ? { show_username: true, requests: [{ song_name: `测试歌曲${phase}`, username: '测试' }] }
     : { config: { enabled: true, show_rules: false, show_notice: false, rules: [] }, remaining_ms: phase * 60000, running: false, rate: 1, notices: [] }
@@ -48,7 +48,7 @@ async function startServer() {
     if (ids.includes(id)) {
       response.setHeader('Content-Type', 'text/event-stream')
       response.write(`event: snapshot\ndata: ${JSON.stringify(state(id))}\n\n`)
-      streams.add(response)
+      streams.set(response, id)
       request.on('close', () => streams.delete(response))
       return
     }
@@ -64,7 +64,7 @@ async function stopServer() {
   await closing
   server = undefined
 }
-async function openBrowser() {
+async function openBrowser(waitForCache = true) {
   context = await chromium.launchPersistentContext(profile, {
     executablePath: process.env.BROWSER_EXECUTABLE_PATH || undefined,
     headless: true,
@@ -73,7 +73,8 @@ async function openBrowser() {
     const page = await context.newPage()
     page.on('pageerror', error => errors.push(String(error)))
     await page.goto(`http://127.0.0.1:${port}/overlays/${id}/`, { waitUntil: 'domcontentloaded' })
-    await page.waitForFunction(() => window.OverlayConnection && navigator.serviceWorker.controller)
+    await page.waitForFunction(() => window.OverlayConnection)
+    if (waitForCache) await page.waitForFunction(() => navigator.serviceWorker.controller)
     return page
   }))
   return pages
@@ -85,10 +86,28 @@ async function expectState(pages, value) {
     pages[2].waitForFunction(expected => document.querySelector('.wish-current')?.textContent === String(expected), value, { timeout: 12000 }),
   ])
 }
-const heartbeat = setInterval(() => { for (const response of streams) response.write('event: heartbeat\ndata:\n\n') }, 10000)
+function broadcast() {
+  for (const [response, id] of streams) response.write(`event: snapshot\ndata: ${JSON.stringify(state(id))}\n\n`)
+}
+const heartbeat = setInterval(() => { for (const response of streams.keys()) response.write('event: heartbeat\ndata:\n\n') }, 10000)
 try {
+  breakDownload = true
   await startServer()
-  let pages = await openBrowser()
+  let pages = await openBrowser(false)
+  await expectState(pages, 1)
+  await pages[0].waitForFunction(async () => !(await navigator.serviceWorker.getRegistration('/overlays/')))
+  assert.ok(failedDownloads > 0)
+  breakDownload = false
+  await Promise.all(pages.map(page => page.waitForFunction(() => navigator.serviceWorker.controller, null, { timeout: 45000 })))
+  console.log('通过：首次安装下载失败后，无需刷新页面即可重新注册并建立完整离线缓存')
+  phase = 7; broadcast()
+  await expectState(pages, 7)
+  await pages[2].reload({ waitUntil: 'domcontentloaded' })
+  await expectState(pages, 7)
+  phase = 8; broadcast()
+  await expectState(pages, 8)
+  console.log('通过：手动校准为 7 后刷新心愿浏览器源，仍显示 7，后续礼物更新为 8')
+  phase = 1; broadcast()
   await expectState(pages, 1)
   await context.close(); context = undefined
   await stopServer()
@@ -105,7 +124,7 @@ try {
   assert.deepEqual(navigations, [0, 0, 0])
   console.log('通过：服务稍后启动，三个页面自动恢复完整状态，相同版本无需刷新')
   await stopServer()
-  version = 'test-v2'; phase = 3; breakDownload = true
+  version = 'test-v2'; phase = 3; breakDownload = true; failedDownloads = 0
   await startServer()
   await expectState(pages, 3)
   const deadline = Date.now() + 15000

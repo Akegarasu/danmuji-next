@@ -621,6 +621,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn wish_machine_default_goals_keep_counting_after_manual_edit_and_obs_refresh() {
+        let fixture = Fixture::new();
+        let service = &fixture.service;
+        let host = &service.extensions;
+        let goals = host.state("wish-machine").unwrap().state["goals"].clone();
+        let overlay = host.subscribe("wish-machine").unwrap();
+        for (index, goal) in goals.as_array().unwrap().iter().enumerate() {
+            let mut request = goal.clone();
+            request["type"] = json!("update_goal");
+            request["current"] = json!(7 + index);
+            host.request("wish-machine", request).unwrap();
+        }
+        drop(overlay);
+        let refreshed = host.subscribe("wish-machine").unwrap();
+        assert_eq!(refreshed.borrow()["goals"][0]["current"], 7);
+        assert_eq!(host.state("wish-machine").unwrap().state["config"]["enabled"], true);
+
+        // 无桌面订阅、无录制也必须分发；相同交易重发不重复累计。
+        for _ in 0..2 {
+            service.process_event(gift_batch()).await;
+            for raw in [
+                json!({"cmd":"USER_TOAST_MSG","data":{
+                    "uid":42,"username":"测试用户","guard_level":3,"num":1,"price":138000,
+                    "gift_id":10003,"payflow_id":"wish-captain","start_time":1700000000
+                }}),
+                json!({"cmd":"SEND_GIFT","data":{
+                    "uid":42,"uname":"测试用户","giftId":30001,"giftName":"粉丝团灯牌",
+                    "num":5,"price":1000,"total_coin":5000,"coin_type":"gold",
+                    "tid":"wish-fans","timestamp":1700000000
+                }}),
+            ] {
+                service.process_event(parse_notification(&serde_json::to_vec(&raw).unwrap(), None).unwrap()).await;
+            }
+        }
+        let desktop = host.state("wish-machine").unwrap().state;
+        let browser = refreshed.borrow();
+        for (index, expected) in [8, 18, 14].into_iter().enumerate() {
+            assert_eq!(desktop["goals"][index]["current"], expected);
+            assert_eq!(browser["goals"][index]["current"], expected);
+        }
+    }
+
+    #[tokio::test]
     async fn cancelled_disconnect_keeps_task_owned_and_next_disconnect_drains_before_clearing() {
         let fixture = Fixture::new();
         let service = fixture.service.clone();

@@ -1,0 +1,35 @@
+[
+  {
+    "cmd": "DANMU_MSG_MIRROR",
+    "dm_v2": "",
+    "info": [
+      [0, 4, 25, 14893055, 1793022281557, 0, 0, "", 0, 0, 43, "", 0, "{}", "{}", {
+        "extra": "{\"content\":\"？哈哈哈哈哈\",\"is_mirror\":true,\"is_collaboration_member\":false}",
+        "user": {
+          "base": {"face": "https://i0.hdslb.com/bfs/face/test.jpg"},
+          "medal": {"level": 38, "name": "测试牌", "ruid": 900, "is_light": 1},
+          "wealth": null
+        }
+      }, {"activity_identity": "", "activity_source": 0, "not_show": 0}, 43],
+      "？哈哈哈哈哈",
+      [42, "跨房观众一", 0, 0, 0, 10000, 1, "#00D1F1", 900, "https://i0.hdslb.com/bfs/face/test.jpg", "测试主播一", 100],
+      [38, "测试牌", "测试主播一", 100, 16736523, "", 0, 6809855, 16736523, 16765060, 3, 1, 900],
+      [15, 0, 6406234, ">50000", 0], ["", ""], 0, 3, null, {"ct": "TEST", "ts": 1793022281},
+      0, 0, null, null, 0, 572, [32], null
+    ]
+  },
+  {
+    "cmd": "DANMU_MSG_MIRROR",
+    "dm_v2": "",
+    "info": [
+      [0, 1, 25, 16777215, 1793022290000, 0, 0, "", 0, 0, 0, "", 0, "{}", "{}", {
+        "extra": "{\"content\":\"怒放的生命了属于是\",\"is_mirror\":true,\"is_collaboration_member\":false}",
+        "user": {"base": {"face": "https://i0.hdslb.com/bfs/face/member/noface.jpg"}, "medal": null, "wealth": null}
+      }],
+      "怒放的生命了属于是",
+      [43, "跨房观众二", 0, 0, 0, 10000, 1, "", 901, "https://i0.hdslb.com/bfs/face/member/noface.jpg", "测试主播二", 101],
+      [], [0, 0, 0, ">50000", 0], ["", ""], 0, 0, null, {"ct": "TEST", "ts": 1793022290},
+      0, 0, null, null, 0, 0, [0], null
+    ]
+  }
+]
