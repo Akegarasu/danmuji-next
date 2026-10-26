@@ -330,8 +330,7 @@ impl ConnectionTask {
 
                     match message {
                         Message::Binary(data) => {
-                            let frame: Arc<[u8]> = Arc::from(data.into_boxed_slice());
-                            let activity = self.process_frame(frame, attempt).await?;
+                            let activity = self.process_frame(&data, attempt).await?;
 
                             if !online {
                                 if let Some(trigger) = activity.online_trigger() {
@@ -385,14 +384,14 @@ impl ConnectionTask {
 
     async fn process_frame(
         &self,
-        frame: Arc<[u8]>,
+        frame: &[u8],
         attempt: u64,
     ) -> std::result::Result<FrameActivity, SessionFailure> {
         if let Some(target) = &self.client.raw_capture {
-            target.capture_frame(Arc::clone(&frame));
+            target.capture_frame(frame);
         }
 
-        let packet = match Packet::from_bytes(&frame) {
+        let packet = match Packet::from_bytes(frame) {
             Ok(packet) => packet,
             Err(error) => {
                 self.report_decode_error(
@@ -444,16 +443,17 @@ impl ConnectionTask {
                     activity.heartbeat_reply = true;
                 }
                 Operation::Notification => {
-                    let body: Arc<[u8]> = Arc::from(packet.body.into_boxed_slice());
+                    // 直接解析已有缓冲区；仅在启用原始捕获时复制给旁路通道。
+                    let body = packet.body;
                     if let Some(target) = &self.client.raw_capture {
-                        target.capture_notification(Arc::clone(&body));
+                        target.capture_notification(&body);
                     }
 
                     match parse_notification(&body, self.client.raw_event_handler.as_deref()) {
                         Ok(event) => {
                             activity.notification = true;
                             if let Some(target) = &self.client.raw_capture {
-                                target.capture_event_notification(Arc::clone(&body));
+                                target.capture_event_notification(&body);
                             }
                             tokio::select! {
                                 _ = self.cancellation.cancelled() => {
@@ -470,7 +470,7 @@ impl ConnectionTask {
                             self.report_decode_error(
                                 attempt,
                                 DecodeStage::Notification,
-                                body,
+                                &body,
                                 error.to_string(),
                             );
                         }
@@ -483,13 +483,7 @@ impl ConnectionTask {
         Ok(activity)
     }
 
-    fn report_decode_error(
-        &self,
-        attempt: u64,
-        stage: DecodeStage,
-        bytes: Arc<[u8]>,
-        error: String,
-    ) {
+    fn report_decode_error(&self, attempt: u64, stage: DecodeStage, bytes: &[u8], error: String) {
         log::warn!("Failed to decode {:?}: {}", stage, error);
         if let Some(target) = &self.client.raw_capture {
             target.capture_error(stage, bytes, error.clone());
@@ -835,10 +829,7 @@ mod tests {
             cancellation: _cancellation,
         } = test_context(Some(raw_capture), ConnectionOptions::default(), 1, 4);
 
-        let activity = task
-            .process_frame(Arc::from(&b"invalid"[..]), 1)
-            .await
-            .unwrap();
+        let activity = task.process_frame(b"invalid", 1).await.unwrap();
 
         assert!(!activity.is_valid_response());
         assert!(matches!(
@@ -873,7 +864,7 @@ mod tests {
             .into_boxed_slice(),
         );
 
-        let activity = context.task.process_frame(frame, 1).await.unwrap();
+        let activity = context.task.process_frame(&frame, 1).await.unwrap();
 
         assert!(!activity.is_valid_response());
         match raw_rx.recv().await {
@@ -908,7 +899,7 @@ mod tests {
             .into_boxed_slice(),
         );
 
-        let activity = task.process_frame(frame, 1).await.unwrap();
+        let activity = task.process_frame(&frame, 1).await.unwrap();
 
         assert!(activity.notification);
         match raw_rx.recv().await {
@@ -919,6 +910,65 @@ mod tests {
             event_rx.recv().await,
             Some(Ok(Event::Raw { cmd, .. })) if cmd == "UNDERLINE_TEST"
         ));
+    }
+
+    #[tokio::test]
+    async fn compressed_notifications_keep_delivery_and_capture_modes() {
+        use std::io::Write;
+
+        let body = br#"{"cmd":"DANMU_MSG_MIRROR","info":[[0,1,25,16777215,1700000000123],"hello",[42,"user",0],[]]}"#;
+        let packet = Packet::new(
+            ProtocolVersion::Plain,
+            Operation::Notification,
+            body.to_vec(),
+        )
+        .to_bytes();
+        let mut encoder =
+            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&packet).unwrap();
+        encoder.write_all(&packet).unwrap();
+        let frame = Packet::new(
+            ProtocolVersion::Zlib,
+            Operation::Notification,
+            encoder.finish().unwrap(),
+        )
+        .to_bytes();
+
+        for (mode, captures) in [
+            (None, 0),
+            (Some(RawCaptureMode::Disabled), 0),
+            (Some(RawCaptureMode::ErrorsOnly), 0),
+            (Some(RawCaptureMode::EventNotifications), 2),
+            (Some(RawCaptureMode::Notifications), 2),
+            (Some(RawCaptureMode::AllFrames), 3),
+        ] {
+            let (raw_tx, mut raw_rx) = mpsc::channel(4);
+            let capture = mode.map(|mode| RawCaptureTarget::new(raw_tx, mode));
+            let mut context = test_context(capture, ConnectionOptions::default(), 2, 4);
+            let input = frame.clone();
+            let activity = context.task.process_frame(&input, 1).await.unwrap();
+            drop(input);
+            assert!(activity.notification);
+            for _ in 0..2 {
+                assert!(matches!(
+                    context.event_rx.try_recv().unwrap().unwrap(),
+                    Event::Danmaku(dm) if dm.is_mirror && dm.content == "hello" && dm.sender.uid == 42
+                ));
+            }
+            assert!(context.event_rx.try_recv().is_err());
+            for index in 0..captures {
+                match raw_rx.try_recv().unwrap() {
+                    RawCapture::WebSocketFrame { bytes } => {
+                        assert_eq!(index, 0);
+                        assert_eq!(mode, Some(RawCaptureMode::AllFrames));
+                        assert_eq!(&*bytes, frame.as_slice());
+                    }
+                    RawCapture::Notification { bytes } => assert_eq!(&*bytes, body),
+                    other => panic!("unexpected capture: {other:?}"),
+                }
+            }
+            assert!(raw_rx.try_recv().is_err());
+        }
     }
 
     #[tokio::test]
@@ -946,7 +996,7 @@ mod tests {
                 .to_bytes()
                 .into_boxed_slice(),
             );
-            task.process_frame(frame, 1)
+            task.process_frame(&frame, 1)
                 .await
                 .expect("process notification");
         }

@@ -4,7 +4,7 @@
  */
 
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, shallowRef } from 'vue'
 import type {
   ProcessedDanmaku,
   ProcessedGift,
@@ -27,8 +27,8 @@ const MAX_INTERACT_WORDS = 1000
 export const useDanmakuStore = defineStore('danmaku', () => {
   // ==================== 数据列表 ====================
   
-  /** 弹幕列表 */
-  const danmakuList = ref<ProcessedDanmaku[]>([])
+  /** 弹幕只追加、不原地修改；按批替换数组，避免为历史消息创建深层响应式代理。 */
+  const danmakuList = shallowRef<ProcessedDanmaku[]>([])
   
   /** 礼物列表 */
   const giftList = ref<ProcessedGift[]>([])
@@ -106,11 +106,14 @@ export const useDanmakuStore = defineStore('danmaku', () => {
   
   /** 追加弹幕 */
   const appendDanmaku = (items: ProcessedDanmaku[]) => {
-    danmakuList.value.push(...items)
-    // 限制长度
-    if (danmakuList.value.length > MAX_DANMAKU) {
-      danmakuList.value.splice(0, danmakuList.value.length - MAX_DANMAKU)
+    if (items.length === 0) return
+    if (items.length >= MAX_DANMAKU) {
+      danmakuList.value = items.slice(-MAX_DANMAKU)
+      return
     }
+    // 在普通数组上裁剪并合并，每批只通知一次视图，避免满缓存时逐项触发响应式更新。
+    const retained = danmakuList.value.slice(-(MAX_DANMAKU - items.length))
+    danmakuList.value = retained.concat(items)
   }
 
   /** 更新礼物（新增或合并） */

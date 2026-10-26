@@ -87,32 +87,38 @@ impl RawCaptureTarget {
         }
     }
 
-    pub(super) fn capture_frame(&self, bytes: Arc<[u8]>) {
+    pub(super) fn capture_frame(&self, bytes: &[u8]) {
         if self.mode == RawCaptureMode::AllFrames {
-            self.emit(RawCapture::WebSocketFrame { bytes });
+            self.emit(RawCapture::WebSocketFrame {
+                bytes: Arc::from(bytes),
+            });
         }
     }
 
-    pub(super) fn capture_notification(&self, bytes: Arc<[u8]>) {
+    pub(super) fn capture_notification(&self, bytes: &[u8]) {
         if matches!(
             self.mode,
             RawCaptureMode::Notifications | RawCaptureMode::AllFrames
         ) {
-            self.emit(RawCapture::Notification { bytes });
+            self.emit(RawCapture::Notification {
+                bytes: Arc::from(bytes),
+            });
         }
     }
 
-    pub(super) fn capture_event_notification(&self, bytes: Arc<[u8]>) {
+    pub(super) fn capture_event_notification(&self, bytes: &[u8]) {
         if self.mode == RawCaptureMode::EventNotifications {
-            self.emit(RawCapture::Notification { bytes });
+            self.emit(RawCapture::Notification {
+                bytes: Arc::from(bytes),
+            });
         }
     }
 
-    pub(super) fn capture_error(&self, stage: DecodeStage, bytes: Arc<[u8]>, error: String) {
+    pub(super) fn capture_error(&self, stage: DecodeStage, bytes: &[u8], error: String) {
         if self.mode != RawCaptureMode::Disabled {
             self.emit(RawCapture::DecodeError {
                 stage,
-                bytes,
+                bytes: Arc::from(bytes),
                 error,
             });
         }

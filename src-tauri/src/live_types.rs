@@ -348,21 +348,21 @@ pub struct DataSnapshot {
 
 // ==================== 辅助函数 ====================
 
-pub fn convert_user(user: &User) -> ProcessedUser {
+pub fn convert_user(user: User) -> ProcessedUser {
     ProcessedUser {
         uid: user.uid,
-        name: user.name.clone(),
-        face: user.face.clone(),
-        medal: user.medal.as_ref().map(convert_medal),
+        name: user.name,
+        face: user.face,
+        medal: user.medal.map(convert_medal),
         guard_level: guard_level_to_u8(&user.guard_level),
         wealth_level: user.wealth_level,
         is_admin: user.is_admin,
     }
 }
 
-pub fn convert_medal(medal: &Medal) -> ProcessedMedal {
+pub fn convert_medal(medal: Medal) -> ProcessedMedal {
     ProcessedMedal {
-        name: medal.name.clone(),
+        name: medal.name,
         level: medal.level,
         color: format!("#{:06x}", medal.color),
         is_light: medal.is_light,

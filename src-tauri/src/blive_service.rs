@@ -473,12 +473,12 @@ impl BliveService {
             return;
         }
 
-        // 按窗口订阅分发，使用带窗口标签的事件名，确保每个窗口只收到自己的事件
+        // 借用本批数据进行序列化，避免每个窗口都深拷贝整批消息。
+        // 使用带窗口标签的事件名，确保每个窗口只收到自己的事件。
         for (window_label, sub) in subs.iter() {
             let filtered: Vec<_> = updates
                 .iter()
                 .filter(|u| sub.contains(&u.event_type()))
-                .cloned()
                 .collect();
 
             if !filtered.is_empty() {

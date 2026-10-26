@@ -228,7 +228,7 @@ impl LiveData {
         let processed = ProcessedDanmaku {
             id: format!("dm_{}_{}", danmaku.timestamp, danmaku.sender.uid),
             content: danmaku.content,
-            user: convert_user(&danmaku.sender),
+            user: convert_user(danmaku.sender),
             timestamp: danmaku.timestamp,
             is_mirror: danmaku.is_mirror,
             is_emoticon: danmaku.r#type == DanmakuType::Emoticon,
@@ -386,7 +386,7 @@ impl LiveData {
                     uid: gift.sender_uid,
                     name: gift.sender_name,
                     face: gift.sender_face,
-                    medal: gift.medal.map(|m| convert_medal(&m)),
+                    medal: gift.medal.map(convert_medal),
                     guard_level: guard_level_to_u8(&gift.guard_level),
                     wealth_level: 0,
                     is_admin: false,
@@ -462,7 +462,7 @@ impl LiveData {
                 uid: sc.sender_uid,
                 name: sc.sender_name,
                 face: sc.sender_face,
-                medal: sc.medal.map(|m| convert_medal(&m)),
+                medal: sc.medal.map(convert_medal),
                 guard_level: guard_level_to_u8(&sc.guard_level),
                 wealth_level: 0,
                 is_admin: false,
@@ -640,7 +640,7 @@ impl LiveData {
     pub fn process_interact_word(&mut self, iw: InteractWord) {
         let processed = ProcessedInteractWord {
             id: format!("iw_{}_{}", iw.timestamp, iw.user.uid),
-            user: convert_user(&iw.user),
+            user: convert_user(iw.user),
             timestamp: iw.timestamp,
             msg_type: iw.msg_type,
         };
