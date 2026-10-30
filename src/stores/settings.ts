@@ -64,6 +64,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const danmakuShowWealthLevel = computed(() => settings.value.display.danmakuShowWealthLevel)
   const danmakuShowGuard = computed(() => settings.value.display.danmakuShowGuard)
   const danmakuShowAdmin = computed(() => settings.value.display.danmakuShowAdmin)
+  const danmakuShowMirror = computed(() => settings.value.display.danmakuShowMirror)
   const danmakuShowTime = computed(() => settings.value.display.danmakuShowTime)
   const danmakuShowGuardBorder = computed(() => settings.value.display.danmakuShowGuardBorder)
   const danmakuEmoticonSize = computed(() => settings.value.display.danmakuEmoticonSize)
@@ -305,12 +306,14 @@ export const useSettingsStore = defineStore('settings', () => {
   const danmakuFilterMinMedalLevel = computed(() => settings.value.danmakuFilterMinMedalLevel)
   const danmakuFilterMinWealthLevel = computed(() => settings.value.danmakuFilterMinWealthLevel)
   const hasDanmakuFilter = computed(() =>
-    danmakuFilterUids.value.length > 0
+    !danmakuShowMirror.value
+    || danmakuFilterUids.value.length > 0
     || danmakuFilterMinMedalLevel.value > 0
     || danmakuFilterMinWealthLevel.value > 0
   )
 
   const isDanmakuFiltered = (danmaku: ProcessedDanmaku, streamerUid: number): boolean => {
+    if (!danmakuShowMirror.value && danmaku.is_mirror) return true
     const { user } = danmaku
     if (danmakuFilterSet.value.has(user.uid)) return true
     if ((user.wealth_level ?? 0) < danmakuFilterMinWealthLevel.value) return true
@@ -392,6 +395,7 @@ export const useSettingsStore = defineStore('settings', () => {
     danmakuShowWealthLevel,
     danmakuShowGuard,
     danmakuShowAdmin,
+    danmakuShowMirror,
     danmakuShowTime,
     danmakuShowGuardBorder,
     danmakuEmoticonSize,

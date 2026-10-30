@@ -633,6 +633,11 @@ const danmakuShowAdmin = computed({
   set: (v) => settingsStore.updateDisplaySettings({ danmakuShowAdmin: v })
 })
 
+const danmakuShowMirror = computed({
+  get: () => settings.value.display.danmakuShowMirror,
+  set: (v) => settingsStore.updateDisplaySettings({ danmakuShowMirror: v })
+})
+
 const danmakuShowTime = computed({
   get: () => settings.value.display.danmakuShowTime,
   set: (v) => settingsStore.updateDisplaySettings({ danmakuShowTime: v })
@@ -1411,6 +1416,8 @@ const openProjectUrl = async () => {
         <!-- 弹幕设置 -->
         <div v-show="activeSection === 'danmaku'" class="section">
           <SettingsSectionTitle>弹幕设置</SettingsSectionTitle>
+
+          <SettingsToggle v-model="danmakuShowMirror" label="显示跨房弹幕" class="setting-group" />
 
           <SettingsToggle v-model="danmakuShowMedal" label="显示粉丝勋章" class="setting-group" />
 
