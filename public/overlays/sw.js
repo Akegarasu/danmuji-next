@@ -1,4 +1,4 @@
-/* VERSION 与 ASSETS 由本地服务根据全部嵌入资源生成，不能手工维护版本号。 */
+/* VERSION 与 ASSETS 由本地服务根据同一份前端资源快照生成，不能手工维护版本号。 */
 const CACHE_PREFIX = 'danmuji-overlays-'
 const CACHE_NAME = CACHE_PREFIX + VERSION
 

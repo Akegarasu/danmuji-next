@@ -74,7 +74,16 @@ blivedm 的弹幕 / SC / 礼物 / 大航海
 
 ## 只读 HTTP 协议
 
-服务固定绑定 `127.0.0.1`，默认端口 `17654`。可在设置面板修改；冲突时明确报错，不自动变更已配置的 OBS 地址。资源使用 `include_bytes!` 嵌入可执行文件，开发和安装包均无需额外 Node 服务、Vite 进程或资源路径查找。
+服务固定绑定 `127.0.0.1`，默认端口 `17654`。可在设置面板修改；冲突时明确报错，不自动变更已配置的 OBS 地址。
+
+### 静态资源打包与复用
+
+`public/overlays/` 是扩展 HTML、CSS、JS 和字体的唯一源目录。Vite 将其复制到 `dist/overlays/`，Tauri 在正式构建时压缩嵌入这一份前端资源；Rust 不再使用 `include_bytes!` / `include_str!` 嵌入扩展正文。`overlay_assets.rs` 仅维护路径、文件名和 MIME 的白名单，供 HTTP 路由与离线预缓存共用。新增文件需注册到表中，资源覆盖测试会检查是否有漏项。
+
+- 正式构建：应用从 `Context::assets()` 精确读取前端包，启动时解压一次并保存完整内容快照；HTTP 响应使用共享 `Bytes`，不随请求复制整个字体。必须精确查询，不能使用会回退到应用首页的 SPA 资源解析。安装包运行不依赖磁盘上的 `public` / `dist` 或 Vite。
+- 开发模式：根据 Tauri 的 `dev` 配置直接读取 `public/overlays/`，不依赖可能过期的 `dist`。请求时检查文件长度和修改时间，发生变化后重建完整快照与内容版本，无需重编译 Rust；已有 OBS 页面通过 Worker 更新机制刷新。
+- 应用内预览：基础 CSS 通过同源 stylesheet 加载，主题 CSS 通过同源请求读取，字体使用相同资源路径。预览不依赖本地 OBS HTTP 服务，也不再把 CSS 原文复制进应用 JS。
+- 任一必需资源缺失时，服务启动报错或资源请求返回 503；未知路径返回 404，不向 Worker 提供伪装成字体或脚本的首页 HTML。下载跨越不同内容版本时仍拒绝激活不完整缓存。
 
 | 路径 | 内容 |
 | --- | --- |
@@ -147,11 +156,14 @@ Service Worker 仅控制 `/overlays/`，安装时预取资源表中的全部 HTM
 ```sh
 pnpm build
 cargo test --manifest-path src-tauri/Cargo.toml
+cargo test --manifest-path src-tauri/Cargo.toml --release --features tauri/custom-protocol --lib extensions::
 node --test scripts/test_extension_client.mjs scripts/test_*overlay*.mjs
 ```
 
 Rust 测试覆盖单调计时、暂停、倍率、边界值、数量及规则过滤、重启恢复、连击去重到计时器的管线、HTTP 静态资源、SSE 重连和本机访问限制。随机规则测试覆盖边界、四种运算、数量、旧配置与具体抽签结果。Node 测试验证 OBS 入口的断线显示、快照校准、循环提示和队列切换、随机范围与结果展示、规则渲染和资源清理，不需要浏览器自动化。
 
 `test_overlay_connection.mjs` 与 `test_overlay_cache.mjs` 额外覆盖离线启动重试、心跳超时、旧连接回调隔离、完整预缓存、下载失败保留旧版和实时接口不落缓存。可选运行 `node scripts/check_overlay_browser.mjs` 做 Chromium 持久配置集成检查，需要 Playwright；可通过 `PLAYWRIGHT_MODULE_PATH` 指定其模块入口、`BROWSER_EXECUTABLE_PATH` 指定 Chrome / Edge 路径。脚本使用正式网页资源和本地 HTTP 替身，验证退出浏览器后离线重开、服务稍后启动、升级下载失败及周期检查后的自动刷新，不启动 Tauri 或访问用户配置。OBS 自身的缓存设置与 CEF 版本仍需实机验证。
+
+资源测试还覆盖清单完整性、开发目录修改和缺失恢复、正文只加载一次、未知路径不回退首页。带 `tauri/custom-protocol` 的 release HTTP 测试从实际 Tauri 前端包读取资源并逐字节校验字体。`node scripts/check_overlay_preview.mjs` 使用同一组浏览器环境变量，检查真实 Vue 组件在 Vite 开发和生产构建中的中文字体、基础样式、主题加载及自定义 CSS；临时构建位于 `.tests/`，不使用用户配置。
 
 扩展管线回归额外覆盖直接 JSON 检查点、待抓取任务恢复、删除后的过期回包、SC 金额与时间单位、并行投票与 UID 去重、断开后的到期检查、状态版本与合并、损坏文件保护，以及点播/投票不暴露给 HTTP。客户端测试覆盖查询/推送竞态、注册监听时关闭页面、重新连接、只读查询与保存失败后的状态刷新。

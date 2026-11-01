@@ -113,8 +113,22 @@ pub fn run() {
     // 初始化语音播报与弹幕服务（语音服务必须是全局单例，避免多窗口重复播报）
     let speech_service = Arc::new(SpeechService::new(SpeechRuntimeConfig::load_from_config()));
     let extensions = Arc::new(extensions::ExtensionHost::new(config::get_config_dir()));
+    let context = tauri::generate_context!();
+    #[cfg(dev)]
+    let overlay_assets = extensions::overlay_assets::OverlayAssets::directory(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../public/overlays"),
+    );
+    #[cfg(not(dev))]
+    let overlay_assets = extensions::overlay_assets::OverlayAssets::bundled(|file| {
+        // 使用前端资源包的精确查询，避免 AssetResolver 的 SPA 首页回退。
+        context
+            .assets()
+            .get(&format!("overlays/{file}").into())
+            .map(|bytes| bytes.into_owned())
+    });
     let overlay_server = Arc::new(extensions::server::OverlayServer::new(
         config::get_config_dir().join("extensions/server.json"),
+        Arc::new(overlay_assets),
     ));
     let blive_service = Arc::new(BliveService::new(
         speech_service.clone(),
@@ -333,7 +347,7 @@ pub fn run() {
             commands::check_portable_update,
             commands::install_portable_update,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application")
         .run(|app_handle, event| {
             if let RunEvent::Exit = event {

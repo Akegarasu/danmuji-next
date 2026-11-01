@@ -1,8 +1,5 @@
 //! 本地只读 OBS 服务。控制入口仅存在于 Tauri IPC 中。
-use super::{
-    overlay_assets::{asset, worker},
-    ExtensionHost,
-};
+use super::{overlay_assets::OverlayAssets, ExtensionHost};
 use axum::{
     extract::{Path, Request, State},
     http::{header, StatusCode},
@@ -27,6 +24,7 @@ use tokio::{
 #[derive(Clone)]
 struct WebState {
     host: Arc<ExtensionHost>,
+    assets: Arc<OverlayAssets>,
     shutdown: watch::Receiver<bool>,
     port: u16,
 }
@@ -49,10 +47,11 @@ pub struct OverlayServer {
     running: Mutex<Option<RunningServer>>,
     operation: Mutex<()>,
     settings_path: PathBuf,
+    assets: Arc<OverlayAssets>,
 }
 
 impl OverlayServer {
-    pub fn new(settings_path: PathBuf) -> Self {
+    pub fn new(settings_path: PathBuf, assets: Arc<OverlayAssets>) -> Self {
         let port = std::fs::read(&settings_path)
             .ok()
             .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
@@ -69,6 +68,7 @@ impl OverlayServer {
             running: Mutex::new(None),
             operation: Mutex::new(()),
             settings_path,
+            assets,
         }
     }
 
@@ -93,6 +93,10 @@ impl OverlayServer {
             info.error = None;
             return Ok(info.clone());
         }
+        if let Err(error) = self.assets.validate() {
+            info.error = Some(error.clone());
+            return Err(error);
+        }
         let listener = match TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).await {
             Ok(listener) => listener,
             Err(error) => {
@@ -111,6 +115,7 @@ impl OverlayServer {
         let (shutdown, receiver) = watch::channel(false);
         let app = router(WebState {
             host,
+            assets: self.assets.clone(),
             shutdown: receiver.clone(),
             port,
         });
@@ -159,17 +164,23 @@ impl OverlayServer {
 
 fn router(state: WebState) -> Router {
     Router::new()
-        .route("/overlays/sw.js", get(worker))
+        .route("/overlays/sw.js", get(|State(state): State<WebState>| async move {
+            state.assets.worker()
+        }))
         .route("/api/extensions", get(catalog))
         .route("/api/extensions/{id}/state", get(snapshot))
         .route("/api/extensions/{id}/events", get(events))
         .route(
             "/overlays/{id}/",
-            get(|Path(id): Path<String>| async move { asset(&id, "index.html") }),
+            get(|State(state): State<WebState>, Path(id): Path<String>| async move {
+                state.assets.asset(&id, "index.html")
+            }),
         )
         .route(
             "/overlays/{id}/{file}",
-            get(|Path((id, file)): Path<(String, String)>| async move { asset(&id, &file) }),
+            get(|State(state): State<WebState>, Path((id, file)): Path<(String, String)>| async move {
+                state.assets.asset(&id, &file)
+            }),
         )
         .layer(middleware::from_fn_with_state(state.clone(), local_only))
         .with_state(state)
@@ -258,6 +269,26 @@ async fn events(State(state): State<WebState>, Path(id): Path<String>) -> Respon
 mod tests {
     use super::*;
     use crate::live_events::ReceivedGift;
+
+    fn test_assets() -> Arc<OverlayAssets> {
+        #[cfg(dev)]
+        {
+            Arc::new(OverlayAssets::directory(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../public/overlays"),
+            ))
+        }
+        #[cfg(not(dev))]
+        {
+            // release 测试走真正的 Tauri 前端资源包，不允许磁盘文件掩盖打包遗漏。
+            let context: tauri::Context<tauri::Wry> = tauri::generate_context!();
+            Arc::new(OverlayAssets::bundled(|file| {
+                context
+                    .assets()
+                    .get(&format!("overlays/{file}").into())
+                    .map(|bytes| bytes.into_owned())
+            }))
+        }
+    }
     #[tokio::test]
     async fn occupied_port_keeps_existing_service_and_shutdown_closes_streams() {
         let directory = std::env::temp_dir().join(format!(
@@ -268,7 +299,7 @@ mod tests {
                 .as_nanos()
         ));
         let host = Arc::new(ExtensionHost::new(directory.clone()));
-        let server = OverlayServer::new(directory.join("server.json"));
+        let server = OverlayServer::new(directory.join("server.json"), test_assets());
         let reservation = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = reservation.local_addr().unwrap().port();
         drop(reservation);
@@ -306,7 +337,7 @@ mod tests {
             .is_none());
         assert!(server.info(&host).await.url.is_none());
         assert_eq!(
-            OverlayServer::new(directory.join("server.json"))
+            OverlayServer::new(directory.join("server.json"), test_assets())
                 .info(&host)
                 .await
                 .port,
@@ -338,6 +369,7 @@ mod tests {
         let (shutdown, receiver) = watch::channel(false);
         let app = router(WebState {
             host: host.clone(),
+            assets: test_assets(),
             shutdown: receiver,
             port,
         });
@@ -432,6 +464,37 @@ mod tests {
                 .unwrap()
                 .status()
                 .is_success());
+        }
+        let font = client
+            .get(format!("{base}/overlays/overtime/timer-heavy.otf"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(font.headers()[header::CONTENT_TYPE], "font/otf");
+        assert_eq!(
+            font.bytes().await.unwrap().as_ref(),
+            std::fs::read(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../public/overlays/overtime/timer-heavy.otf")
+            )
+            .unwrap()
+        );
+        for path in [
+            "/overlays/missing/",
+            "/overlays/overtime/missing.otf",
+            "/overlays/shared/index.html",
+            "/overlays/overtime/%2e%2e%2fsw.js",
+        ] {
+            assert_eq!(
+                client
+                    .get(format!("{base}{path}"))
+                    .send()
+                    .await
+                    .unwrap()
+                    .status(),
+                StatusCode::NOT_FOUND,
+                "{path}"
+            );
         }
         let catalog: Value = client
             .get(format!("{base}/api/extensions"))

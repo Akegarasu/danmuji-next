@@ -1,13 +1,25 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import FontPicker from '@/components/common/FontPicker.vue'
-import baseCss from '../../../public/overlays/wish-machine/overlay.css?raw'
-import testACss from '../../../public/overlays/wish-machine/theme-test-a.css?raw'
 import type { WishConfig, WishGoal, WishTheme } from '@/types/wish-machine'
 
 const props = defineProps<{ config: WishConfig; goals: WishGoal[]; disabled: boolean }>()
 const emit = defineEmits<{ change: [value: WishConfig] }>()
 const feedback = ref('')
+const testACss = ref('')
+const styleError = ref('')
+async function loadThemeStyle() {
+  styleError.value = ''
+  try {
+    // 与 OBS 共用前端资源文件，不再把原始 CSS 另行编译进应用 JS。
+    const response = await fetch('/overlays/wish-machine/theme-test-a.css')
+    if (!response.ok) throw new Error('style unavailable')
+    testACss.value = await response.text()
+  } catch {
+    styleError.value = '主题样式加载失败，请重试。'
+  }
+}
+onMounted(loadThemeStyle)
 const themes: { id: WishTheme; label: string; description: string }[] = [
   { id: 'default', label: '默认样式', description: '极简白字 · 无覆盖' },
   { id: 'test-a', label: '测试主题 A', description: '蓝色横条 · 白色数字框' },
@@ -16,9 +28,10 @@ const themes: { id: WishTheme; label: string; description: string }[] = [
 const css = computed(() => {
   if (props.config.theme === 'default') return ''
   if (props.config.theme === 'custom') return props.config.custom_css
+  if (!testACss.value) return ''
   const family = (props.config.theme_a_font_family || '').trim().replace(/[\\"]/g, '\\$&').replace(/[\x00-\x1f\x7f]/g, '')
   // 按单个字体名称引用，预览、编辑框和复制内容共用同一份 CSS。
-  return family ? `${testACss}\n#wish-machine { font-family: "${family}", WishHeavy, "Microsoft YaHei", sans-serif; }\n` : testACss
+  return family ? `${testACss.value}\n#wish-machine { font-family: "${family}", WishHeavy, "Microsoft YaHei", sans-serif; }\n` : testACss.value
 })
 function changeFont(family: string) {
   feedback.value = ''
@@ -38,25 +51,26 @@ async function copy() {
   catch { feedback.value = '复制失败，请选中下面的 CSS 手动复制。' }
 }
 const escapeHtml = (text: string | number) => String(text).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!))
-// 禁止脚本、表单和外部资源；仅复用同源内置字体，避免每次预览内嵌整个字体。
+// 基础样式和字体直接读取同源前端资源；预览继续禁止脚本、表单和外部资源。
 const preview = computed(() => {
   const rows = props.goals.map(goal => {
     const id = escapeHtml(goal.id)
     return `<li id="wish-goal-${id}" class="wish-row" data-complete="${goal.current >= goal.target}"><span id="wish-name-${id}" class="wish-name">${escapeHtml(goal.gift_name)}</span><span id="wish-count-${id}" class="wish-count"><span id="wish-current-${id}" class="wish-current">${goal.current}</span><span id="wish-separator-${id}" class="wish-separator">/</span><span id="wish-target-${id}" class="wish-target">${goal.target}</span></span></li>`
   }).join('')
   // 阻止 CSS 中的结束标签逃离 style 节点。
-  const styles = (baseCss.replace('../overtime/timer-heavy.otf', '/overlays/overtime/timer-heavy.otf') + '\n' + css.value).replace(/<\/style/gi, '<\\/style')
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; base-uri 'none'; form-action 'none'"><style>${styles}</style></head><body><main id="wish-machine"><ul id="wish-list" aria-label="礼物心愿">${rows}</ul></main></body></html>`
+  const styles = css.value.replace(/<\/style/gi, '<\\/style')
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self' 'unsafe-inline'; font-src 'self'; base-uri 'none'; form-action 'none'"><link rel="stylesheet" href="/overlays/wish-machine/overlay.css"><style>${styles}</style></head><body><main id="wish-machine"><ul id="wish-list" aria-label="礼物心愿">${rows}</ul></main></body></html>`
 })
 </script>
 
 <template>
   <div class="wish-style-settings">
     <div class="themes" role="group" aria-label="心愿机主题">
-      <button v-for="theme in themes" :key="theme.id" class="theme" :class="{ selected: config.theme === theme.id }" :aria-pressed="config.theme === theme.id" :disabled="disabled" @click="choose(theme.id)">
+      <button v-for="theme in themes" :key="theme.id" class="theme" :class="{ selected: config.theme === theme.id }" :aria-pressed="config.theme === theme.id" :disabled="disabled || (theme.id === 'test-a' && !testACss)" @click="choose(theme.id)">
         <span class="swatch" :class="theme.id"><span>心愿</span><b>0/5</b></span><strong>{{ theme.label }}</strong><small>{{ theme.description }}</small>
       </button>
     </div>
+    <p v-if="styleError" role="status">{{ styleError }} <button class="ext-btn" @click="loadThemeStyle">重试</button></p>
     <div v-if="config.theme === 'test-a'" class="theme-font">
       <span>主题字体</span>
       <FontPicker :model-value="config.theme_a_font_family || ''" label="主题字体" placeholder="默认：内置加班机字体" :disabled="disabled" @update:model-value="changeFont" />
@@ -68,7 +82,7 @@ const preview = computed(() => {
     <p>主题仅在此预览。保存可保留主题和 CSS 草稿；复制到 OBS 浏览器源的「自定义 CSS」后应用。建议源尺寸 400 × {{ Math.max(200, goals.length * 64 + 12) }}。</p>
     <div class="css-heading"><span>OBS 样式覆盖</span><button class="ext-btn ext-btn--primary" :disabled="!css" @click="copy">复制 CSS</button></div>
     <p v-if="config.theme === 'default'" class="default-hint">默认样式无需覆盖。恢复默认时，请清空 OBS 浏览器源中已粘贴的「自定义 CSS」。</p>
-    <textarea v-else :value="css" :disabled="disabled" maxlength="32768" spellcheck="false" aria-label="OBS 自定义 CSS" @input="edit" />
+    <textarea v-else :value="css" :disabled="disabled || (config.theme === 'test-a' && !testACss)" maxlength="32768" spellcheck="false" aria-label="OBS 自定义 CSS" @input="edit" />
     <p v-if="feedback" role="status">{{ feedback }}</p>
     <details>
       <summary>可自定义的节点与选择器</summary>
