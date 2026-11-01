@@ -1,134 +1,36 @@
 #!/usr/bin/env python3
+"""同步应用版本；保留原有仅升级版本 / 本地构建入口。完整发版使用 release.py。"""
+
 from __future__ import annotations
 
 import argparse
+import json
 import re
-import subprocess
+import shutil
 import sys
 from pathlib import Path
 
+from release_support import ROOT, ReleaseError, configure_console, load_release_env, require_env, run_command
 
-ROOT = Path(__file__).resolve().parent.parent
+
 PACKAGE_NAME = "danmuji-next"
-VERSION_PATTERN = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
-
-
-def read_lines(path: Path) -> list[str]:
-    return path.read_text(encoding="utf-8").splitlines(keepends=True)
-
-
-def write_lines(path: Path, lines: list[str]) -> None:
-    path.write_text("".join(lines), encoding="utf-8")
-
-
-def extract_json_version(path: Path) -> str:
-    for line in read_lines(path):
-        match = re.match(r'^(\s*"version":\s*")([^"]+)(".*)$', line)
-        if match:
-            return match.group(2)
-    raise ValueError(f"Could not find JSON version in {path}")
-
-
-def replace_json_version(path: Path, old_version: str, new_version: str) -> None:
-    lines = read_lines(path)
-    for index, line in enumerate(lines):
-        match = re.match(r'^(\s*"version":\s*")([^"]+)(".*)$', line)
-        if match:
-            if match.group(2) != old_version:
-                raise ValueError(
-                    f"Version mismatch in {path}: expected {old_version}, found {match.group(2)}"
-                )
-            lines[index] = f"{match.group(1)}{new_version}{match.group(3)}\n"
-            write_lines(path, lines)
-            return
-    raise ValueError(f"Could not update JSON version in {path}")
-
-
-def extract_cargo_toml_version(path: Path) -> str:
-    in_package = False
-    for line in read_lines(path):
-        stripped = line.strip()
-        if stripped.startswith("["):
-            in_package = stripped == "[package]"
-            continue
-        if in_package:
-            match = re.match(r'^version\s*=\s*"([^"]+)"$', stripped)
-            if match:
-                return match.group(1)
-    raise ValueError(f"Could not find package version in {path}")
-
-
-def replace_cargo_toml_version(path: Path, old_version: str, new_version: str) -> None:
-    lines = read_lines(path)
-    in_package = False
-    for index, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped.startswith("["):
-            in_package = stripped == "[package]"
-            continue
-        if in_package:
-            match = re.match(r'^(\s*version\s*=\s*")([^"]+)(".*)$', line)
-            if match:
-                if match.group(2) != old_version:
-                    raise ValueError(
-                        f"Version mismatch in {path}: expected {old_version}, found {match.group(2)}"
-                    )
-                lines[index] = f"{match.group(1)}{new_version}{match.group(3)}\n"
-                write_lines(path, lines)
-                return
-    raise ValueError(f"Could not update package version in {path}")
-
-
-def extract_cargo_lock_version(path: Path) -> str:
-    current_name = None
-    for line in read_lines(path):
-        stripped = line.strip()
-        if stripped == "[[package]]":
-            current_name = None
-            continue
-        name_match = re.match(r'^name\s*=\s*"([^"]+)"$', stripped)
-        if name_match:
-            current_name = name_match.group(1)
-            continue
-        version_match = re.match(r'^version\s*=\s*"([^"]+)"$', stripped)
-        if version_match and current_name == PACKAGE_NAME:
-            return version_match.group(1)
-    raise ValueError(f"Could not find {PACKAGE_NAME} version in {path}")
-
-
-def replace_cargo_lock_version(path: Path, old_version: str, new_version: str) -> None:
-    lines = read_lines(path)
-    current_name = None
-    for index, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped == "[[package]]":
-            current_name = None
-            continue
-        name_match = re.match(r'^name\s*=\s*"([^"]+)"$', stripped)
-        if name_match:
-            current_name = name_match.group(1)
-            continue
-        version_match = re.match(r'^(\s*version\s*=\s*")([^"]+)(".*)$', line)
-        if version_match and current_name == PACKAGE_NAME:
-            if version_match.group(2) != old_version:
-                raise ValueError(
-                    f"Version mismatch in {path}: expected {old_version}, found {version_match.group(2)}"
-                )
-            lines[index] = f"{version_match.group(1)}{new_version}{version_match.group(3)}"
-            write_lines(path, lines)
-            return
-    raise ValueError(f"Could not update {PACKAGE_NAME} version in {path}")
+VERSION_PATTERN = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
+PARTS = {"patch": "patch", "0.0.1": "patch", "minor": "minor", "0.1": "minor",
+         "0.1.0": "minor", "major": "major", "1": "major", "1.0.0": "major"}
+VERSION_FILES = ("package.json", "src-tauri/Cargo.toml", "src-tauri/tauri.conf.json")
+LOCK_FILE = "src-tauri/Cargo.lock"
 
 
 def ensure_semver(version: str) -> tuple[int, int, int]:
-    match = VERSION_PATTERN.match(version)
+    match = VERSION_PATTERN.fullmatch(version)
     if not match:
-        raise ValueError(f"Unsupported version format: {version}")
+        raise ValueError(f"不支持的版本号：{version}")
     return tuple(int(group) for group in match.groups())
 
 
 def bump_version(version: str, part: str) -> str:
     major, minor, patch = ensure_semver(version)
+    part = PARTS[part]
     if part == "major":
         return f"{major + 1}.0.0"
     if part == "minor":
@@ -136,89 +38,116 @@ def bump_version(version: str, part: str) -> str:
     return f"{major}.{minor}.{patch + 1}"
 
 
-def get_current_version() -> str:
-    versions = {
-        "package.json": extract_json_version(ROOT / "package.json"),
-        "src-tauri/Cargo.toml": extract_cargo_toml_version(ROOT / "src-tauri" / "Cargo.toml"),
-        "src-tauri/tauri.conf.json": extract_json_version(ROOT / "src-tauri" / "tauri.conf.json"),
-    }
-    unique_versions = set(versions.values())
-    if len(unique_versions) != 1:
-        details = ", ".join(f"{path}={version}" for path, version in versions.items())
-        raise ValueError(f"Version mismatch across files: {details}")
-    return unique_versions.pop()
+def package_block(text: str, lock: bool = False) -> re.Match:
+    pattern = r"(?ms)^\[\[package\]\][^\[]*" if lock else r"(?ms)^\[package\][^\[]*"
+    for block in re.finditer(pattern, text):
+        if not lock or re.search(r'^name\s*=\s*"danmuji-next"\s*$', block[0], re.M):
+            return block
+    raise ValueError("找不到 danmuji-next 的 Cargo package 段")
 
 
-def update_versions(old_version: str, new_version: str) -> None:
-    replace_json_version(ROOT / "package.json", old_version, new_version)
-    replace_cargo_toml_version(ROOT / "src-tauri" / "Cargo.toml", old_version, new_version)
-    replace_json_version(ROOT / "src-tauri" / "tauri.conf.json", old_version, new_version)
+def version_from_text(path: str, text: str) -> str:
+    if path.endswith(".json"):
+        return json.loads(text)["version"]
+    block = package_block(text, lock=path.endswith(".lock"))
+    match = re.search(r'^version\s*=\s*"([^"]+)"', block[0], re.M)
+    if not match:
+        raise ValueError(f"找不到版本号：{path}")
+    return match[1]
 
 
-def run_tauri_build() -> None:
-    subprocess.run(["pnpm", "exec", "tauri", "build"], cwd=ROOT, check=True)
+def get_current_version(root: Path = ROOT) -> str:
+    versions = {name: version_from_text(name, (root / name).read_text(encoding="utf-8"))
+                for name in VERSION_FILES}
+    if len(set(versions.values())) != 1:
+        raise ValueError("三个版本文件不一致：" + ", ".join(f"{k}={v}" for k, v in versions.items()))
+    version = versions[VERSION_FILES[0]]
+    ensure_semver(version)
+    return version
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Bump the app version and optionally run Tauri build."
-    )
-    parser.add_argument(
-        "part",
-        nargs="?",
-        choices=("major", "minor", "patch"),
-        default="patch",
-        help="Version part to increment. Defaults to patch.",
-    )
-    parser.add_argument(
-        "--no-build",
-        action="store_true",
-        help="Only bump the version without running Tauri build.",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Print the next version without changing files or running build.",
-    )
-    return parser.parse_args()
+def version_updates(root: Path, old_version: str, new_version: str) -> dict[Path, bytes]:
+    """先校验所有文件并生成补丁，避免中途发现不一致后只更新部分文件。"""
+    ensure_semver(new_version)
+    names = list(VERSION_FILES)
+    if (root / LOCK_FILE).is_file():
+        names.append(LOCK_FILE)
+    result = {}
+    for name in names:
+        path = root / name
+        text = path.read_bytes().decode("utf-8")
+        if version_from_text(name, text) != old_version:
+            raise ValueError(f"版本不一致：{name}，预期 {old_version}")
+        if name.endswith(".json"):
+            updated, count = re.subn(r'("version"\s*:\s*")' + re.escape(old_version) + r'(")',
+                                     lambda m: m[1] + new_version + m[2], text, count=1)
+            expected = json.loads(text)
+            expected["version"] = new_version
+            if count != 1 or json.loads(updated) != expected:
+                raise ValueError(f"无法准确定位顶层 version：{name}")
+        else:
+            block = package_block(text, lock=name.endswith(".lock"))
+            new_block, count = re.subn(r'(?m)^(version\s*=\s*")[^"]+("[^\r\n]*)',
+                                       lambda m: m[1] + new_version + m[2], block[0], count=1)
+            if count != 1:
+                raise ValueError(f"无法更新版本：{name}")
+            updated = text[:block.start()] + new_block + text[block.end():]
+        result[path] = updated.encode("utf-8")
+    return result
+
+
+def update_versions(old_version: str, new_version: str, root: Path = ROOT) -> None:
+    updates = version_updates(root, old_version, new_version)
+    originals = {path: path.read_bytes() for path in updates}
+    written = []
+    try:
+        for path, data in updates.items():
+            written.append(path)
+            path.write_bytes(data)
+    except OSError:
+        for path in written:
+            path.write_bytes(originals[path])
+        raise
+
+
+def run_tauri_build(root: Path = ROOT, env: dict[str, str] | None = None) -> None:
+    env = env if env is not None else load_release_env(root)
+    require_env(env, ("TAURI_SIGNING_PRIVATE_KEY",))
+    pnpm = shutil.which("pnpm", path=env.get("PATH"))
+    if not pnpm:
+        raise ReleaseError("未找到 pnpm")
+    run_command([pnpm, "run", "tauri:build"], root, env)
 
 
 def main() -> int:
-    args = parse_args()
-
+    configure_console()
+    parser = argparse.ArgumentParser(description="同步版本号，并可选执行本地构建与签名")
+    parser.add_argument("part", nargs="?", choices=PARTS, default="patch")
+    parser.add_argument("--no-build", action="store_true", help="仅升级版本")
+    parser.add_argument("--dry-run", action="store_true", help="只预览，不读取 .env、不改文件")
+    args = parser.parse_args()
     try:
-        current_version = get_current_version()
-        next_version = bump_version(current_version, args.part)
-    except ValueError as error:
-        print(f"Error: {error}", file=sys.stderr)
-        return 1
-
-    print(f"Current version: {current_version}")
-    print(f"Next version: {next_version}")
-
-    if args.dry_run:
+        current = get_current_version()
+        target = bump_version(current, args.part)
+        version_updates(ROOT, current, target)
+        print(f"版本：{current} -> {target}")
+        if args.dry_run:
+            return 0
+        env = None
+        if not args.no_build:
+            env = load_release_env()
+            require_env(env, ("TAURI_SIGNING_PRIVATE_KEY",))
+        update_versions(current, target)
+        print("三个版本文件及 Cargo.lock 已同步。")
+        if not args.no_build:
+            run_tauri_build(env=env)
         return 0
-
-    try:
-        update_versions(current_version, next_version)
-    except ValueError as error:
-        print(f"Error: {error}", file=sys.stderr)
+    except (ValueError, ReleaseError) as error:
+        print(f"错误：{error}", file=sys.stderr)
         return 1
-
-    print("Version files updated.")
-
-    if args.no_build:
-        return 0
-
-    print("Running Tauri build...")
-    try:
-        run_tauri_build()
-    except subprocess.CalledProcessError as error:
-        print(f"Tauri build failed with exit code {error.returncode}.", file=sys.stderr)
-        return error.returncode
-
-    print("Tauri build completed successfully.")
-    return 0
+    except OSError:
+        print("错误：文件或命令访问失败", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

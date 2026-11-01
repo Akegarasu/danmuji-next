@@ -73,3 +73,15 @@ All in `dirs::config_dir()/danmuji-next/` (typically `%APPDATA%/danmuji-next/`).
 - Frontend uses hash-mode Vue Router (`createWebHashHistory`)
 - Rust errors returned as `Result<T, String>` from commands
 - `DANMUJI_NEXT_DEV` env var enables dev mode (raw event dump to file)
+
+## 发版
+
+用户要求「执行发版」「发布新版本」时，先读取并执行工作区 skill：
+[danmuji-release](.agents/skills/danmuji-release/SKILL.md)。它负责根据上次发版后的
+commit 编写 `UPDATE.md`，再调用 `scripts/release.py` 完成版本同步、构建、签名和 COS 上传。
+默认升级 patch；支持 minor / major 以及 0.0.1 / 0.1 / 1。
+`UPDATE.md` 面向普通用户，用简短中文概括功能、体验和问题修复；提交明细与技术实现保留在
+`.release/` 内部记录中，不写进用户更新日志。
+
+不要读取任何 `launch.json` 或向上下文输出 `.env` 的值。凭据仅由脚本在运行时加载，
+缺失时只报告环境变量名。创建或修改发版工具不等于执行真实发版。

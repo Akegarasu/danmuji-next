@@ -638,6 +638,11 @@ const danmakuShowMirror = computed({
   set: (v) => settingsStore.updateDisplaySettings({ danmakuShowMirror: v })
 })
 
+const danmakuShowEmoticon = computed({
+  get: () => settings.value.display.danmakuShowEmoticon,
+  set: (v) => settingsStore.updateDisplaySettings({ danmakuShowEmoticon: v })
+})
+
 const danmakuShowTime = computed({
   get: () => settings.value.display.danmakuShowTime,
   set: (v) => settingsStore.updateDisplaySettings({ danmakuShowTime: v })
@@ -1418,6 +1423,8 @@ const openProjectUrl = async () => {
           <SettingsSectionTitle>弹幕设置</SettingsSectionTitle>
 
           <SettingsToggle v-model="danmakuShowMirror" label="显示跨房弹幕" class="setting-group" />
+
+          <SettingsToggle v-model="danmakuShowEmoticon" label="显示表情弹幕" class="setting-group" />
 
           <SettingsToggle v-model="danmakuShowMedal" label="显示粉丝勋章" class="setting-group" />
 

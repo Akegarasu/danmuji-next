@@ -195,7 +195,52 @@ pnpm run tauri:build
 
 ## 版本与发版
 
-项目提供了一个本地 `Python` 脚本，用于统一递增版本号，并同步更新这些文件：
+在本工作区告诉 Codex「执行发版」即可触发
+[danmuji-release skill](.agents/skills/danmuji-release/SKILL.md)。默认升级补丁版本；
+也可以说「执行发版，升级 0.1」或「执行发版，升级 major」。
+
+流程分为两部分：agent 列出上次发版到 HEAD 的提交，结合实际改动编写面向用户的简洁中文 `UPDATE.md`；
+脚本统一升级版本、构建并生成 Tauri updater 签名、验证签名、上传 COS，最后发布 `update.json`。
+更新日志用少量要点概括新增能力、体验改善和问题修复；提交明细、SHA 和技术实现保留在
+`.release/commits.md`、`.release/plan.json` 等内部记录中，不进入用户看到的更新说明。
+签名是 Tauri 自动更新签名，不包含 Windows Authenticode 证书签名。
+
+首次准备（Windows x64、Python 3.10+、Node.js / pnpm、Rust MSVC 工具链）：
+
+```bash
+pnpm install --frozen-lockfile
+python -m pip install -r scripts/requirements-release.txt
+```
+
+凭据放在仓库根目录 `.env`，或由进程环境注入；已有环境变量优先。使用的变量名为：
+`TAURI_SIGNING_PRIVATE_KEY`、`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`（可为空）、
+`COS_SECRET_ID`、`COS_SECRET_KEY`、`COS_BUCKET`、`COS_REGION`、`COS_CDN_DOMAIN`（可选）。
+支持带引号及多行值，不执行变量插值。不要把凭据传到命令行或提交到 Git。
+
+手动分步执行：
+
+```bash
+# patch / minor / major，也接受 0.0.1 / 0.1 / 1
+pnpm release:plan patch
+# agent 读取 .release/commits.md，根据 skill 编写 UPDATE.md
+pnpm release --dry-run
+pnpm release
+
+# 只完成本地构建和签名
+pnpm release --no-upload
+# 构建或上传失败后续跑；不会再次升级版本
+pnpm release --resume
+```
+
+`plan` 优先使用本地成功发版记录、当前版本的精确 tag，最后从版本文件历史推断基线；
+不会直接使用已经落后的最新 tag。可用 `python scripts/release.py plan patch --since <tag或SHA>`
+指定基线。计划阶段不读取 `.env`。正式运行前，除本次 `UPDATE.md` 外的源代码改动应已提交；
+HEAD 或日志改变后需重新生成计划。
+
+`run --dry-run` 只检查计划、版本、日志和工作区，不读取 `.env`、改版本、构建或联网。
+`plan --dry-run` 连计划文件也不写。正式运行会在修改版本前检查工具链、必需环境变量和远端版本。
+
+三个版本文件始终一起更新，`Cargo.lock` 中本项目条目也会同步：
 
 - `package.json`
 - `src-tauri/Cargo.toml`
@@ -208,7 +253,7 @@ pnpm run tauri:build
 python scripts/bump_version_and_build.py --no-build
 ```
 
-自增补丁版本并本地构建：
+兼容旧入口：自增补丁版本并本地构建（不上传 COS）：
 
 ```bash
 python scripts/bump_version_and_build.py
@@ -220,29 +265,38 @@ python scripts/bump_version_and_build.py
 python scripts/bump_version_and_build.py minor
 ```
 
-也可以直接使用 npm script：
+旧的 npm script 也保留：
 
 ```bash
 pnpm run version:bump
 pnpm run release:local
 ```
 
+上传只接受对应版本的 Windows x64 NSIS `.exe` 及其相邻 `.exe.sig`；签名用
+`tauri.conf.json` 的公钥校验。产物先复制到 `.release/<版本>/`，记录 SHA-256 后上传。
+COS 中已有相同内容可跳过，已有同版本不同内容则拒绝覆盖；所有产物和
+`releases/<版本>.json` 就绪后，才切换根目录 `update.json` 并回读验证。
+
+`.release/state.json` 记录失败续跑阶段，`.release/last-release.json` 记录成功发版基线，
+整个 `.release/` 不提交。失败后保留版本和产物，使用 `--resume`，不要再次运行版本升级脚本。
+如果构建失败需要修复源码，且尚未开始上传，可运行 `python scripts/release.py reset`：
+它先保留故障记录，再恢复原版本，保留日志和产物；修复并提交源码后重新 plan。
+已经开始上传或已发布时禁止 reset，使用 `--resume` 检查并完成同一版本；同版本不同内容不能覆盖。
+进程被强制终止遗留 `.release/active.lock` 时，确认没有发版进程再移除锁。
+脚本不会自动提交、打 tag 或推送 Git，发版完成后按项目习惯提交版本文件和 `UPDATE.md`。
+
+验证发版工具：`pnpm release:test`（临时仓库、测试密钥和模拟 COS，不使用真实凭据或上传）。
+
 ## GitHub Release 工作流
 
 仓库已经配置 Tauri 发版工作流：
 
 - 工作流文件：`.github/workflows/tauri-release.yml`
-- 触发方式：推送形如 `v1.6.1` 的标签
+- 触发方式：GitHub Actions 中手动 `workflow_dispatch`（目前 tag push 触发已注释）
 - 运行环境：`windows-latest`
 - 结果：自动构建并上传到 GitHub Release
 
-建议的发版流程如下：
-
-1. 本地执行版本自增脚本。
-2. 提交版本变更。
-3. 创建标签，例如 `git tag v1.6.1`。
-4. 推送提交和标签：`git push origin main --tags`。
-5. 等待 GitHub Actions 完成构建并发布产物。
+该工作流用于 GitHub Release，与上面的本地 COS 发版流程独立。
 
 ## 项目结构
 

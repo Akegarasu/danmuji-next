@@ -54,6 +54,7 @@ const danmakuLayoutVersion = computed(() => [
   settingsStore.danmakuShowGuard,
   settingsStore.danmakuShowAdmin,
   settingsStore.danmakuShowMirror,
+  settingsStore.danmakuShowEmoticon,
   settingsStore.danmakuShowTime,
   settingsStore.danmakuShowGuardBorder,
   settingsStore.danmakuEmoticonSize,

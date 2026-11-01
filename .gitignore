@@ -37,10 +37,13 @@ __pycache__/
 
 docs/
 
-scripts/cos_upload.py
-
 trace/
 
-UPDATE.md
 # 参考站静态源码，仅供本地研究
 .reference/
+
+.env
+.env.*
+
+# 本地发版计划、构建快照和续跑状态
+.release/

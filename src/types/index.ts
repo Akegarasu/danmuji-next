@@ -83,6 +83,7 @@ export interface DisplaySettings {
   danmakuShowGuard: boolean
   danmakuShowAdmin: boolean
   danmakuShowMirror: boolean
+  danmakuShowEmoticon: boolean
   danmakuShowTime: boolean
   danmakuShowGuardBorder: boolean
   danmakuEmoticonSize: number
@@ -214,6 +215,7 @@ export const DEFAULT_DISPLAY_SETTINGS: DisplaySettings = {
   danmakuShowGuard: true,
   danmakuShowAdmin: true,
   danmakuShowMirror: true,
+  danmakuShowEmoticon: true,
   danmakuShowTime: false,
   danmakuShowGuardBorder: false,
   danmakuEmoticonSize: 32,

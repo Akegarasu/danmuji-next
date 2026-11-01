@@ -1,0 +1,4 @@
+interface:
+  display_name: "弹幕姬发版"
+  short_description: "汇总提交、生成更新日志，并执行版本升级、构建签名和 COS 发布"
+  default_prompt: "使用 $danmuji-release 为当前工作区执行发版，默认升级 patch。"
